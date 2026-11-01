@@ -283,6 +283,15 @@ func drop_token(e: Dictionary, cell: Vector2i) -> String:
 	return ref
 
 
+## A token's look changed in a book (TASK-41): the map shows it again (players too).
+func refresh_tokens() -> void:
+	if not is_dm() or timeline == null:
+		return
+	timeline.reload_world()
+	_apply_state(view_for(""))
+	_send_tables()
+
+
 ## A core compendium entry is copied into the world before it is used (the world's book
 ## only shows what was imported); one already imported is reused. World and timeline
 ## entries come back as they are. {} if the world can't take it.
@@ -657,13 +666,14 @@ func _apply_state(view: Dictionary) -> void:
 		keep[id] = true
 		var cell: Vector2i = t.cell
 		var token: Sprite2D = grid.tokens.get(id)
-		if token and token.get_meta("info", {}).get("image", "") == t.get("image", ""):
+		var info: Dictionary = token.get_meta("info", {}) if token else {}
+		if token and info.get("image", "") == t.get("image", "") and info.get("token_style") == t.get("token_style"):
 			token.set_meta("info", t)
 			grid.set_token_cell(id, cell, token.get_meta("cell") != cell)
 		else:
-			var tex := assets.texture(t.get("image", "")) if str(t.get("image", "")) != "" else TokenGrid.placeholder(str(t.get("kind", "")))
-			if tex:
-				grid.add_token_view(t, tex, cell)
+			var pic := assets.texture(t.get("image", "")) if str(t.get("image", "")) != "" else null
+			if pic != null or str(t.get("image", "")) == "":
+				grid.add_token_view(t, TokenArt.compose(pic, t.get("token_style"), str(t.get("kind", ""))), cell)
 	for id: String in grid.tokens.keys():
 		if not keep.has(id):
 			grid.tokens[id].queue_free()

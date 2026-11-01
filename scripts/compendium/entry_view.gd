@@ -8,6 +8,7 @@ extends ScrollContainer
 
 signal link_clicked(meta: String)
 signal edit_requested(entry: Dictionary)
+signal token_requested(entry: Dictionary)  ## the Token button (TASK-41)
 signal back_requested  ## the back arrow next to the title (TASK-24)
 signal send_requested(entry: Dictionary)  ## "Promote to world": a timeline entry goes into the world (TASK-32)
 ## A link middle-clicked: open it in a background tab (TASK-24).
@@ -19,6 +20,7 @@ const SIDE_WIDTH := 340
 var entry: Dictionary
 var key := ""  ## package/kind/id
 var edit_button: Button
+var token_button: Button  ## creatures only (TASK-41)
 var back_button: Button
 var send_button: Button
 var _hovered_meta := ""
@@ -288,6 +290,14 @@ func _header(e: Dictionary) -> Control:
 	edit_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	edit_button.pressed.connect(func() -> void: edit_requested.emit(entry))
 	row.add_child(edit_button)
+	token_button = Button.new()
+	token_button.name = "Token"
+	token_button.text = "Token"
+	token_button.tooltip_text = "How this creature's token looks on the map"
+	token_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	token_button.visible = str(e.get("_kind", "")) in Timeline.CREATURES
+	token_button.pressed.connect(func() -> void: token_requested.emit(entry))
+	row.add_child(token_button)
 	return plate
 
 

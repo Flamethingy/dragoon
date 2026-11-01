@@ -150,7 +150,7 @@ func go(to: int) -> void:
 				continue
 			var img := str(t.get("image", ""))
 			var tex := assets.texture(img) if assets != null and img != "" else null
-			grid.add_token_view(t, tex if tex != null else TokenGrid.placeholder(str(t.get("kind", ""))), cell)
+			grid.add_token_view(t, TokenArt.compose(tex, t.get("token_style"), str(t.get("kind", ""))), cell)
 	for ref: String in grid.tokens.keys():
 		if not keep.has(ref):
 			grid.tokens[ref].queue_free()

@@ -14,6 +14,7 @@ extends Control
 ## read-only unless unlocked; the editor offers "edit a copy" in a world package.
 ## Packages load on a worker thread (PackageDB), so the window stays responsive.
 
+signal token_changed(entry: Dictionary)  ## a token style was saved (TASK-41)
 signal tabs_restored  ## the saved tabs are open again (after loading)
 signal close_requested  ## the Close button (when shown over the table)
 
@@ -1033,6 +1034,7 @@ func open_tab(e: Dictionary, background := false) -> EntryView:
 	view.back_requested.connect(go_back_tab)
 	view.send_requested.connect(func(entry: Dictionary) -> void: promote_to_world(entry))
 	view.edit_requested.connect(func(_e: Dictionary) -> void: start_edit(view))
+	view.token_requested.connect(func(_e: Dictionary) -> void: open_token_editor(view))
 	_views.add_child(view)
 	_open_views[key] = view
 	_tab_bar.add_tab(str(e.get("name", "?")), UISkin.tex(KIND_ICONS.get(e.get("_kind"), "dot_wine")))
@@ -1570,6 +1572,43 @@ func start_edit(view: EntryView, is_new := false) -> EntryEditor:
 	form.open_requested.connect(edit_entry)
 	view.begin_edit(form)
 	return form
+
+
+## The Token button (TASK-41): the token editor for the entry of `view`; Save writes
+## `token_style` into the entry (read-only source packages: import it or edit a copy).
+func open_token_editor(view: EntryView) -> TokenEditor:
+	var e := view.entry
+	var ed := TokenEditor.new()
+	ed.setup(e)
+	add_child(ed)
+	var store := store_for(e)
+	if store == null or store.is_read_only():
+		ed.lock("This creature is in a read-only package. Drag it into your Book (or use Edit, then edit a copy) to give it its own token.")
+	ed.saved.connect(func(style: Dictionary) -> void: save_token(view, style))
+	ed.close_requested.connect(ed.queue_free)
+	ed.canceled.connect(ed.queue_free)
+	ed.popup_centered()
+	return ed
+
+
+## Writes a token style into the entry shown in `view` and shows it again.
+func save_token(view: EntryView, style: Dictionary) -> Dictionary:
+	var e := view.entry
+	var store := store_for(e)
+	if store == null or store.is_read_only():
+		return {}
+	var kind := str(e.get("_kind", ""))
+	var after := e.duplicate(true)
+	after["token_style"] = style
+	var r := store.commit(kind, e, after, event_log)
+	if r.error != OK:
+		_status.text = "Couldn't save the token (%s)" % error_string(r.error)
+		return {}
+	var held := db.put_entry(store.find(kind, str(e.get("id", ""))), kind, store)
+	view.setup(held)
+	_status.text = "Token of %s saved" % held.get("name", "?")
+	token_changed.emit(held)
+	return held
 
 
 ## Opens an entry of a store in a tab and starts editing it (new entries, copies, features).

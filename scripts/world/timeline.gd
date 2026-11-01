@@ -18,7 +18,7 @@ const START_NAME := "Prologue"
 ## Kinds that can stand on a map.
 const CREATURES := ["pcs", "npcs", "monsters"]
 ## Token fields every player sees; owners also get OWNER_FIELDS of their own PC.
-const TOKEN_FIELDS := ["name", "size"]
+const TOKEN_FIELDS := ["name", "size", "token_style"]
 const OWNER_FIELDS := ["hp", "ac"]
 const ENTITY_EVENTS := ["entity.created", "entity.edited", "entity.deleted", "entity.promoted"]
 

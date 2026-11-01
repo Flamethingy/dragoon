@@ -244,6 +244,7 @@ func _panel(which: String) -> Control:
 				b.timeline_dir = table.timeline_dir
 				b.event_log = table.event_log  # session edits become events
 			b.close_requested.connect(func() -> void: toggle_view(which))
+			b.token_changed.connect(func(_e: Dictionary) -> void: table.refresh_tokens())
 			books[which] = b
 			c = b
 		"notes":

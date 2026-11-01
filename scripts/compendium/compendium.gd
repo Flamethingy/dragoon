@@ -35,6 +35,7 @@ var campaign_dir := ""
 ## Shown over the table: a Close button and no campaign picker.
 var closable := false
 var _campaign_pick: OptionButton
+var _send_world: Button
 var _campaigns: PackedStringArray = []
 
 var _status: Label
@@ -152,6 +153,11 @@ func _build() -> void:
 	_campaign_pick.clip_text = true
 	_campaign_pick.item_selected.connect(func(i: int) -> void: set_campaign(_campaigns[i]))
 	side.add_child(_campaign_pick)
+	_send_world = Button.new()
+	_send_world.text = "Send world..."
+	_send_world.tooltip_text = "Copy a whole world package into the campaign (entries it doesn't have yet)"
+	_send_world.pressed.connect(_send_world_dialog)
+	side.add_child(_send_world)
 	if closable:
 		var close := Button.new()
 		close.text = "Back to the table"
@@ -827,6 +833,7 @@ func open_tab(e: Dictionary, background := false) -> EntryView:
 	view.link_clicked.connect(func(link: String) -> void: _follow(link, view.entry, true))
 	view.link_background.connect(func(link: String) -> void: _follow(link, view.entry, true, true))
 	view.back_requested.connect(go_back_tab)
+	view.send_requested.connect(func(entry: Dictionary) -> void: send_to_campaign(entry))
 	view.edit_requested.connect(func(_e: Dictionary) -> void: start_edit(view))
 	_views.add_child(view)
 	_open_views[key] = view
@@ -926,6 +933,7 @@ func _on_tab_changed(_index: int) -> void:
 		_last_key = key
 	for k: String in _open_views:
 		_open_views[k].back_button.disabled = _back_target(k) == null
+		_open_views[k].send_button.visible = campaign_dir != "" and _open_views[k].entry.get("_layer") != "campaign"
 	_browse.visible = key == ""
 	_browse_button.set_pressed_no_signal(key == "")
 	for k: String in _open_views:
@@ -1097,6 +1105,7 @@ func _fill_campaigns() -> void:
 		_campaign_pick.add_item("No campaign" if c == "" else "Campaign: " + str(Campaign.new(c, null).info.get("name", c.get_file())))
 	_campaign_pick.selected = _campaigns.find(campaign_dir)
 	_campaign_pick.visible = not closable
+	_send_world.visible = campaign_dir != ""
 
 
 ## Shows another campaign's entries (or none) together with the packages.
@@ -1110,6 +1119,73 @@ func set_campaign(path: String) -> void:
 	_open_campaign_log()
 	_save_tabs()
 	_reload()
+
+
+func campaign_store() -> EntryStore:
+	if campaign_dir == "":
+		return null
+	for p in db.packages:
+		if p.get("_layer") == "campaign":
+			return store_for({"_package": p.get("id", ""), "_dir": campaign_dir})
+	return EntryStore.open(campaign_dir)
+
+
+## Sends a core/world entry into the campaign (TASK-11) and opens the copy.
+func send_to_campaign(e: Dictionary) -> Dictionary:
+	var target := campaign_store()
+	var from := store_for(e)
+	if target == null or from == null:
+		return {}
+	var kind := str(e.get("_kind", ""))
+	var copy := target.send(from, kind, str(e.get("id", "")), event_log)
+	if copy.is_empty():
+		_status.text = "Couldn't send %s" % e.get("name", "?")
+		return {}
+	if kind == "monsters":  # its features came along
+		for list_key in PackageDB.FEATURE_LISTS:
+			for fid: Variant in copy.get(list_key, []):
+				var f := target.find("features", str(fid))
+				if not f.is_empty():
+					db.put_entry(f, "features", target)
+	var held := db.put_entry(copy, kind, target)
+	_after_db_change(kind)
+	open_tab(held)
+	_status.text = "Sent %s into %s" % [held.get("name", "?"), target.name]
+	return held
+
+
+## Sends a whole world package into the campaign, then re-reads the book.
+func send_world_to_campaign(world: EntryStore) -> Dictionary:
+	var target := campaign_store()
+	if target == null or world == null:
+		return {}
+	var r := target.send_world(world, event_log)
+	_status.text = "Sent %d entries from %s (%d already there)" % [r.sent.size(), world.name, r.skipped.size()]
+	_reload()
+	return r
+
+
+func _send_world_dialog() -> void:
+	var worlds := []
+	for p in db.packages:
+		if p.get("_layer") == "world":
+			worlds.append(store_for({"_package": p.get("id", ""), "_dir": p.get("_dir", "")}))
+	var dialog := ConfirmationDialog.new()
+	dialog.title = "Send a world into the campaign"
+	dialog.ok_button_text = "Send"
+	var pick := OptionButton.new()
+	for w: EntryStore in worlds:
+		pick.add_item(w.name)
+		if w.id == db.campaign_world:
+			pick.selected = pick.item_count - 1
+	dialog.add_child(pick)
+	dialog.get_ok_button().disabled = worlds.is_empty()
+	dialog.confirmed.connect(func() -> void:
+		send_world_to_campaign(worlds[pick.selected])
+		dialog.queue_free())
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered(Vector2i(380, 0))
 
 
 ## Standalone, the campaign's own log, so edits during a running session become events.

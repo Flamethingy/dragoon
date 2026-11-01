@@ -179,7 +179,7 @@ func copy_entry(from: EntryStore, kind: String, entry_id: String) -> Dictionary:
 	if from.layer != layer or from.id != id:
 		copy["origin"] = {"layer": "core" if from.layer == SOURCE else from.layer, "package": from.id,
 			"kind": kind, "id": entry_id, "version": str(from.manifest.get("version", ""))}
-	for key in ["image", "token"]:
+	for key in ["image", "token", "party_token"]:
 		if str(copy.get(key, "")) != "":
 			copy[key] = _copy_asset(from, str(copy[key]))
 	if kind == "monsters":
@@ -189,6 +189,48 @@ func copy_entry(from: EntryStore, kind: String, entry_id: String) -> Dictionary:
 				ids[i] = _copy_feature(from, str(ids[i]))
 	save(kind, copy)
 	return copy
+
+
+## "Send into the campaign" (TASK-11): a campaign copy of one core/world entry that keeps its
+## origin and drifts freely from then on; logged as entity.sent if a log is given.
+func send(from: EntryStore, kind: String, entry_id: String, events_log: EventLog = null) -> Dictionary:
+	if layer != CAMPAIGN:
+		return {}
+	var copy := copy_entry(from, kind, entry_id)
+	if not copy.is_empty() and events_log != null:
+		events_log.append("entity.sent", "%s/%s" % [kind, copy.id], {"source": source_ref(from, kind, entry_id),
+			"layer": "core" if from.layer == SOURCE else from.layer})
+	return copy
+
+
+## Sends a whole world package: every entry the campaign doesn't have yet (same id) is
+## copied. Returns {sent: ["kind/id"], skipped: ["kind/id"]}.
+func send_world(world: EntryStore, events_log: EventLog = null) -> Dictionary:
+	var out := {"sent": [], "skipped": []}
+	if layer != CAMPAIGN:
+		return out
+	for file in DirAccess.get_files_at(world.folder):
+		var kind := file.get_basename()
+		if not file.ends_with(".json") or kind == "package":
+			continue
+		for e: Variant in world.list(kind):
+			if not e is Dictionary or not e.has("id"):
+				continue
+			var ref := "%s/%s" % [kind, e.id]
+			if has(kind, str(e.id)):
+				out.skipped.append(ref)
+				continue
+			var copy := send(world, kind, str(e.id), events_log)
+			if not copy.is_empty():
+				out.sent.append("%s/%s" % [kind, copy.id])
+	return out
+
+
+## The qualified ref of an entry in a package (entity.sent `source`).
+static func source_ref(from: EntryStore, kind: String, entry_id: String) -> String:
+	if from.layer == SOURCE:
+		return "core:%s/%s/%s" % [from.id, kind, entry_id]
+	return "%s:%s/%s" % [from.layer, kind, entry_id]
 
 
 func _copy_feature(from: EntryStore, feature_id: String) -> String:

@@ -149,3 +149,11 @@ See the "Open questions" section of the concept (secrets marking, event log form
   "Compendium" button: the book opens over the table with the table's campaign and EventLog ("Back to the
   table"). Fix: the speed field kept zero entries it had (no spurious sheet.changed).
   Test: `tools/test_unified_index.gd`.
+
+- 2026-11-01: TASK-11 (Mochi): send into the campaign. `EntryStore.send(from, kind, id, log)` makes a campaign
+  copy of a core/world entry (features and images come along, `origin` {layer, package, kind, id, version}) and
+  logs `entity.sent` {source: `core:pkg/kind/id` or `world:kind/id`, layer}; sending twice makes `goblin-2`.
+  `send_world(world, log)` copies every entry the campaign doesn't have yet (same id = skipped, listed). The copy
+  is independent: later changes to the original don't touch it, and two campaigns can hold different versions.
+  In the compendium: "Send to campaign" next to Edit on core/world entries when a campaign is set (opens the
+  copy, which then wins in the index), and "Send world..." on the cover. Test: `tools/test_send.gd`.

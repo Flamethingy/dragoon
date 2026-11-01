@@ -9,6 +9,7 @@ extends ScrollContainer
 signal link_clicked(meta: String)
 signal edit_requested(entry: Dictionary)
 signal back_requested  ## the back arrow next to the title (TASK-24)
+signal send_requested(entry: Dictionary)  ## "Send to campaign" (TASK-11)
 ## A link middle-clicked: open it in a background tab (TASK-24).
 signal link_background(meta: String)
 
@@ -19,6 +20,7 @@ var entry: Dictionary
 var key := ""  ## package/kind/id
 var edit_button: Button
 var back_button: Button
+var send_button: Button
 var _hovered_meta := ""
 var editor: EntryEditor  ## while editing (TASK-21)
 
@@ -131,6 +133,13 @@ func _header(e: Dictionary) -> Control:
 	sub.add_theme_color_override("font_color", UISkin.TAN)
 	sub.add_theme_font_size_override("font_size", 14)
 	col.add_child(sub)
+	send_button = Button.new()
+	send_button.text = "Send to campaign"
+	send_button.tooltip_text = "Make a campaign copy (keeps its origin, then drifts freely)"
+	send_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	send_button.visible = false
+	send_button.pressed.connect(func() -> void: send_requested.emit(entry))
+	row.add_child(send_button)
 	edit_button = Button.new()
 	edit_button.text = "Edit"
 	edit_button.tooltip_text = "Edit this entry here (source packages: edit a copy or unlock)"

@@ -138,3 +138,14 @@ See the "Open questions" section of the concept (secrets marking, event log form
   Alt+Left still steps back through the quick card. **Right-click on a tab**: Close, Close all tabs, Close tabs to
   the left / right, and the "Back closes the tab" toggle. The quick card always shows the full text (no fold).
   Test: `tools/test_compendium_back.gd`.
+
+- 2026-11-01: TASK-6 (Mochi): unified index. `PackageDB.campaign_dir` loads a campaign's kind files next to the
+  packages (notes/table/campaign.json skipped); every entry has `_layer` (campaign, world, core). Wikilinks
+  (`resolve`) rank campaign > the campaign's world (`campaign.json` `world`) > other worlds > core, then kind and
+  package as before; `resolve_ref` handles `kind/id`, `world:kind/id` and `core:<package>/kind/id`. Measured:
+  16,484 entries from 34 packages + the example campaign in ~0.4 s, so no cache. The compendium has a campaign
+  picker on the cover (remembered with the tabs) and opens the campaign's `events.jsonl`, so session edits
+  become events; the campaign is a writable store for New... and "edit a copy". At the table the DM has a
+  "Compendium" button: the book opens over the table with the table's campaign and EventLog ("Back to the
+  table"). Fix: the speed field kept zero entries it had (no spurious sheet.changed).
+  Test: `tools/test_unified_index.gd`.

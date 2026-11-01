@@ -4,6 +4,9 @@ extends RefCounted
 ## thread so the UI keeps running. Every entry gets a few bookkeeping keys:
 ## `_kind`, `_package` (id), `_package_name`, `_dir` (package folder, for images) and
 ## `_key` (lower-case name, for search and wikilinks).
+## Unified index (TASK-6): with `campaign_dir` set, the campaign's entries are loaded too, and
+## every entry gets `_layer` (campaign, world or core). Names and refs resolve campaign ->
+## world (the campaign's own world first) -> core, so a campaign copy hides the original.
 
 signal loaded
 
@@ -18,6 +21,12 @@ const LINK_PRIORITY := ["classes", "spells", "monsters", "items", "races", "subc
 const FEATURE_LISTS := ["traits", "actions", "bonus_actions", "reactions", "legendary_actions"]
 
 var root := ""
+## A campaign folder to include ("" = packages only).
+var campaign_dir := ""
+var campaign_world := ""  ## the campaign's world package id (campaign.json `world`)
+## Kinds of a campaign folder that aren't entries for the book.
+const CAMPAIGN_SKIP := ["campaign", "notes", "table"]
+const LAYERS := ["campaign", "world", "core"]
 var packages: Array[Dictionary] = []  ## manifests, sorted by name
 var entries := {}  ## kind -> Array[Dictionary], sorted by name
 var errors: PackedStringArray = []
@@ -77,12 +86,40 @@ func _load_all() -> void:
 				if not list is Array:
 					continue
 				var bucket: Array = found.get_or_add(kind, [])
+				var layer := "world" if str(manifest.get("kind", "")) == "world" else "core"
+				manifest["_layer"] = layer
 				for e: Variant in list:
 					if e is Dictionary:
 						e["_kind"] = kind
 						e["_package"] = str(manifest.get("id", id))
 						e["_package_name"] = str(manifest.get("name", id))
 						e["_dir"] = folder
+						e["_layer"] = layer
+						e["_key"] = str(e.get("name", "")).to_lower()
+						bucket.append(e)
+	var world := ""
+	if campaign_dir != "" and FileAccess.file_exists(campaign_dir.path_join("campaign.json")):
+		var info: Variant = _read_json(campaign_dir.path_join("campaign.json"), problems)
+		if info is Dictionary:
+			world = str(info.get("world", ""))
+			var cid := str(info.get("id", campaign_dir.get_file()))
+			var m := {"id": cid, "name": str(info.get("name", cid)), "kind": "campaign", "_dir": campaign_dir, "_layer": "campaign"}
+			found_packages.append(m)
+			for file in DirAccess.get_files_at(campaign_dir):
+				if not file.ends_with(".json") or file.get_basename() in CAMPAIGN_SKIP:
+					continue
+				var kind := file.get_basename()
+				var list: Variant = _read_json(campaign_dir.path_join(file), problems)
+				if not list is Array:
+					continue
+				var bucket: Array = found.get_or_add(kind, [])
+				for e: Variant in list:
+					if e is Dictionary and e.has("name"):
+						e["_kind"] = kind
+						e["_package"] = cid
+						e["_package_name"] = m.name
+						e["_dir"] = campaign_dir
+						e["_layer"] = "campaign"
 						e["_key"] = str(e.get("name", "")).to_lower()
 						bucket.append(e)
 	var by_name_key := func(a: Dictionary, b: Dictionary) -> bool: return a["_key"] < b["_key"]
@@ -98,6 +135,7 @@ func _load_all() -> void:
 			ids["%s/%s/%s" % [e["_package"], kind, e.get("id", "")]] = e
 	# Hand over in one go (the main thread only reads after `loaded`).
 	packages = found_packages
+	campaign_world = world
 	entries = found
 	_by_name = names
 	_by_id = ids
@@ -160,8 +198,41 @@ func resolve(target: String, prefer_package := "") -> Dictionary:
 			rank = LINK_PRIORITY.size()
 		if e["_package"] != prefer_package:
 			rank += 100
+		rank += layer_rank(e) * 1000
 		if rank < best_rank:
 			best_rank = rank
+			best = e
+	return best
+
+
+## 0 campaign, 1 the campaign's world, 2 other worlds, 3 core.
+func layer_rank(e: Dictionary) -> int:
+	match str(e.get("_layer", "core")):
+		"campaign":
+			return 0
+		"world":
+			return 1 if e.get("_package") == campaign_world else 2
+	return 3
+
+
+## A ref (data-layout.md): "kind/id" searches campaign -> world -> core; "world:kind/id" and
+## "core:<package>/kind/id" skip the search. {} if nothing matches.
+func resolve_ref(ref: String) -> Dictionary:
+	if ref.begins_with("core:"):
+		var parts := ref.substr(5).split("/")
+		return get_entry(parts[0], parts[1], parts[2]) if parts.size() == 3 else {}
+	var layer_only := ""
+	var plain := ref
+	if ref.begins_with("world:"):
+		layer_only = "world"
+		plain = ref.substr(6)
+	var kind := plain.get_slice("/", 0)
+	var id := plain.get_slice("/", 1)
+	var best := {}
+	for e: Dictionary in entries.get(kind, []):
+		if str(e.get("id", "")) != id or (layer_only != "" and e.get("_layer") != layer_only):
+			continue
+		if best.is_empty() or layer_rank(e) < layer_rank(best):
 			best = e
 	return best
 
@@ -210,6 +281,7 @@ func put_entry(entry: Dictionary, kind: String, store: EntryStore, old_id := "")
 	e["_package"] = store.id
 	e["_package_name"] = store.name
 	e["_dir"] = store.folder
+	e["_layer"] = "campaign" if store.layer == EntryStore.CAMPAIGN else "world" if store.layer == EntryStore.WORLD else "core"
 	e["_key"] = str(e.get("name", "")).to_lower()
 	var list: Array = entries.get_or_add(kind, [])
 	var at := list.bsearch_custom(e, func(a: Dictionary, b: Dictionary) -> bool: return a["_key"] < b["_key"])

@@ -23,6 +23,8 @@ var _status: Label
 var _maps: OptionButton
 var _who: Label
 var _color: ColorPickerButton
+var _book_button: Button
+var _book: Compendium
 
 var _notes_panel: PanelContainer
 var _notes_title: Label
@@ -59,6 +61,7 @@ func _refresh() -> void:
 	_notes_panel.visible = online
 	_next_session.visible = dm
 	_maps.visible = dm
+	_book_button.visible = dm
 	var picking := online and not dm and table.my_pc == "" and not table.pc_choices.is_empty()
 	_picker.visible = picking
 	if picking:
@@ -254,6 +257,11 @@ func _build_bar(root: Control) -> void:
 	_maps.tooltip_text = "Show another map to everyone"
 	_maps.item_selected.connect(func(i: int) -> void: table.show_map_to_all(str(_maps.get_item_metadata(i))))
 	row.add_child(_maps)
+	_book_button = Button.new()
+	_book_button.text = "Compendium"
+	_book_button.tooltip_text = "Core, world and this campaign's entries; edit them (session edits become events)"
+	_book_button.pressed.connect(open_compendium)
+	row.add_child(_book_button)
 	_color = ColorPickerButton.new()
 	_color.custom_minimum_size = Vector2(36, 28)
 	_color.edit_alpha = false
@@ -264,6 +272,20 @@ func _build_bar(root: Control) -> void:
 	_status.custom_minimum_size = Vector2(320, 0)
 	_status.theme_type_variation = UISkin.V_MUTED
 	row.add_child(_status)
+
+
+## DM: the compendium over the table, with this campaign's entries and event log (TASK-6).
+func open_compendium() -> Compendium:
+	if _book != null:
+		_book.show()
+		return _book
+	_book = Compendium.new()
+	_book.closable = true
+	_book.campaign_dir = table.campaign_dir
+	_book.event_log = table.event_log
+	_book.close_requested.connect(func() -> void: _book.hide())
+	_bar.get_parent().add_child(_book)
+	return _book
 
 
 # --- Session notes ------------------------------------------------------------------------

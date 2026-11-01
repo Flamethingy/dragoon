@@ -1,10 +1,11 @@
 ---
 id: TASK-24
 title: 'Compendium: back arrow, background tabs, tab context menu'
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@Mochi'
 created_date: '2026-11-01 13:40'
-updated_date: '2026-11-01 13:49'
+updated_date: '2026-11-01 13:53'
 labels:
   - ui
 dependencies:
@@ -24,14 +25,14 @@ Follow-up to TASK-22 (tabs), from Nico's testing:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Middle-click on a card, wikilink or feature opens a new tab in the background; the current tab stays focused
-- [ ] #2 Background tabs are inserted right after the current tab in opening order and briefly highlighted
-- [ ] #3 An entry that is already open is not duplicated by middle-click (its tab just gets highlighted)
-- [ ] #4 The back arrow next to the page title closes the current tab and switches to the previously active one (disabled on Browse / without history; closed tabs are skipped)
-- [ ] #5 Alt+Left and the mouse back button do the same
-- [ ] #6 Back-closes-tab is a setting (default on) so Nico can try both behaviours; when off, Back only switches tabs
-- [ ] #7 Right-clicking a tab opens a context menu: Close, Close all tabs, Close tabs to the left, Close tabs to the right (Browse is never closed; entries that don't apply are disabled)
-- [ ] #8 The quick preview on the right of the Browse tab drops the 'Full text' fold: it always shows everything (key facts, stat block, full Markdown text) and simply scrolls
+- [x] #1 Middle-click on a card, wikilink or feature opens a new tab in the background; the current tab stays focused
+- [x] #2 Background tabs are inserted right after the current tab in opening order and briefly highlighted
+- [x] #3 An entry that is already open is not duplicated by middle-click (its tab just gets highlighted)
+- [x] #4 The back arrow next to the page title closes the current tab and switches to the previously active one (disabled on Browse / without history; closed tabs are skipped)
+- [x] #5 Alt+Left and the mouse back button do the same
+- [x] #6 Back-closes-tab is a setting (default on) so Nico can try both behaviours; when off, Back only switches tabs
+- [x] #7 Right-clicking a tab opens a context menu: Close, Close all tabs, Close tabs to the left, Close tabs to the right (Browse is never closed; entries that don't apply are disabled)
+- [x] #8 The quick preview on the right of the Browse tab drops the 'Full text' fold: it always shows everything (key facts, stat block, full Markdown text) and simply scrolls
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -41,3 +42,9 @@ Follow-up to TASK-22 (tabs), from Nico's testing:
 
 2026-11-01 (Nico): the right-hand preview doesn't need "Full text". Always show everything; people scroll if they want (AC8).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Middle-click on a card or on a link (full view and quick card, tracked via meta_hover_started/ended) opens a background tab right after the current one. Several in a row line up in opening order, and a "✦" before the title highlights the new tab for 1.2 s. If the entry is already open it is only highlighted. Every full view has a Back arrow next to the title. The arrow, Alt+Left and the mouse back button all use the tab history: they skip closed tabs, close the tab they leave and show the previous one; nothing happens on Browse, where Alt+Left still steps back through the quick card. `back_closes_tab` defaults to on and is saved with the tabs; it can be toggled from the tab context menu. Right-clicking a tab offers Close, Close all tabs, Close tabs to the left, Close tabs to the right (each disabled when it doesn't apply) and the "Back closes the tab" check. The quick card always shows the full text. Test: tools/test_compendium_back.gd. Commit 37e8af9.
+<!-- SECTION:FINAL_SUMMARY:END -->

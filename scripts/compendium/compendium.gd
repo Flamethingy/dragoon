@@ -15,6 +15,7 @@ extends Control
 ## Packages load on a worker thread (PackageDB), so the window stays responsive.
 
 signal tabs_restored  ## the saved tabs are open again (after loading)
+signal close_requested  ## the Close button (when shown over the table)
 
 const SEARCH_DELAY := 0.15
 const GRID_GAP := 14
@@ -28,6 +29,13 @@ var db := PackageDB.new()
 var tabs_file := "user://compendium_tabs.json"
 ## The packages folder ("" = PackageDB.default_root()).
 var packages_root := ""
+## The campaign whose entries are in the book too (TASK-6); "" = none. Standalone the
+## cover has a picker (remembered in tabs_file); the table sets it to its campaign.
+var campaign_dir := ""
+## Shown over the table: a Close button and no campaign picker.
+var closable := false
+var _campaign_pick: OptionButton
+var _campaigns: PackedStringArray = []
 
 var _status: Label
 var _progress: ProgressBar
@@ -89,6 +97,13 @@ func _ready() -> void:
 	StatBlock.db = db
 	_build()
 	db.loaded.connect(_on_loaded)
+	if campaign_dir == "" and not closable and tabs_file != "" and FileAccess.file_exists(tabs_file):
+		var state: Variant = JSON.parse_string(FileAccess.get_file_as_string(tabs_file))
+		if state is Dictionary and Campaign.is_campaign(str(state.get("campaign", ""))):
+			campaign_dir = str(state.campaign)
+	_fill_campaigns()
+	db.campaign_dir = campaign_dir
+	_open_campaign_log()
 	db.load_async(packages_root)
 
 
@@ -132,6 +147,16 @@ func _build() -> void:
 	_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_tabs.add_theme_constant_override("separation", 6)
 	tabs_scroll.add_child(_tabs)
+	_campaign_pick = OptionButton.new()
+	_campaign_pick.tooltip_text = "A campaign whose entries are in the book too (they win over world and core)"
+	_campaign_pick.clip_text = true
+	_campaign_pick.item_selected.connect(func(i: int) -> void: set_campaign(_campaigns[i]))
+	side.add_child(_campaign_pick)
+	if closable:
+		var close := Button.new()
+		close.text = "Back to the table"
+		close.pressed.connect(func() -> void: close_requested.emit())
+		side.add_child(close)
 	var manage := Button.new()
 	manage.text = "Packages..."
 	manage.tooltip_text = "Import, export, switch on/off or remove source packages"
@@ -1013,7 +1038,7 @@ func _tabs_state() -> Dictionary:
 	var list := []
 	for key in tab_keys():
 		list.append({"key": key, "scroll": _open_views[key].scroll_vertical})
-	return {"tabs": list, "current": current_tab_key(), "back_closes_tab": back_closes_tab}
+	return {"tabs": list, "current": current_tab_key(), "back_closes_tab": back_closes_tab, "campaign": campaign_dir}
 
 
 func _save_tabs() -> void:
@@ -1055,6 +1080,42 @@ func _restore_tabs(state: Variant) -> void:
 	_restoring = false
 	_save_tabs()
 	tabs_restored.emit()
+
+
+# --- Campaign (TASK-6) ---------------------------------------------------------------------
+
+func _fill_campaigns() -> void:
+	_campaigns = PackedStringArray([""])
+	var root := Campaign.default_root()
+	for d in DirAccess.get_directories_at(root):
+		if Campaign.is_campaign(root.path_join(d)):
+			_campaigns.append(root.path_join(d))
+	if campaign_dir != "" and campaign_dir not in _campaigns:
+		_campaigns.append(campaign_dir)
+	_campaign_pick.clear()
+	for c in _campaigns:
+		_campaign_pick.add_item("No campaign" if c == "" else "Campaign: " + str(Campaign.new(c, null).info.get("name", c.get_file())))
+	_campaign_pick.selected = _campaigns.find(campaign_dir)
+	_campaign_pick.visible = not closable
+
+
+## Shows another campaign's entries (or none) together with the packages.
+func set_campaign(path: String) -> void:
+	if path == campaign_dir and db.is_loaded:
+		return
+	campaign_dir = path
+	db.campaign_dir = path
+	if not closable:
+		event_log = null
+	_open_campaign_log()
+	_save_tabs()
+	_reload()
+
+
+## Standalone, the campaign's own log, so edits during a running session become events.
+func _open_campaign_log() -> void:
+	if event_log == null and campaign_dir != "" and FileAccess.file_exists(campaign_dir.path_join("events.jsonl")):
+		event_log = EventLog.open(campaign_dir.path_join("events.jsonl"))
 
 
 # --- Editing (TASK-21) -------------------------------------------------------------------
@@ -1170,6 +1231,7 @@ func _new_entry_dialog() -> void:
 	box.custom_minimum_size = Vector2(420, 0)
 	dialog.add_child(box)
 	var kinds := PackedStringArray(Schema.KINDS.keys())
+	kinds.remove_at(kinds.find("notes"))
 	for k in db.kinds():
 		if k not in kinds:
 			kinds.append(k)
@@ -1182,7 +1244,7 @@ func _new_entry_dialog() -> void:
 	var targets := writable_stores()
 	var target_pick := OptionButton.new()
 	for t: EntryStore in targets:
-		target_pick.add_item("In %s" % t.name)
+		target_pick.add_item("In %s (%s)" % [t.name, t.layer])
 	target_pick.add_item("In a new world package...")
 	box.add_child(target_pick)
 	var world_name := LineEdit.new()

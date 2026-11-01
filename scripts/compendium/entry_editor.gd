@@ -264,7 +264,7 @@ func _numbers(key: String, value: Variant, names: Array, default: int, keep_all:
 		var out := {}
 		for n: String in names:
 			var v: float = boxes[n].value
-			if keep_all or v != 0.0:
+			if keep_all or v != 0.0 or d.has(n):
 				out[n] = int(v) if v == floorf(v) else v
 		return out
 	return row

@@ -30,6 +30,8 @@ static func to_bbcode(e: Dictionary) -> String:
 			return spell(e)
 		"features":
 			return feature(e)
+		"tables":
+			return table(e)
 		_:
 			return generic(e)
 
@@ -326,6 +328,25 @@ static func _components(c: Variant) -> String:
 
 
 # --- Everything else ---------------------------------------------------------------
+
+## A rollable table (TASK-25): the table with its Roll button and a link to where it comes from.
+static func table(e: Dictionary) -> String:
+	var rows: int = e.rows.size() if e.get("rows") is Array else 0
+	var bb := _title(e, "Rollable table · %s · %d rows" % [e.get("dice", "?"), rows]) + _rule()
+	bb += RollTables.bbcode(str(e.get("id", ""))) + "\n"
+	var parent := str(e.get("parent", ""))
+	if parent != "":
+		var p := {}
+		if db != null:
+			p = db.get_entry(str(e.get("_package", "")), parent.get_slice("/", 0), parent.get_slice("/", 1))
+		var label := str(p.get("name", parent)) if not p.is_empty() else parent
+		var link := "[url=entry:%s/%s][color=#%s]%s[/color][/url]" % [e.get("_package", ""), parent, Markdown.LINK.to_html(), Markdown.escape(label)] \
+			if not p.is_empty() else Markdown.escape(label)
+		bb += "\n" + _field("From", link + (" (%s)" % str(e.field).replace("_", " ") if str(e.get("field", "")) not in ["", "description"] else ""))
+	if str(e.get("description", "")).strip_edges() != "":
+		bb += _md(e.description)
+	return bb + _footer(e)
+
 
 static func generic(e: Dictionary) -> String:
 	var kind := str(e.get("_kind", ""))

@@ -21,6 +21,11 @@ func _init() -> void:
 	await _shot(out.path_join("compendium_tab_spell.png"))
 	book.show_browse()
 	await _shot(out.path_join("compendium_tab_browse.png"))
+	book.open_tab(book.db.resolve_ref("spells/confusion"))
+	RollTables.set_result("confusion-behavior", 4, 1)
+	await _shot(out.path_join("compendium_table_embed.png"))
+	book.open_tab(book.db.resolve_ref("tables/confusion-behavior"))
+	await _shot(out.path_join("compendium_table.png"))
 	quit()
 
 

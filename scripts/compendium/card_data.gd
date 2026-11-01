@@ -30,6 +30,8 @@ static func badge(e: Dictionary) -> Array:
 		"classes":
 			var hd: Variant = e.get("hit_dice", e.get("hit_die"))
 			return ["d" + StatBlock._num(hd), "wine"] if hd != null else []
+		"tables":
+			return [str(e.get("dice", "?")), "tan" if bool(e.get("complete", true)) else "red"]
 	return []
 
 
@@ -40,6 +42,7 @@ static func badge_label(e: Dictionary) -> String:
 		"items": return "Rarity: " + str(e.get("rarity", ""))
 		"classes": return "Hit die"
 		"features": return "Monsters using it"
+		"tables": return "Die to roll" + ("" if bool(e.get("complete", true)) else " (gaps in the table)")
 	return ""
 
 
@@ -61,6 +64,9 @@ static func subtitle(e: Dictionary) -> String:
 			if str(e.get("rarity", "")) != "":
 				parts.append(str(e.rarity))
 			return ", ".join(parts)
+		"tables":
+			var n: int = e.rows.size() if e.get("rows") is Array else 0
+			return "Rollable table, %d rows" % n
 	return StatBlock.SINGULAR.get(str(e.get("_kind", "")), str(e.get("_kind", "")).capitalize())
 
 
@@ -95,6 +101,13 @@ static func chips(e: Dictionary) -> Array:
 				out.append(["icon_shield", "Save", "DC %s %s" % [StatBlock._num(e.save.get("dc")), str(e.save.get("ability", "")).to_upper()]])
 			if e.get("uses") != null and str(e.uses) != "":
 				out.append(["", "Uses", str(e.uses)])
+		"tables":
+			out.append(["icon_dagger", "Die", str(e.get("dice", "?"))])
+			out.append(["", "Rows", str(e.rows.size() if e.get("rows") is Array else 0)])
+			if str(e.get("parent", "")) != "":
+				out.append(["", "From", str(e.parent).get_file().replace("-", " ").capitalize()])
+			if not bool(e.get("complete", true)):
+				out.append(["", "Note", "gaps in table"])
 		"items":
 			if e.get("gold") != null and float(e.gold) > 0:
 				out.append(["coin_gold", "Cost", StatBlock._num(e.gold) + " gp"])

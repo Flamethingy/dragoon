@@ -69,6 +69,7 @@ var accounts := {}  ## id -> {name, color "#rrggbb"}; "dm" = the DM (both sides)
 var sheets := {}  ## ref -> the sheet as the host let me see it (open_sheet)
 var rolls: Array = []  ## the roll log as I may see it (this session), oldest first
 var rng := RandomNumberGenerator.new()  ## host: rolls the dice
+var tables := {}  ## id -> rollable table (packages' tables.json, the campaign's win) (TASK-25)
 const ROLL_LOG_SIZE := 100
 var sheet_watchers := {}  ## host: ref -> {peer id: true} who has the sheet open
 var _state := {}  ## the last table view from the host
@@ -158,6 +159,7 @@ func host(port := DEFAULT_PORT) -> Error:
 	accounts = campaign.accounts()
 	_apply_accounts()
 	rng.randomize()
+	load_tables()
 	_load_rolls()
 	_apply_state(view_for(""))
 	_set_status("Hosting %s on port %d (%d events in the log)" % [campaign.info.get("name", campaign.id()), port, event_log.events.size()])
@@ -320,6 +322,7 @@ func join(address: String, name_to_use := "") -> Error:
 		_set_status("Can't join %s: %s" % [address, error_string(err)])
 		return err
 	multiplayer.multiplayer_peer = peer
+	load_tables()
 	_set_status("Joining %s:%d..." % [ip, port])
 	return OK
 
@@ -1083,12 +1086,76 @@ func _handle_roll(sender: int, query: String, ref: String, hidden: bool) -> Dict
 ## A dice.rolled event as the roll log shows it.
 static func _roll_entry(e: Dictionary) -> Dictionary:
 	var d: Dictionary = e.get("data", {})
-	return {"id": e.get("id", 0), "by": e.get("by", ""), "who": d.get("who", ""), "results": d.get("results", []),
+	var entry := {"id": e.get("id", 0), "by": e.get("by", ""), "who": d.get("who", ""), "results": d.get("results", []),
 		"hidden": bool(d.get("hidden", false)), "real": e.get("real", "")}
+	if d.has("table"):
+		entry["table"] = str(d.table).trim_prefix("tables/")
+		entry["value"] = int(d.get("value", 0))
+		entry["row"] = int(d.get("row", -1))
+	return entry
+
+
+## The rollable tables everyone may roll: every package's tables.json, the campaign's own
+## (host) on top. Players load them from their own packages folder.
+func load_tables(packages_root := "") -> void:
+	tables = {}
+	var root := packages_root if packages_root != "" else PackageDB.default_root()
+	var files := []
+	for d in DirAccess.get_directories_at(root):
+		files.append(root.path_join(d).path_join("tables.json"))
+	if campaign != null:
+		files.append(campaign.folder.path_join("tables.json"))
+	for file: String in files:
+		if not FileAccess.file_exists(file):
+			continue
+		var list: Variant = JSON.parse_string(FileAccess.get_file_as_string(file))
+		if list is Array:
+			for t: Variant in list:
+				if t is Dictionary and t.has("id"):
+					tables[str(t.id)] = t
+
+
+## Rolls a rollable table (TASK-25): the host rolls, logs dice.rolled with table, value and
+## row, and everyone sees the row highlighted; `hidden` (DM) only for the DM.
+func roll_table(id: String, hidden := false) -> void:
+	if is_dm():
+		_handle_table_roll(1, id, hidden)
+	elif is_online():
+		request_table_roll.rpc_id(1, id)
+
+
+## Player -> DM.
+@rpc("any_peer", "call_remote", "reliable")
+func request_table_roll(id: String) -> void:
+	if is_dm():
+		_handle_table_roll(multiplayer.get_remote_sender_id(), id.left(200), false)
+
+
+func _handle_table_roll(sender: int, id: String, hidden: bool) -> Dictionary:
+	var player := _sender_player(sender)
+	var t: Dictionary = tables.get(id, {})
+	if player == "" or t.is_empty():
+		_deny_roll(sender, "there is no table \"%s\"" % id)
+		return {}
+	var r := Dice.roll(str(t.get("dice", "d20")), rng)
+	if r.is_empty():
+		_deny_roll(sender, "the table's die \"%s\" isn't a formula" % t.get("dice", ""))
+		return {}
+	var row := RollTables.row_for(t, int(r.total))
+	var data := RollTables.event_data(id, t, r, row, hidden and player == Reveal.DM, campaign.player_name(player))
+	var e := event_log.append("dice.rolled", "", data, player)
+	var entry := _roll_entry(e)
+	_add_roll(entry)
+	if not entry.hidden:
+		for peer_id: int in peers:
+			roll_added.rpc_id(peer_id, entry)
+	return entry
 
 
 func _add_roll(entry: Dictionary) -> void:
 	rolls.append(entry)
+	if entry.has("table") and _ui != null:  # the table on my screen shows the row
+		RollTables.set_result(str(entry.table), int(entry.value), int(entry.row))
 	if rolls.size() > ROLL_LOG_SIZE:
 		rolls = rolls.slice(rolls.size() - ROLL_LOG_SIZE)
 	rolls_changed.emit()
@@ -1144,9 +1211,12 @@ static func roll_bbcode(entry: Dictionary, names := {}) -> String:
 		elif r.get("crit") == "1":
 			total = "[b][color=#%s]%d (nat 1)[/color][/b]" % [UISkin.RED.to_html(false), int(r.total)]
 		var label := str(r.get("label", ""))
-		lines.append("%s%s  [color=#%s]%s[/color]  = %s" % [Markdown.escape(label) + ": " if label != "" else "",
+		var line := "%s%s  [color=#%s]%s[/color]  = %s" % [Markdown.escape(label) + ": " if label != "" else "",
 			Markdown.escape(str(r.get("formula", ""))), Markdown.MUTED.to_html(false),
-			Markdown.escape(str(r.get("text", "")).get_slice(" = ", 0)), total])
+			Markdown.escape(str(r.get("text", "")).get_slice(" = ", 0)), total]
+		if r.has("row_text"):
+			line += " → " + (Markdown.inline(str(r.row_text)) if str(r.row_text) != "" else "no row")
+		lines.append(line)
 	var who := str(entry.get("who", ""))
 	var by := str(names.get(entry.get("by", ""), entry.get("by", "")))
 	var head := Markdown.escape(who if who != "" else by)

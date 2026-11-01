@@ -370,6 +370,7 @@ static func flipped(t: Texture2D) -> Texture2D:
 
 func _on_loaded() -> void:
 	_progress.hide()
+	_hook_tables()
 	if _saved_tabs == null and tabs_file != "" and FileAccess.file_exists(tabs_file):
 		_saved_tabs = JSON.parse_string(FileAccess.get_file_as_string(tabs_file))
 	_stores.clear()
@@ -784,6 +785,8 @@ func _on_meta(meta: Variant) -> void:
 ## Follows a link from `from`: entry:/wiki: links open the entry (quick card or new tab),
 ## web links the browser.
 func _follow(link: String, from: Dictionary, in_tab: bool, background := false) -> void:
+	if RollTables.handle_meta(link):
+		return
 	var e := {}
 	if link.begins_with("entry:"):
 		var parts := link.substr(6).split("/")
@@ -1286,6 +1289,38 @@ func _on_deleted(view: EntryView, store: EntryStore, kind: String) -> void:
 	close_tab(_tab_index(view.key))
 	_after_db_change(kind)
 	_status.text = "Deleted %s" % view.entry.get("name", "?")
+
+
+# --- Rollable tables (TASK-25) -------------------------------------------------------------
+
+## Tables resolve in this book (campaign > world > core). Standalone, rolls happen here and
+## go into the campaign's event log; over the table the table rolls (TableUI sets the roller).
+func _hook_tables() -> void:
+	RollTables.resolver = func(id: String) -> Dictionary: return db.resolve_ref("tables/" + id)
+	if not closable:
+		RollTables.event_log = event_log
+	if not RollTables.hub.changed.is_connected(_on_table_rolled):
+		RollTables.hub.changed.connect(_on_table_rolled)
+		RollTables.hub.rolled.connect(func(text: String) -> void: _status.text = text)
+
+
+## A table got a result: the views that show it are drawn again.
+func _on_table_rolled(id: String) -> void:
+	for k: String in _open_views:
+		var view: EntryView = _open_views[k]
+		if not view.is_editing() and _shows_table(view.entry, id):
+			view.setup(view.entry)
+	if not _current.is_empty() and _shows_table(_current, id):
+		_build_detail(_current)
+
+
+static func _shows_table(e: Dictionary, id: String) -> bool:
+	if e.get("_kind") == "tables" and str(e.get("id", "")) == id:
+		return true
+	for k: Variant in e:
+		if e[k] is String and RollTables.embeds(e[k], id):
+			return true
+	return false
 
 
 ## Bookmarks and the binder page after entries were added, changed or removed.

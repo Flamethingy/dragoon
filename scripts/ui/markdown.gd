@@ -5,6 +5,7 @@ class_name Markdown
 ## lists (nested, ordered, task boxes), > quotes, links, tables, --- rules and images.
 ## [[Target]], [[Target|Label]] and [[Target#Section|Label]] (the pipe may be escaped
 ## as \| inside tables) become [url=wiki:Target#Section] links for the compendium.
+## ![[tables/<id>]] embeds become the rollable table with a Roll button (RollTables, TASK-25).
 ## Everything else is shown as plain text: BBCode in the input is escaped.
 
 const MUTED := Color8(128, 92, 96)
@@ -51,6 +52,12 @@ static func to_segments(md: String) -> Array:
 				i += 1
 			i += 1  # the closing fence
 			out.append(_code_block("\n".join(code)))
+			continue
+
+		var embed := _re(RollTables.EMBED).search(stripped)
+		if embed:
+			out.append(RollTables.bbcode(embed.get_string(1).strip_edges()))
+			i += 1
 			continue
 
 		var m := _re("^(#{1,6})\\s+(.*?)(?:\\s+#+)?\\s*$").search(stripped)
@@ -300,6 +307,13 @@ static func inline(text: String) -> String:
 			out += ticks
 			i += ticks.length()
 			continue
+
+		if c == "!" and text.substr(i, 10) == "![[tables/":
+			m = _re("\\G!\\[\\[tables/([^\\]|#]+)(?:[|#][^\\]]*)?\\]\\]").search(text, i)
+			if m:
+				out += "\n" + RollTables.bbcode(m.get_string(1).strip_edges()) + "\n"
+				i = m.get_end()
+				continue
 
 		if c == "!":
 			m = _re("\\G" + IMAGE).search(text, i)

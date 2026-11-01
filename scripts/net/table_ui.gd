@@ -58,6 +58,15 @@ func _ready() -> void:
 	table.table_changed.connect(_refresh)
 	table.accounts_changed.connect(_refresh)
 	table.rolls_changed.connect(_show_rolls)
+	RollTables.resolver = func(id: String) -> Dictionary: return table.tables.get(id, {})
+	RollTables.roller = func(id: String, hidden: bool) -> void: table.roll_table(id, hidden and table.is_dm())
+	RollTables.formula_roller = func(formula: String) -> void: table.roll(formula, roll_ref(), _roll_hidden.button_pressed)
+	RollTables.event_log = null
+	RollTables.hub.changed.connect(func(id: String) -> void:
+		if table.notes.entries.any(func(e: Dictionary) -> bool: return RollTables.embeds(str(e.get("text", "")), id)):
+			_show_notes()
+		if sheet.visible and RollTables.embeds(str(sheet.sheet.get("description", "")), id):
+			sheet.show_sheet(sheet.sheet))
 	_refresh()
 	_show_notes()
 
@@ -329,6 +338,7 @@ func _build_notes(root: Control) -> void:
 	head.add_child(_next_session)
 	_notes_text = RichTextLabel.new()
 	_notes_text.bbcode_enabled = true
+	_notes_text.meta_clicked.connect(func(meta: Variant) -> void: RollTables.handle_meta(str(meta)))
 	_notes_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_notes_text.custom_minimum_size = Vector2(0, 80)
 	_notes_text.scroll_following = true

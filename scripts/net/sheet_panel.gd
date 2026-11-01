@@ -109,7 +109,9 @@ func show_sheet(s: Dictionary) -> void:
 ## Links in the sheet: "roll:<name>" rolls it for this creature.
 func _on_meta(meta: Variant) -> void:
 	var m := str(meta)
-	if m.begins_with("roll:") and table != null:
+	if m.begins_with(RollTables.ROLL) or m.begins_with(RollTables.ROW):
+		RollTables.handle_meta(m)
+	elif m.begins_with("roll:") and table != null:
 		table.roll(m.substr(5), ref, Input.is_key_pressed(KEY_SHIFT) and table.is_dm())
 
 

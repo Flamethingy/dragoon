@@ -347,6 +347,10 @@ func _markdown(key: String, value: String) -> Control:
 	preview.fit_content = true
 	preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	preview.text = Markdown.to_bbcode(value)
+	preview.meta_clicked.connect(func(meta: Variant) -> void: RollTables.handle_meta(str(meta)))
+	RollTables.hub.changed.connect(func(id: String) -> void:
+		if is_instance_valid(preview) and RollTables.embeds(edit.text, id):
+			preview.text = Markdown.to_bbcode(edit.text))
 	row.add_child(preview)
 	edit.text_changed.connect(func() -> void:
 		preview.text = Markdown.to_bbcode(edit.text)

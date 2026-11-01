@@ -188,3 +188,15 @@ See the "Open questions" section of the concept (secrets marking, event log form
   `Replay.world_state(events)` the world-wide ones (`combat`, `weather`, `party_groups`). Item events now keep a
   sheet's own inventory list shape (`[{item, qty}]`) instead of failing on it. The table's sheet shows
   conditions, death saves, used resources and coins. Test: `tools/test_event_types.gd`.
+
+- 2026-11-01: TASK-25 (Mochi): rollable tables. `RollTables` (`scripts/dice/roll_tables.gd`): `![[tables/<id>]]`
+  embeds (own line or inside a paragraph) render in every Markdown view (compendium quick card and full view,
+  editor preview, table notes, sheets) as the table: die column with ranges, the other columns as Markdown
+  (formulas like "2d10" become roll links), a **Roll d10** button and the result ("Rolled 4: ..."); the rolled
+  row is highlighted, clicking a range picks a row by hand, a missing table is a warning, an incomplete table
+  says it has gaps. Standalone the compendium rolls itself (into the campaign's event log when one is picked);
+  at the table the host rolls (`NetTable.roll_table`, tables from every package's `tables.json` plus the
+  campaign's): `dice.rolled` with `table`, `value`, `row`, shown in everyone's roll log with the row text and
+  highlighted for everyone; Shift+click = hidden for the DM. `tables` cards: die badge (red if incomplete),
+  "Rollable table, N rows", chips Die/Rows/From; the full view links back to the parent entry.
+  Test: `tools/test_roll_tables.gd`; screenshots `compendium_table_embed.png`, `compendium_table.png`.

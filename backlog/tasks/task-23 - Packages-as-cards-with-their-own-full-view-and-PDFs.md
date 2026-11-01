@@ -1,10 +1,10 @@
 ---
 id: TASK-23
 title: Packages as cards with their own full view and PDFs
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-01 13:20'
-updated_date: '2026-11-01 13:28'
+updated_date: '2026-11-01 14:24'
 labels:
   - ui
   - data
@@ -30,12 +30,12 @@ Tamago fills `documents` from the Obsidian vault via `tools/import_obsidian.py`;
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Packages show as cards in the compendium with name, kind badge, entry count and on/off switch; filter and search work
-- [ ] #2 On/off still works from card and full view; disabled packages are dimmed and their entries are hidden elsewhere
-- [ ] #3 The package full view (own tab) shows version, kind, description, clickable counts per kind, origin and dependencies
-- [ ] #4 Documents section lists the manifest's PDFs with title and size; Open launches the default viewer, 'Show in folder' and 'Add PDF...' work
-- [ ] #5 Package export/import includes docs/ and shows the total size first
-- [ ] #6 The package full view has a card-style 'Contents' overview: the package's entries as cards (same card look as the binder), grouped by kind with a header and count per kind (Monsters 395, Spells 12 ...), collapsible groups, a search field inside the package, and cards open in their own tab like everywhere else
+- [x] #1 Packages show as cards in the compendium with name, kind badge, entry count and on/off switch; filter and search work
+- [x] #2 On/off still works from card and full view; disabled packages are dimmed and their entries are hidden elsewhere
+- [x] #3 The package full view (own tab) shows version, kind, description, clickable counts per kind, origin and dependencies
+- [x] #4 Documents section lists the manifest's PDFs with title and size; Open launches the default viewer, 'Show in folder' and 'Add PDF...' work
+- [x] #5 Package export/import includes docs/ and shows the total size first
+- [x] #6 The package full view has a card-style 'Contents' overview: the package's entries as cards (same card look as the binder), grouped by kind with a header and count per kind (Monsters 395, Spells 12 ...), collapsible groups, a search field inside the package, and cards open in their own tab like everywhere else
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -43,3 +43,9 @@ Tamago fills `documents` from the Obsidian vault via `tools/import_obsidian.py`;
 <!-- SECTION:NOTES:BEGIN -->
 2026-11-01 (Nico): when opening a source, show an overview in card style of all elements in that source. Added as AC6. Big packages (Tome of Beasts 3 has ~400 monsters + ~2400 features) need paging or lazy loading per group. Features are better collapsed by default, since they are mostly reached via their monsters.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The Packages bookmark shows every installed package as a card: cover or fallback art, S/W badge, entry count and an on/off switch (off = dimmed, entries hidden). One filter covers Source/World/On/Off/Has PDFs, and search covers name and description. The full view (own tab, survives reloads) shows version, kind, description with PDF links, counts per kind linking to a filtered Browse, origin, dependencies, the on/off switch and Export (size incl. PDFs shown first). It also has Documents (Open / Show in folder / Add PDF... into docs/ + manifest) and Contents: the package's cards grouped by kind, collapsible, features collapsed, 24 at a time, searchable, opening in tabs. Export/import carry docs/ (tested). Test: tools/test_package_cards.gd. Commit: effbd25.
+<!-- SECTION:FINAL_SUMMARY:END -->

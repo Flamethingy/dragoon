@@ -214,3 +214,11 @@ See the "Open questions" section of the concept (secrets marking, event log form
   `add_document`, `size_text`. Fixes: tag chips ("Concentration") no longer wrap letter by letter; a quick
   second reload no longer crashes the tab restore. Test: `tools/test_package_cards.gd`; screenshots
   `compendium_packages.png`, `compendium_package_view.png`, `compendium_package_docs.png`.
+
+- 2026-11-01: TASK-26 (Mochi): monster pictures. Cards, quick card and full view show the entry's `image`
+  (vault image or PDF art); `ImageCache.decode` reads images by content, so JPEGs named `.png` load and broken
+  files fall back quietly (no decoder errors). Without a picture, monsters show their creature type icon
+  (`res://assets/creature_types/<type>.svg`, matched inside the type text, e.g. "swarm of Tiny beasts" -> beast;
+  `unknown.svg` otherwise), tinted in the card colour; other kinds keep the initial. A **Credits** button on the
+  compendium cover shows `assets/creature_types/CREDITS.md` (CC BY 3.0, game-icons.net).
+  Test: `tools/test_monster_art.gd`.

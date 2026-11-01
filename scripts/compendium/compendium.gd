@@ -168,6 +168,12 @@ func _build() -> void:
 		close.text = "Back to the table"
 		close.pressed.connect(func() -> void: close_requested.emit())
 		side.add_child(close)
+	var credits := Button.new()
+	credits.name = "Credits"
+	credits.text = "Credits"
+	credits.tooltip_text = "Who made the icons and art we use"
+	credits.pressed.connect(show_credits)
+	side.add_child(credits)
 	var manage := Button.new()
 	manage.text = "Packages..."
 	manage.tooltip_text = "Import, export, switch on/off or remove source packages"
@@ -1325,6 +1331,43 @@ func _on_deleted(view: EntryView, store: EntryStore, kind: String) -> void:
 	close_tab(_tab_index(view.key))
 	_after_db_change(kind)
 	_status.text = "Deleted %s" % view.entry.get("name", "?")
+
+
+# --- Credits (TASK-26) ----------------------------------------------------------------------
+
+const CREDITS := ["res://assets/creature_types/CREDITS.md"]
+
+
+## The credits as Markdown (the creature type icons are CC BY 3.0, game-icons.net).
+static func credits_text() -> String:
+	var parts := PackedStringArray()
+	for file: String in CREDITS:
+		if FileAccess.file_exists(file):
+			parts.append(FileAccess.get_file_as_string(file))
+		else:  # an export without the .md files
+			parts.append("# Creature type icons
+
+From https://game-icons.net (lorc, delapouite), licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/).")
+	return "
+
+".join(parts)
+
+
+func show_credits() -> AcceptDialog:
+	var dialog := AcceptDialog.new()
+	dialog.name = "CreditsDialog"
+	dialog.title = "Credits"
+	var text := RichTextLabel.new()
+	text.bbcode_enabled = true
+	text.custom_minimum_size = Vector2(640, 460)
+	text.text = Markdown.to_bbcode(credits_text())
+	text.meta_clicked.connect(func(meta: Variant) -> void: OS.shell_open(str(meta)))
+	dialog.add_child(text)
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered()
+	return dialog
 
 
 # --- Packages as cards (TASK-23) --------------------------------------------------------------

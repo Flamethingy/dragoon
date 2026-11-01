@@ -15,6 +15,7 @@ const SIDE_WIDTH := 340
 var entry: Dictionary
 var key := ""  ## package/kind/id
 var edit_button: Button
+var editor: EntryEditor  ## while editing (TASK-21)
 
 
 static func key_of(e: Dictionary) -> String:
@@ -68,6 +69,36 @@ func setup(e: Dictionary) -> void:
 		right.add_child(_text(StatBlock.to_bbcode(e)))
 
 
+## Swaps the view for the editor (same tab); end_edit() swaps back.
+func begin_edit(form: EntryEditor) -> void:
+	end_edit()
+	editor = form
+	for c in get_children():
+		c.hide()
+	var page := PanelContainer.new()
+	page.name = "EditPage"
+	page.theme_type_variation = UISkin.V_PAGE
+	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page.add_child(form)
+	add_child(page)
+	scroll_vertical = 0
+
+
+func end_edit() -> void:
+	if editor == null:
+		return
+	var page := editor.get_parent()
+	remove_child(page)
+	page.queue_free()
+	editor = null
+	for c in get_children():
+		c.show()
+
+
+func is_editing() -> bool:
+	return editor != null
+
+
 func _header(e: Dictionary) -> Control:
 	var plate := PanelContainer.new()
 	plate.theme_type_variation = UISkin.V_PLATE
@@ -91,8 +122,7 @@ func _header(e: Dictionary) -> Control:
 	col.add_child(sub)
 	edit_button = Button.new()
 	edit_button.text = "Edit"
-	edit_button.disabled = true
-	edit_button.tooltip_text = "Coming with the entity editor (TASK-21)"
+	edit_button.tooltip_text = "Edit this entry here (source packages: edit a copy or unlock)"
 	edit_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	edit_button.pressed.connect(func() -> void: edit_requested.emit(entry))
 	row.add_child(edit_button)

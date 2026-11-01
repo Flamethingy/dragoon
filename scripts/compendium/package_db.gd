@@ -197,3 +197,56 @@ func package_name(id: String) -> String:
 		if str(p.get("id", "")) == id:
 			return str(p.get("name", id))
 	return id
+
+
+# --- Edits (TASK-21) -------------------------------------------------------------------
+
+## Adds or replaces an entry after an edit, without reloading everything. `old_id`: its id
+## before a rename. Returns the entry as the book holds it (with bookkeeping keys).
+func put_entry(entry: Dictionary, kind: String, store: EntryStore, old_id := "") -> Dictionary:
+	remove_entry(store.id, kind, old_id if old_id != "" else str(entry.get("id", "")))
+	var e := EntryStore.strip(entry).duplicate(true)
+	e["_kind"] = kind
+	e["_package"] = store.id
+	e["_package_name"] = store.name
+	e["_dir"] = store.folder
+	e["_key"] = str(e.get("name", "")).to_lower()
+	var list: Array = entries.get_or_add(kind, [])
+	var at := list.bsearch_custom(e, func(a: Dictionary, b: Dictionary) -> bool: return a["_key"] < b["_key"])
+	list.insert(at, e)
+	_by_name.get_or_add(e["_key"], []).append(e)
+	_by_id["%s/%s/%s" % [store.id, kind, e.get("id", "")]] = e
+	return e
+
+
+func remove_entry(package_id: String, kind: String, id: String) -> void:
+	var key := "%s/%s/%s" % [package_id, kind, id]
+	var old: Dictionary = _by_id.get(key, {})
+	if old.is_empty():
+		return
+	_by_id.erase(key)
+	var list: Array = entries.get(kind, [])
+	var i := list.find(old)
+	if i >= 0:
+		list.remove_at(i)
+	var same: Array = _by_name.get(old["_key"], [])
+	same.erase(old)
+	if same.is_empty():
+		_by_name.erase(old["_key"])
+
+
+## Entry names for [[ suggestions: names starting with `prefix` first, then containing it.
+func suggest(prefix: String, limit := 12) -> PackedStringArray:
+	var p := prefix.strip_edges().to_lower()
+	var starts := PackedStringArray()
+	var contains := PackedStringArray()
+	if p == "":
+		return starts
+	for key: String in _by_name:
+		if key.begins_with(p):
+			starts.append(str(_by_name[key][0].get("name", key)))
+		elif contains.size() < limit and key.contains(p):
+			contains.append(str(_by_name[key][0].get("name", key)))
+	starts.sort()
+	starts.append_array(contains)
+	return starts.slice(0, limit)

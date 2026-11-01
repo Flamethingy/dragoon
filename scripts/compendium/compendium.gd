@@ -9,6 +9,9 @@ extends Control
 ## middle-click, "Open" or Ctrl+click on a link opens an entry in its own full-view tab
 ## (EntryView). Tabs close (x, middle-click, Ctrl+W), switch (Ctrl+Tab), reorder by drag,
 ## keep their scroll position and come back on the next start (tabs_file).
+## Editing (TASK-21): "Edit" in a full view turns the tab into the EntryEditor; "New..." in
+## Browse creates an entry in a world package (or a new one). Source packages stay
+## read-only unless unlocked; the editor offers "edit a copy" in a world package.
 ## Packages load on a worker thread (PackageDB), so the window stays responsive.
 
 signal tabs_restored  ## the saved tabs are open again (after loading)
@@ -23,6 +26,8 @@ const KIND_ICONS := {"monsters": "icon_sword", "spells": "star", "items": "icon_
 var db := PackageDB.new()
 ## Where the open tabs are kept between runs ("" = don't keep them).
 var tabs_file := "user://compendium_tabs.json"
+## The packages folder ("" = PackageDB.default_root()).
+var packages_root := ""
 
 var _status: Label
 var _progress: ProgressBar
@@ -64,6 +69,9 @@ var _browse: Control
 var _open_views := {}  ## key -> EntryView
 var _saved_tabs: Variant = null  ## {tabs: [{key, scroll}], current} to restore after a load
 var _restoring := false
+## The running campaign's log, if any: editor saves during a session become events.
+var event_log: EventLog
+var _stores := {}  ## package id -> EntryStore
 
 
 func _ready() -> void:
@@ -72,7 +80,7 @@ func _ready() -> void:
 	StatBlock.db = db
 	_build()
 	db.loaded.connect(_on_loaded)
-	db.load_async()
+	db.load_async(packages_root)
 
 
 # --- Layout --------------------------------------------------------------------------
@@ -252,6 +260,11 @@ func _build_filters() -> Control:
 	_sort.size_flags_horizontal = Control.SIZE_SHRINK_END
 	_sort.custom_minimum_size = Vector2(170, 0)
 	row.add_child(_sort)
+	var new := Button.new()
+	new.text = "New..."
+	new.tooltip_text = "Create an entry in a world package"
+	new.pressed.connect(_new_entry_dialog)
+	row.add_child(new)
 
 	var filters := HBoxContainer.new()
 	filters.add_theme_constant_override("separation", 8)
@@ -315,23 +328,13 @@ func _on_loaded() -> void:
 	_progress.hide()
 	if _saved_tabs == null and tabs_file != "" and FileAccess.file_exists(tabs_file):
 		_saved_tabs = JSON.parse_string(FileAccess.get_file_as_string(tabs_file))
-	for c in _tabs.get_children():
-		_tabs.remove_child(c)
-		c.queue_free()
+	_stores.clear()
 	_status.text = "%d cards from %d packages" % [db.count(), db.packages.size()]
 	if not db.errors.is_empty():
 		_status.text += "\n%d problems (see Output)" % db.errors.size()
 		for e in db.errors:
 			push_warning(e)
-	for k in db.kinds():
-		var tab := Button.new()
-		tab.theme_type_variation = UISkin.V_TAB
-		tab.toggle_mode = true
-		tab.button_group = _tab_group
-		tab.text = "%s  %d" % [k.capitalize(), db.entries[k].size()]
-		tab.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		tab.pressed.connect(_select_kind.bind(k))
-		_tabs.add_child(tab)
+	_build_bookmarks()
 	if _tabs.get_child_count() > 0:
 		var keep := db.kinds().find(_kind)  # after a reload, stay on the same kind
 		var i := keep if keep >= 0 else 0
@@ -343,6 +346,23 @@ func _on_loaded() -> void:
 	var saved: Variant = _saved_tabs
 	_saved_tabs = {}
 	_restore_tabs(saved)
+
+
+## The bookmark tabs on the cover, one per kind (with counts).
+func _build_bookmarks() -> void:
+	for c in _tabs.get_children():
+		_tabs.remove_child(c)
+		c.queue_free()
+	for k in db.kinds():
+		var tab := Button.new()
+		tab.theme_type_variation = UISkin.V_TAB
+		tab.toggle_mode = true
+		tab.button_group = _tab_group
+		tab.text = "%s  %d" % [k.capitalize(), db.entries[k].size()]
+		tab.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		tab.pressed.connect(_select_kind.bind(k))
+		tab.button_pressed = k == _kind
+		_tabs.add_child(tab)
 
 
 ## The Packages window; after changes the book reloads.
@@ -766,6 +786,7 @@ func open_tab(e: Dictionary) -> EntryView:
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	view.hide()
 	view.link_clicked.connect(func(link: String) -> void: _follow(link, view.entry, true))
+	view.edit_requested.connect(func(_e: Dictionary) -> void: start_edit(view))
 	_views.add_child(view)
 	_open_views[key] = view
 	_tab_bar.add_tab(str(e.get("name", "?")), UISkin.tex(KIND_ICONS.get(e.get("_kind"), "dot_wine")))
@@ -896,6 +917,154 @@ func _restore_tabs(state: Variant) -> void:
 	_restoring = false
 	_save_tabs()
 	tabs_restored.emit()
+
+
+# --- Editing (TASK-21) -------------------------------------------------------------------
+
+## The store (package folder) an entry lives in.
+func store_for(e: Dictionary) -> EntryStore:
+	var pkg := str(e.get("_package", ""))
+	if not _stores.has(pkg):
+		_stores[pkg] = EntryStore.open(str(e.get("_dir", "")))
+	return _stores[pkg]
+
+
+## Stores entries can be created or copied into: world packages and unlocked packages.
+func writable_stores() -> Array:
+	var out := []
+	for p in db.packages:
+		var s := store_for({"_package": p.get("id", ""), "_dir": p.get("_dir", "")})
+		if s != null and not s.is_read_only():
+			out.append(s)
+	return out
+
+
+## Turns a full-view tab into the editor for its entry.
+func start_edit(view: EntryView) -> EntryEditor:
+	var store := store_for(view.entry)
+	if store == null:
+		_status.text = "Can't find the package folder of %s" % view.entry.get("name", "?")
+		return null
+	var kind := str(view.entry.get("_kind", ""))
+	var current := store.find(kind, str(view.entry.get("id", "")))
+	var form := EntryEditor.new()
+	form.event_log = event_log
+	form.name_source = func(prefix: String) -> PackedStringArray: return db.suggest(prefix)
+	form.copy_targets = writable_stores().filter(func(t: EntryStore) -> bool: return t != store)
+	form.setup(store, kind, current if not current.is_empty() else view.entry)
+	var old_id := str(view.entry.get("id", ""))
+	form.saved.connect(func(saved_entry: Dictionary) -> void: _on_saved(view, store, kind, saved_entry, old_id))
+	form.cancelled.connect(view.end_edit)
+	form.deleted.connect(func() -> void: _on_deleted(view, store, kind))
+	form.open_requested.connect(edit_entry)
+	view.begin_edit(form)
+	return form
+
+
+## Opens an entry of a store in a tab and starts editing it (new entries, copies, features).
+func edit_entry(store: EntryStore, kind: String, id: String) -> EntryEditor:
+	var e := store.find(kind, id)
+	if e.is_empty():
+		return null
+	_stores[store.id] = store
+	var held := db.put_entry(e, kind, store)
+	_after_db_change(kind)
+	var view := open_tab(held)
+	return start_edit(view) if view else null
+
+
+func _on_saved(view: EntryView, store: EntryStore, kind: String, saved_entry: Dictionary, old_id: String) -> void:
+	var held := db.put_entry(store.find(kind, str(saved_entry.get("id", ""))), kind, store, old_id)
+	var old_key := view.key
+	view.end_edit()
+	view.setup(held)
+	if old_key != view.key:
+		_open_views.erase(old_key)
+		_open_views[view.key] = view
+		var i := _tab_index(old_key)
+		if i >= 0:
+			_tab_bar.set_tab_metadata(i, view.key)
+	var t := _tab_index(view.key)
+	if t >= 0:
+		_tab_bar.set_tab_title(t, str(held.get("name", "?")))
+	_after_db_change(kind)
+	_status.text = "Saved %s" % held.get("name", "?")
+
+
+func _on_deleted(view: EntryView, store: EntryStore, kind: String) -> void:
+	db.remove_entry(store.id, kind, str(view.entry.get("id", "")))
+	close_tab(_tab_index(view.key))
+	_after_db_change(kind)
+	_status.text = "Deleted %s" % view.entry.get("name", "?")
+
+
+## Bookmarks and the binder page after entries were added, changed or removed.
+func _after_db_change(kind: String) -> void:
+	_build_bookmarks()
+	if kind == _kind:
+		var keep := _page
+		_refresh_list()
+		_page = mini(keep, _pages() - 1)
+		_render_page()
+
+
+## "New...": kind, target package (or a new world package) and name.
+func _new_entry_dialog() -> void:
+	var dialog := ConfirmationDialog.new()
+	dialog.title = "New entry"
+	dialog.ok_button_text = "Create"
+	var box := VBoxContainer.new()
+	box.custom_minimum_size = Vector2(420, 0)
+	dialog.add_child(box)
+	var kinds := PackedStringArray(Schema.KINDS.keys())
+	for k in db.kinds():
+		if k not in kinds:
+			kinds.append(k)
+	kinds.sort()
+	var kind_pick := OptionButton.new()
+	for k in kinds:
+		kind_pick.add_item(k.capitalize())
+	kind_pick.selected = maxi(0, kinds.find(_kind))
+	box.add_child(kind_pick)
+	var targets := writable_stores()
+	var target_pick := OptionButton.new()
+	for t: EntryStore in targets:
+		target_pick.add_item("In %s" % t.name)
+	target_pick.add_item("In a new world package...")
+	box.add_child(target_pick)
+	var world_name := LineEdit.new()
+	world_name.placeholder_text = "Name of the new world"
+	world_name.visible = targets.is_empty()
+	box.add_child(world_name)
+	target_pick.item_selected.connect(func(i: int) -> void: world_name.visible = i == targets.size())
+	var entry_name := LineEdit.new()
+	entry_name.placeholder_text = "Name"
+	box.add_child(entry_name)
+	dialog.confirmed.connect(func() -> void:
+		var store: EntryStore = targets[target_pick.selected] if target_pick.selected < targets.size() else null
+		if store == null:
+			store = new_world(world_name.text if world_name.text.strip_edges() != "" else "New World")
+		create_entry(store, kinds[kind_pick.selected], entry_name.text if entry_name.text.strip_edges() != "" else "New " + kinds[kind_pick.selected].trim_suffix("s"))
+		dialog.queue_free())
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered()
+	entry_name.grab_focus()
+
+
+## A new world package in the packages folder (shows up in the book right away).
+func new_world(world_name: String) -> EntryStore:
+	var store := EntryStore.create_world(db.root, world_name)
+	var m := store.manifest.duplicate()
+	m["_dir"] = store.folder
+	db.packages.append(m)
+	_stores[store.id] = store
+	return store
+
+
+func create_entry(store: EntryStore, kind: String, entry_name: String) -> EntryEditor:
+	var e := store.create(kind, entry_name)
+	return edit_entry(store, kind, str(e.id))
 
 
 func _close_all_tabs() -> void:

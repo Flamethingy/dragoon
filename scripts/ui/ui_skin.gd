@@ -188,6 +188,15 @@ static func theme() -> Theme:
 	t.set_color("font_selected_color", "TabBar", WINE)
 	t.set_constant("h_separation", "TabBar", 6)
 
+	# Lists (e.g. [[ suggestions): cream paper, tan selection.
+	t.set_stylebox("panel", "ItemList", box("flat_cream", 18, Vector2(8, 6)))
+	t.set_stylebox("focus", "ItemList", StyleBoxEmpty.new())
+	t.set_stylebox("selected", "ItemList", _flat(TAN, 6, 2))
+	t.set_stylebox("selected_focus", "ItemList", _flat(TAN, 6, 2))
+	t.set_stylebox("hovered", "ItemList", _flat(Color(TAN, 0.5), 6, 2))
+	for c in ["font_color", "font_selected_color", "font_hovered_color"]:
+		t.set_color(c, "ItemList", INK)
+
 	t.set_stylebox("normal", "LineEdit", box("flat_tan", 18, Vector2(18, 8)))
 	t.set_stylebox("focus", "LineEdit", box("outline_wine", 18, Vector2(18, 8)))
 	t.set_color("font_color", "LineEdit", INK)

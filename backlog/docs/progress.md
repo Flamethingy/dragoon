@@ -102,3 +102,18 @@ See the "Open questions" section of the concept (secrets marking, event log form
   drag to reorder; every tab keeps its scroll position, and the tabs (order, shown tab, scroll) come back on the
   next start (`user://compendium_tabs.json`). Test: `tools/test_compendium_tabs.gd`; screenshots:
   `tools/screenshot_compendium.gd`.
+
+- 2026-11-01: TASK-21 (Mochi): entity editor. `EntryStore` (`scripts/data/entry_store.gd`) edits a package or
+  campaign folder: create (from `Schema.blank`), save (rename-safe), duplicate, delete, atomic writes, ints stay
+  ints, package `counts` kept. Source packages are read-only until unlocked (`"editable": true`); "edit a copy"
+  (`copy_entry`) copies an entry, its features and images into a world package with `origin`.
+  `commit()` in a campaign during a session logs creature sheet changes as `sheet.changed` events and keeps
+  the file (texts are still saved); prep edits go to JSON (`EventLog.in_session()`). `Schema` lists the form
+  fields per kind (data-layout.md), extra keys get a guessed type. `EntryEditor` replaces the full view in the
+  same tab after "Edit": lines, numbers, choices, lists, refs, image picker (copied into assets/), ability
+  scores, speeds, bonuses ("dex +4"), JSON for nested data, Markdown with live preview and `[[` suggestions
+  (`PackageDB.suggest`), `FeatureList` for monsters (add by name/id = link or new feature, reorder, remove,
+  Edit opens the feature in its own tab). Save (Ctrl+S), Cancel, Duplicate, Delete (confirm). "New..." in
+  Browse creates an entry in a world package or a new one. The book updates in place (`PackageDB.put_entry`).
+  Campaign entries open in the compendium with TASK-6 (unified index); the store side is ready and tested.
+  Tests: `tools/test_entry_store.gd`, `tools/test_entry_editor.gd`; screenshots: `tools/screenshot_editor.gd`.

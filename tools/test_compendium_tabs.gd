@@ -23,7 +23,7 @@ func _init() -> void:
 	_check(view.size.x > 1200, "full view uses the whole width (%d)" % view.size.x)
 	var texts := _texts(view)
 	_check(texts.contains("Scimitar") and texts.contains("Nimble Escape") and texts.contains("Armor Class"), "stat block and features in the view")
-	_check(view.edit_button.disabled and view.edit_button.tooltip_text.contains("TASK-21"), "Edit button waits for TASK-21")
+	_check(not view.edit_button.disabled, "Edit button is enabled (TASK-21)")
 	book.open_tab(goblin)
 	_check(book.tab_keys().size() == 1, "opening again focuses, no duplicate")
 

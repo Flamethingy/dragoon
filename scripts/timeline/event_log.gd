@@ -184,6 +184,19 @@ func get_event(id: int) -> Dictionary:
 	return {}
 
 
+## True while a session runs (the last session.started isn't followed by session.ended).
+func in_session() -> bool:
+	for i in range(events.size() - 1, -1, -1):
+		var e: Dictionary = events[i]
+		if e.has("undoes") or is_undone(e.id):
+			continue
+		if e.type == "session.started":
+			return true
+		if e.type == "session.ended":
+			return false
+	return false
+
+
 func is_undone(id: int) -> bool:
 	return _undone.has(id)
 

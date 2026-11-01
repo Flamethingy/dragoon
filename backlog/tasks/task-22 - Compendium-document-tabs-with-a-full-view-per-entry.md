@@ -1,9 +1,11 @@
 ---
 id: TASK-22
 title: 'Compendium: document tabs with a full view per entry'
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@Mochi'
 created_date: '2026-11-01 13:15'
+updated_date: '2026-11-01 13:30'
 labels:
   - mvp
   - ui
@@ -31,9 +33,15 @@ Works for every kind (monsters, spells, items, features, classes ...) and for wo
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A tab bar sits above the search/filter row; the first tab 'Browse' holds the current binder view and cannot be closed
-- [ ] #2 Double-click, the 'Open' button, middle-click on a card and Ctrl+click on a wikilink/feature open the entry in its own full-view tab; an already open entry is focused instead of duplicated
-- [ ] #3 The full view uses the whole width and shows all fields and the full Markdown text for every kind (monster layout: stats/features + description side by side)
-- [ ] #4 Tabs can be closed (button, middle-click, Ctrl+W), switched (Ctrl+Tab), reordered by drag, keep their scroll position, and are restored after a restart
-- [ ] #5 Each full-view tab has an Edit button (disabled until TASK-21, with a tooltip)
+- [x] #1 A tab bar sits above the search/filter row; the first tab 'Browse' holds the current binder view and cannot be closed
+- [x] #2 Double-click, the 'Open' button, middle-click on a card and Ctrl+click on a wikilink/feature open the entry in its own full-view tab; an already open entry is focused instead of duplicated
+- [x] #3 The full view uses the whole width and shows all fields and the full Markdown text for every kind (monster layout: stats/features + description side by side)
+- [x] #4 Tabs can be closed (button, middle-click, Ctrl+W), switched (Ctrl+Tab), reordered by drag, keep their scroll position, and are restored after a restart
+- [x] #5 Each full-view tab has an Edit button (disabled until TASK-21, with a tooltip)
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+"Browse" is a fixed button that can't be closed, left of a TabBar. Double-click or middle-click on a card, "Open" on the quick card, or Ctrl+click on a link opens a full-view tab (EntryView, scripts/compendium/entry_view.gd). Each tab has a title plate with a disabled Edit button (tooltip points to TASK-21). Monsters get two columns (stat block and features left; picture, chips and description right); other kinds show picture and chips left and the full text right. Links in full views open new tabs, and an entry that is already open is focused instead of duplicated. Tabs close with x, middle-click or Ctrl+W; Ctrl+Tab and Ctrl+Shift+Tab cycle; drag reorders. Scroll positions are kept, and tabs, the shown tab and scroll come back after a restart (user://compendium_tabs.json). Test: tools/test_compendium_tabs.gd. Screenshots: tools/screenshot_compendium.gd. Commit d3b2453.
+<!-- SECTION:FINAL_SUMMARY:END -->

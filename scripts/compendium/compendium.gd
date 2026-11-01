@@ -103,6 +103,7 @@ func _ready() -> void:
 	StatBlock.db = db
 	_build()
 	db.loaded.connect(_on_loaded)
+	get_window().files_dropped.connect(_on_files_dropped)
 	if campaign_dir == "" and not closable and tabs_file != "" and FileAccess.file_exists(tabs_file):
 		var state: Variant = JSON.parse_string(FileAccess.get_file_as_string(tabs_file))
 		if state is Dictionary and Campaign.is_campaign(str(state.get("campaign", ""))):
@@ -440,7 +441,35 @@ func _open_packages() -> void:
 	var panel := PackagesPanel.new()
 	panel.manager = PackageManager.new(db.root)
 	panel.changed.connect(_reload)
+	panel.import_requested.connect(func(input: String) -> void: open_import(input))
 	add_child(panel)
+
+
+## The import window (TASK-28), with a dropped file or a link filled in.
+func open_import(input := "") -> ImportPanel:
+	var panel := ImportPanel.new(db.root)
+	panel.name = "ImportPanel"
+	panel.changed.connect(_reload)
+	add_child(panel)
+	panel.set_input(input)
+	var current_package := str(_current.get("_package", ""))
+	if current_package != "":
+		panel.select_target(current_package)
+	return panel
+
+
+## A PDF or image dropped on the window goes to the import window.
+func _on_files_dropped(files: PackedStringArray) -> void:
+	if not is_visible_in_tree():
+		return
+	for f in files:
+		if ImportJobs.input_kind(f) in ["pdf", "image"]:
+			var open := find_child("ImportPanel", false, false) as ImportPanel
+			if open:
+				open.set_input(f)
+			else:
+				open_import(f)
+			return
 
 
 func _reload() -> void:

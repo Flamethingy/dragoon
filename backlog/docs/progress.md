@@ -222,3 +222,16 @@ See the "Open questions" section of the concept (secrets marking, event log form
   `unknown.svg` otherwise), tinted in the card colour; other kinds keep the initial. A **Credits** button on the
   compendium cover shows `assets/creature_types/CREDITS.md` (CC BY 3.0, game-icons.net).
   Test: `tools/test_monster_art.gd`.
+
+- 2026-11-01: TASK-28 (Mochi): import UI for the import agent. `scripts/import/`: **ImportJobs** starts
+  `tools/import_agent.py` as its own process (`--input --kind --target --job --packages`; the Anthropic API key
+  only as `ANTHROPIC_API_KEY` in its environment, kept in `user://import_settings.cfg`, never in data/ or git),
+  follows `data/imports/<job>/` (job.json status, progress.log; a dead process = failed; cancel), crops a draft's
+  picture from its source page into `art/<id>.jpg`, and merges accepted drafts into the target package (features
+  and picture along, import `origin` kept, read-only target unlocked, same name: replace / keep both / skip).
+  **ImportPanel**: file or link, target package or "New world package...", API key + Python settings, jobs with
+  their live log, Review. **DraftReview**: drafts list, the entry editor on the draft, the source page with a
+  drag-to-crop box, Accept / Discard / Accept all. Dropping a PDF or image on the compendium opens the import
+  window; the Packages window has "Import from link...". The contract for TASK-27 is in import-agent.md;
+  `tools/fake_import_agent.py` follows it. Test: `tools/test_import_ui.gd`; screenshots via
+  `tools/screenshot_import.gd` (`import_window.png`, `import_review.png`).

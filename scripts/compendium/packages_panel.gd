@@ -6,6 +6,7 @@ extends Control
 ## both or cancel. Emits `changed` after anything that needs the book to reload.
 
 signal changed
+signal import_requested(input: String)  ## "Import from link..." (TASK-28)
 
 var manager: PackageManager
 
@@ -44,6 +45,14 @@ func _ready() -> void:
 	import_button.text = "Import..."
 	import_button.pressed.connect(_pick_import)
 	head.add_child(import_button)
+	var link_button := Button.new()
+	link_button.name = "ImportLink"
+	link_button.text = "Import from link..."
+	link_button.tooltip_text = "Turn a PDF, image or web page into entries with the import agent"
+	link_button.pressed.connect(func() -> void:
+		import_requested.emit("")
+		_close())
+	head.add_child(link_button)
 	var close := Button.new()
 	close.text = "Close"
 	close.pressed.connect(_close)

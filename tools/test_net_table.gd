@@ -187,6 +187,16 @@ func _init() -> void:
 	_check(dm.event_log.effective(AMULET).back().type == "reveal.changed", "logged as reveal.changed")
 	_check(not str(bob.entries[AMULET].description).contains("Curse"), "the curse stays hidden")
 
+	# --- Account colors (TASK-19) ---------------------------------------------------------------
+	_check(bob.accounts.get("ann", {}).get("color") == "#2e6e60" and bob.accounts.has("dm"), "players get the account colors")
+	ann2.set_my_color(Color.html("#ff8800"))
+	await _until(func() -> bool: return bob.accounts.get("ann", {}).get("color") == "#ff8800")
+	_check(bob.accounts.ann.color == "#ff8800", "Ann's new color reaches Bob")
+	_check(FileAccess.get_file_as_string(CAMPAIGN.path_join("campaign.json")).contains("#ff8800"), "saved in campaign.json")
+	dm.set_my_color(Color.html("#334455"))
+	await _until(func() -> bool: return ann2.accounts.get("dm", {}).get("color") == "#334455")
+	_check(ann2.accounts.dm.color == "#334455", "the DM's color too")
+
 	# --- A restarted host continues: positions, players and map ------------------------------
 	var dm2 := _table("DM2", "dm")
 	await process_frame

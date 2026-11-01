@@ -123,12 +123,149 @@ static func to_segments(md: String) -> Array:
 	return merged
 
 
-## The document as one BBCode string, images as links.
+## The document as one BBCode string, images as links. <reveal> passages and %% comments
+## (Reveal) get a frame in the colors of the accounts who may see them (TASK-19).
 static func to_bbcode(md: String) -> String:
+	if "reveal" in md or "%%" in md:
+		return _with_reveals(Reveal.parse(md))
+	return _plain(md)
+
+
+static func _plain(md: String) -> String:
 	var bbcode := ""
 	for seg in to_segments(md):
 		bbcode += seg if seg is String else _image_link(seg["image"], seg["alt"])
 	return bbcode
+
+
+# --- Reveal frames (TASK-19) -----------------------------------------------------------
+
+## Who is looking ("dm" or a player id) and the accounts: id -> {name, color (Color)},
+## with "dm" for the DM. Set by the table / compendium.
+static var reveal_viewer := "dm"
+static var reveal_accounts := {}
+
+const _OPEN := "\uE000"
+const _MID := "\uE001"
+const _CLOSE := "\uE002"
+
+
+static func _with_reveals(nodes: Array) -> String:
+	var parts := PackedStringArray()
+	var pending := ""
+	var frames := []
+	for node: Variant in nodes:
+		if node is String:
+			pending += node
+		elif _is_block(node):
+			parts.append(_tokens_to_bbcode(_plain(pending), frames))
+			pending = ""
+			parts.append(_block_frame(node))
+		else:
+			pending += _inline_source(node, frames)
+	parts.append(_tokens_to_bbcode(_plain(pending), frames))
+	return "\n".join(Array(parts).filter(func(p: String) -> bool: return p != ""))
+
+
+## A passage is a block if it holds paragraphs or stands on its own lines.
+static func _is_block(node: Dictionary) -> bool:
+	var text := _flat(node.children)
+	return "\n\n" in text.strip_edges() or text.begins_with("\n") or text.ends_with("\n")
+
+
+static func _flat(nodes: Array) -> String:
+	var out := ""
+	for n: Variant in nodes:
+		out += n if n is String else _flat(n.children)
+	return out
+
+
+static func _inline_source(node: Dictionary, frames: Array) -> String:
+	var idx := frames.size()
+	frames.append(node)
+	var inner := ""
+	for n: Variant in node.children:
+		inner += n if n is String else _inline_source(n, frames)
+	return "%s%d%s%s%s" % [_OPEN, idx, _MID, inner, _CLOSE]
+
+
+static func _tokens_to_bbcode(bb: String, frames: Array) -> String:
+	var out := ""
+	var closers := []
+	var i := 0
+	while i < bb.length():
+		var c := bb[i]
+		if c == _OPEN:
+			var mid := bb.find(_MID, i)
+			var frame := frame_of(frames[int(bb.substr(i + 1, mid - i - 1))])
+			if frame.is_empty():
+				closers.append("")
+			else:
+				var blend := frame.colors[0] as Color
+				for col: Color in frame.colors.slice(1):
+					blend = blend.lerp(col, 0.5)
+				out += "[hint=\"%s\"][bgcolor=#%s]" % [frame.hint, Color(blend, 0.28).to_html()]
+				closers.append("[/bgcolor][/hint]")
+			i = mid + 1
+		elif c == _CLOSE:
+			out += closers.pop_back() if not closers.is_empty() else ""
+			i += 1
+		else:
+			out += c
+			i += 1
+	return out
+
+
+static func _block_frame(node: Dictionary) -> String:
+	var inner := _with_reveals(node.children)
+	var frame := frame_of(node)
+	if frame.is_empty():
+		return inner
+	var open := ""
+	var close := ""
+	var n: int = frame.colors.size()
+	for k in n:
+		var col: Color = frame.colors[k]
+		var bg := Color(col, 0.08) if k == n - 1 else Color(0, 0, 0, 0)
+		open += "[table=1][cell border=#%s bg=#%s padding=8,4,8,4]" % [col.to_html(), bg.to_html()]
+		close += "[/cell][/table]"
+	return "%s[hint=\"%s\"]%s[/hint]%s" % [open, frame.hint, inner, close]
+
+
+## {colors: [Color], hint} for a passage, or {} if it needs no frame (visible to all players).
+static func frame_of(node: Dictionary) -> Dictionary:
+	var who: PackedStringArray = node.get("for", PackedStringArray())
+	if who.is_empty() or Reveal.PARTY in who:
+		return {}
+	var colors := []
+	for id in who:
+		colors.append(account_color(id))
+	return {"colors": colors, "hint": hint_for(who)}
+
+
+static func account_color(id: String) -> Color:
+	var a: Dictionary = reveal_accounts.get(id, {})
+	if a.has("color"):
+		return a.color if a.color is Color else Color.from_string(str(a.color), MUTED)
+	return Color.from_hsv(float(id.hash() % 360) / 360.0, 0.55, 0.65)
+
+
+static func account_name(id: String) -> String:
+	var a: Dictionary = reveal_accounts.get(id, {})
+	return str(a.get("name", "the DM" if id == Reveal.DM else id.capitalize()))
+
+
+## "Only you and Lena can see this" (the viewer is "you"; the DM sees everything).
+static func hint_for(who: PackedStringArray) -> String:
+	var names := PackedStringArray()
+	var me := reveal_viewer
+	if me in who or me == Reveal.DM:
+		names.append("you")
+	for id in who:
+		if id != me and not (id == Reveal.DM and me == Reveal.DM):
+			names.append(account_name(id))
+	var text := names[0] if names.size() == 1 else ", ".join(names.slice(0, -1)) + " and " + names[-1]
+	return ("Only %s can see this" % text).replace("\"", "'").replace("[", "(").replace("]", ")")
 
 
 ## Plain text, safe inside BBCode.

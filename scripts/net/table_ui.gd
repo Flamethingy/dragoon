@@ -22,6 +22,7 @@ var _bar: PanelContainer
 var _status: Label
 var _maps: OptionButton
 var _who: Label
+var _color: ColorPickerButton
 
 var _notes_panel: PanelContainer
 var _notes_title: Label
@@ -45,6 +46,7 @@ func _ready() -> void:
 	table.pcs_changed.connect(_refresh)
 	table.notes_changed.connect(_show_notes)
 	table.table_changed.connect(_refresh)
+	table.accounts_changed.connect(_refresh)
 	_refresh()
 	_show_notes()
 
@@ -76,6 +78,10 @@ func _refresh() -> void:
 	elif table.my_pc != "":
 		me = "%s · %s" % [table.notes.names.get(table.my_player, table.player_name), _pc_name(table.my_pc)]
 	_who.text = me
+	var mine: Dictionary = table.accounts.get(table.my_account(), {})
+	_color.visible = not mine.is_empty()
+	if mine.has("color") and Color.html_is_valid(str(mine.color)):
+		_color.color = Color.html(str(mine.color))
 
 
 func _pc_name(id: String) -> String:
@@ -248,6 +254,12 @@ func _build_bar(root: Control) -> void:
 	_maps.tooltip_text = "Show another map to everyone"
 	_maps.item_selected.connect(func(i: int) -> void: table.show_map_to_all(str(_maps.get_item_metadata(i))))
 	row.add_child(_maps)
+	_color = ColorPickerButton.new()
+	_color.custom_minimum_size = Vector2(36, 28)
+	_color.edit_alpha = false
+	_color.tooltip_text = "My color: frames around passages only some people can see"
+	_color.popup_closed.connect(func() -> void: table.set_my_color(_color.color))
+	row.add_child(_color)
 	_status = Label.new()
 	_status.custom_minimum_size = Vector2(320, 0)
 	_status.theme_type_variation = UISkin.V_MUTED
@@ -296,6 +308,10 @@ func _build_notes(root: Control) -> void:
 			_submit_note()
 			_note_edit.accept_event())
 	col.add_child(_note_edit)
+	RevealPopup.attach(_note_edit, func() -> Dictionary: return table.accounts,
+		func(from: int, to: int, who: PackedStringArray) -> void:
+			var r := Reveal.apply(_note_edit.text, from, to, who, Reveal.next_id([_note_edit.text]))
+			_note_edit.text = r.text)
 	var add := Button.new()
 	add.text = "Add note"
 	add.size_flags_horizontal = Control.SIZE_SHRINK_END

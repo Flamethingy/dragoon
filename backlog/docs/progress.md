@@ -117,3 +117,15 @@ See the "Open questions" section of the concept (secrets marking, event log form
   Browse creates an entry in a world package or a new one. The book updates in place (`PackageDB.put_entry`).
   Campaign entries open in the compendium with TASK-6 (unified index); the store side is ready and tested.
   Tests: `tools/test_entry_store.gd`, `tools/test_entry_editor.gd`; screenshots: `tools/screenshot_editor.gd`.
+
+- 2026-11-01: TASK-19 (Mochi): "Visible for" and colored frames. `Markdown.to_bbcode` renders `<reveal>` passages
+  and `%% %%` with a frame in the account colors of who may see them (`Markdown.reveal_accounts`,
+  `reveal_viewer`): inline passages get a tinted background (several people = mixed color), block passages
+  nested bordered cells (one ring per person); party passages have no frame. Hover hint "Only you and Ann can
+  see this". `RevealPopup` (checkbox per player in their color, Party, DM only, Apply / Visible to all) opens
+  when text is selected with the mouse (or Ctrl+H) in the editor's Markdown fields and the table's note input;
+  `Reveal.apply` wraps the selection or edits the passage there (stable ids via `Reveal.next_id`). In a
+  campaign during a session, changing an existing passage writes `reveal.changed` instead of the text.
+  Account colors: `Campaign.accounts()` / `set_color()` (campaign.json); at the table a color button in the
+  top bar, `NetTable.set_my_color` -> DM saves and sends `receive_accounts` to everyone (also on join).
+  Tests: `tools/test_reveal_ui.gd`, `tools/test_net_table.gd`; screenshot `editor_reveal.png`.

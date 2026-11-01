@@ -21,6 +21,7 @@ signal notes_changed
 signal table_changed  ## the map or tokens were (re)built
 signal pcs_changed  ## lobby: the PC list or my PC changed
 signal entry_received(ref: String)  ## player: an entry I asked for arrived or changed
+signal accounts_changed  ## names or colors of the accounts changed
 
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
@@ -58,6 +59,7 @@ var my_pc := ""
 var my_player := ""  ## my player id, as the host knows me
 var assets_received := 0  ## images downloaded this run (tests check the cache with it)
 var entries := {}  ## ref -> the entry as the host let me see it (request_entry)
+var accounts := {}  ## id -> {name, color "#rrggbb"}; "dm" = the DM (both sides)
 var _state := {}  ## the last table view from the host
 var _requested := {}  ## sha -> true while downloading
 
@@ -140,6 +142,8 @@ func host(port := DEFAULT_PORT) -> Error:
 	multiplayer.multiplayer_peer = peer
 	player_name = "DM"
 	_open_notes()
+	accounts = campaign.accounts()
+	_apply_accounts()
 	_apply_state(view_for(""))
 	_set_status("Hosting %s on port %d (%d events in the log)" % [campaign.info.get("name", campaign.id()), port, event_log.events.size()])
 	return OK
@@ -306,6 +310,7 @@ func hello(name_given: String) -> void:
 		return
 	peers[sender] = player
 	pc_list.rpc_id(sender, campaign.pc_choices(owners), _pc_of(player), player)
+	receive_accounts.rpc_id(sender, accounts)
 	sync_notes.rpc_id(sender, notes.session, _notes_for(player), notes.names)
 	receive_table.rpc_id(sender, view_for(player))
 	var who := campaign.player_name(player)
@@ -676,6 +681,53 @@ func _open_notes() -> void:
 
 func _show_notes() -> void:
 	notes_changed.emit()
+
+
+# --- Account colors (TASK-19) -------------------------------------------------------------
+
+## My account color: the DM saves it, players ask the DM. Everyone gets the new colors.
+func set_my_color(color: Color) -> void:
+	var hex := "#" + color.to_html(false)
+	if is_dm():
+		_handle_color(Reveal.DM, hex)
+	elif is_online():
+		request_color.rpc_id(1, hex)
+
+
+func my_account() -> String:
+	return Reveal.DM if is_dm() else my_player
+
+
+## Player -> DM.
+@rpc("any_peer", "call_remote", "reliable")
+func request_color(hex: String) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if is_dm() and peers.has(sender):
+		_handle_color(peers[sender], hex.left(9))
+
+
+func _handle_color(account: String, hex: String) -> void:
+	if not campaign.set_color(account, hex):
+		return
+	accounts = campaign.accounts()
+	_apply_accounts()
+	for peer_id: int in peers:
+		receive_accounts.rpc_id(peer_id, accounts)
+
+
+## DM -> players.
+@rpc("authority", "call_remote", "reliable")
+func receive_accounts(list: Dictionary) -> void:
+	accounts = list
+	_apply_accounts()
+
+
+## Frames and hints in Markdown use these colors and "you" = this account.
+func _apply_accounts() -> void:
+	Markdown.reveal_accounts = accounts
+	Markdown.reveal_viewer = my_account() if my_account() != "" else "?"
+	accounts_changed.emit()
+	_show_notes()
 
 
 # --- Entries and reveals (TASK-18) -------------------------------------------------------

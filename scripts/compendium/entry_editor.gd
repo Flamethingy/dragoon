@@ -24,6 +24,8 @@ var event_log: EventLog  ## campaign log, for edits during a session (optional)
 var name_source: Callable = func(_p: String) -> PackedStringArray: return PackedStringArray()
 ## Writable stores to "edit a copy" in (read-only stores only).
 var copy_targets: Array = []
+## Accounts for the "Visible for" popup: id -> {name, color}, "dm" = the DM (TASK-19).
+var accounts := {}
 
 var status: Label
 var save_button: Button
@@ -353,8 +355,39 @@ func _markdown(key: String, value: String) -> Control:
 	edit.gui_input.connect(func(event: InputEvent) -> void: _suggest_keys(event, edit, suggest))
 	suggest.item_activated.connect(func(i: int) -> void: accept_suggestion(edit, suggest.get_item_text(i)); suggest.hide())
 	suggest.item_clicked.connect(func(i: int, _at: Vector2, _b: int) -> void: accept_suggestion(edit, suggest.get_item_text(i)); suggest.hide())
+	RevealPopup.attach(edit, func() -> Dictionary: return accounts,
+		func(from: int, to: int, who: PackedStringArray) -> void: apply_reveal(key, edit, from, to, who))
 	_getters[key] = func() -> Variant: return edit.text
 	return row
+
+
+## "Visible for" on a selection of a Markdown field. Normally the text gets (or changes) a
+## <reveal> tag; in a campaign during a session, changing an existing passage is a
+## reveal.changed event instead (the text keeps its starting `for`).
+func apply_reveal(key: String, edit: TextEdit, from: int, to: int, who: PackedStringArray) -> void:
+	var span := Reveal.span_at(edit.text, from, to)
+	if not span.is_empty() and _live_session():
+		var ref := "%s/%s" % [kind, original.get("id", "")]
+		var ops: Array = Reveal.grants_from(event_log.effective(ref), ref).get(key, {}).get(span.id, [])
+		var now := Reveal.current_viewers(span.for, ops)
+		var target := who if not who.is_empty() else PackedStringArray([Reveal.PARTY])
+		var add := Array(target).filter(func(v: String) -> bool: return v not in now)
+		var remove := Array(now).filter(func(v: String) -> bool: return v not in target)
+		if not add.is_empty() or not remove.is_empty():
+			event_log.change_reveal(ref, span.id, key, add, remove)
+			_say("Logged: %s now visible for %s" % [span.id, ", ".join(target)])
+		return
+	var texts := [edit.text]
+	for k: Variant in original:
+		texts.append(str(original[k]))
+	var r := Reveal.apply(edit.text, from, to, who, Reveal.next_id(texts))
+	if r.text != edit.text:
+		edit.text = r.text
+		edit.text_changed.emit()
+
+
+func _live_session() -> bool:
+	return store.layer == EntryStore.CAMPAIGN and event_log != null and event_log.in_session()
 
 
 ## The text after an open [[ before the caret ("" = not in a link).

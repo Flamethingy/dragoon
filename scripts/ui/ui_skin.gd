@@ -188,6 +188,13 @@ static func theme() -> Theme:
 	t.set_color("font_selected_color", "TabBar", WINE)
 	t.set_constant("h_separation", "TabBar", 6)
 
+	# Popups (e.g. "Visible for") on paper; check boxes without the pill.
+	t.set_stylebox("panel", "PopupPanel", box("page", 14, Vector2(12, 10)))
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus", "disabled"]:
+		t.set_stylebox(st, "CheckBox", StyleBoxEmpty.new())
+	t.set_color("font_hover_color", "CheckBox", INK)
+	t.set_color("font_pressed_color", "CheckBox", INK)
+
 	# Lists (e.g. [[ suggestions): cream paper, tan selection.
 	t.set_stylebox("panel", "ItemList", box("flat_cream", 18, Vector2(8, 6)))
 	t.set_stylebox("focus", "ItemList", StyleBoxEmpty.new())

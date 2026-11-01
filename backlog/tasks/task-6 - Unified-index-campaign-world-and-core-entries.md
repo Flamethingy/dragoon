@@ -4,7 +4,7 @@ title: 'Unified index: campaign, world and core entries'
 status: To Do
 assignee: []
 created_date: '2026-11-01 11:17'
-updated_date: '2026-11-01 13:02'
+updated_date: '2026-11-01 13:44'
 labels:
   - mvp
   - data
@@ -26,4 +26,5 @@ Originally "parse markdown entities with a startup cache". With JSON everywhere 
 - [ ] #1 Campaign, world and core entries are in one index with layer priority campaign > world > core
 - [ ] #2 Wikilinks [[Name]] resolve with that priority
 - [ ] #3 Loading time measured with all 34 packages + example campaign; cache added only if > 2 s
+- [ ] #4 Campaign entries appear in the compendium and open in the entry editor (TASK-21 hookup): EntryStore for the campaign folder, campaign names in [[ suggestions, the table's EventLog passed to Compendium.event_log so session edits become events
 <!-- AC:END -->

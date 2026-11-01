@@ -133,6 +133,37 @@ func player_name(player: String) -> String:
 	return "DM" if player == "dm" else player
 
 
+## Every account with its display name and color: players by id, the DM as "dm".
+## {id: {name, color: "#rrggbb"}} (TASK-19).
+func accounts() -> Dictionary:
+	var out := {}
+	for p: Dictionary in players():
+		out[str(p.get("id", ""))] = {"name": str(p.get("name", p.get("id", ""))), "color": str(p.get("color", ""))}
+	var dm: Dictionary = info.get("dm", {}) if info.get("dm") is Dictionary else {}
+	out["dm"] = {"name": str(dm.get("name", "DM")), "color": str(dm.get("color", ""))}
+	return out
+
+
+## Sets an account's color ("#rrggbb") and saves campaign.json. False if unknown/invalid.
+func set_color(account: String, color: String) -> bool:
+	if not Color.html_is_valid(color):
+		return false
+	var hex := "#" + Color.html(color).to_html(false)
+	if account == "dm":
+		var dm: Dictionary = info.get("dm", {}) if info.get("dm") is Dictionary else {}
+		dm["color"] = hex
+		info["dm"] = dm
+	else:
+		var found := false
+		for p: Dictionary in players():
+			if str(p.get("id", "")) == account:
+				p["color"] = hex
+				found = true
+		if not found:
+			return false
+	return EntryStore._write(folder.path_join("campaign.json"), info) == OK
+
+
 ## Who plays which PC, from pcs.json (`player`); PCs without one are left out.
 func owners() -> Dictionary:
 	var out := {}

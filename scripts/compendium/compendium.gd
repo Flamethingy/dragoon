@@ -921,6 +921,20 @@ func _restore_tabs(state: Variant) -> void:
 
 # --- Editing (TASK-21) -------------------------------------------------------------------
 
+## Accounts for "Visible for" and the frame colors: the players of all campaigns in
+## data/campaigns (by id) and the DM. The book is the DM's view.
+func accounts() -> Dictionary:
+	if Markdown.reveal_accounts.is_empty():
+		var out := {}
+		var root := Campaign.default_root()
+		for d in DirAccess.get_directories_at(root):
+			if Campaign.is_campaign(root.path_join(d)):
+				out.merge(Campaign.new(root.path_join(d), null).accounts())
+		Markdown.reveal_accounts = out
+		Markdown.reveal_viewer = Reveal.DM
+	return Markdown.reveal_accounts
+
+
 ## The store (package folder) an entry lives in.
 func store_for(e: Dictionary) -> EntryStore:
 	var pkg := str(e.get("_package", ""))
@@ -951,6 +965,7 @@ func start_edit(view: EntryView) -> EntryEditor:
 	form.event_log = event_log
 	form.name_source = func(prefix: String) -> PackedStringArray: return db.suggest(prefix)
 	form.copy_targets = writable_stores().filter(func(t: EntryStore) -> bool: return t != store)
+	form.accounts = accounts()
 	form.setup(store, kind, current if not current.is_empty() else view.entry)
 	var old_id := str(view.entry.get("id", ""))
 	form.saved.connect(func(saved_entry: Dictionary) -> void: _on_saved(view, store, kind, saved_entry, old_id))

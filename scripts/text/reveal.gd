@@ -199,3 +199,79 @@ static func _filter_value(v: Variant, viewer: String, grants: Dictionary) -> Var
 			a.append(_filter_value(x, viewer, grants))
 		return a
 	return v
+
+
+# --- Editing (TASK-19) -----------------------------------------------------------------
+
+## The <reveal> tags in a text with their character positions, outer ones first:
+## [{id, for, open: [start, end], close: [start, end]}] (unclosed tags are left out).
+static func spans(md: String) -> Array:
+	var out := []
+	var stack := []
+	var i := 0
+	while i < md.length():
+		var close := md.find("</reveal>", i)
+		var m := _open_re.search(md, i)
+		if m != null and (close < 0 or m.get_start() < close):
+			var attrs := _attrs(m.get_string(1))
+			var span := {"id": str(attrs.get("id", "")), "for": viewers(str(attrs.get("for", DM))),
+				"open": [m.get_start(), m.get_end()], "close": []}
+			out.append(span)
+			stack.append(span)
+			i = m.get_end()
+		elif close >= 0:
+			if not stack.is_empty():
+				stack.pop_back().close = [close, close + 9]
+			i = close + 9
+		else:
+			break
+	return out.filter(func(s: Dictionary) -> bool: return not s.close.is_empty())
+
+
+## A reveal id not used in any of the texts: r1, r2 ...
+static func next_id(texts: Array) -> String:
+	var used := 0
+	var re := RegEx.create_from_string(r"""<reveal\b[^>]*\bid\s*=\s*["']r(\d+)["']""")
+	for t: Variant in texts:
+		for m in re.search_all(str(t)):
+			used = maxi(used, int(m.get_string(1)))
+	return "r%d" % (used + 1)
+
+
+## The passage a selection [from, to) means: one whose content or whole tag it covers
+## (blanks around ignored), innermost first; {} if none.
+static func span_at(md: String, from: int, to: int) -> Dictionary:
+	var best := {}
+	for s: Dictionary in spans(md):
+		var inner := md.substr(s.open[1], s.close[0] - s.open[1])
+		var lead := inner.length() - inner.lstrip(" \n\t").length()
+		var trail := inner.length() - inner.rstrip(" \n\t").length()
+		var content := [s.open[1] + lead, s.close[0] - trail]
+		var whole := [s.open[0], s.close[1]]
+		if (from == content[0] and to == content[1]) or (from == whole[0] and to == whole[1]) \
+				or (from == to and from >= s.open[1] and from <= s.close[0]):
+			best = s  # later spans are nested deeper
+	return best
+
+
+## Sets who may see the selection [from, to): an existing passage there gets the new `for`
+## (an empty list removes the tag: visible to all), otherwise the selection is wrapped in a
+## new tag with id `new_id`. Returns {text, id, old_for (PackedStringArray, empty if new)}.
+static func apply(md: String, from: int, to: int, who: PackedStringArray, new_id: String) -> Dictionary:
+	var s := span_at(md, from, to)
+	if not s.is_empty():
+		var inner := md.substr(s.open[1], s.close[0] - s.open[1])
+		var text: String
+		if who.is_empty():
+			text = md.left(s.open[0]) + inner + md.substr(s.close[1])
+		else:
+			text = md.left(s.open[0]) + tag(s.id, who) + inner + md.substr(s.close[0])
+		return {"text": text, "id": s.id, "old_for": s.for}
+	if who.is_empty() or from >= to:
+		return {"text": md, "id": "", "old_for": PackedStringArray()}
+	var text := md.left(from) + tag(new_id, who) + md.substr(from, to - from) + "</reveal>" + md.substr(to)
+	return {"text": text, "id": new_id, "old_for": PackedStringArray()}
+
+
+static func tag(id: String, who: PackedStringArray) -> String:
+	return "<reveal id=\"%s\" for=\"%s\">" % [id, ",".join(who)]

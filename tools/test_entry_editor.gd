@@ -125,7 +125,7 @@ func _init() -> void:
 	var nform := book.create_entry(world, "npcs", "Mira")
 	_check(nform != null and world.has("npcs", "mira") and "npcs" in book.db.kinds(), "new NPC in the world")
 	_check(book._tabs.get_children().any(func(b: Button) -> bool: return b.text.begins_with("Npcs")), "Npcs bookmark added")
-	_check(nform.find_child("Field_attitude", true, false) is OptionButton, "NPC form has its own fields")
+	_check(nform.find_child("Field_attitude", true, false) is TokenField, "NPC form has its own fields (attitude as tokens)")
 
 	# Unlocking the source package.
 	book._tab_bar.current_tab = book._tab_index("mini-core/monsters/goblin")

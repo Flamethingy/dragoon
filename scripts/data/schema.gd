@@ -6,11 +6,46 @@ extends RefCounted
 ## image, stats (str..cha), speed (walk..climb, metres), bonuses ({name: int}),
 ## features (feature ids, monsters), cell ([x, y]), json (anything else, edited as JSON).
 ## Keys an entry has beyond its kind's list are added with a type guessed from the value.
+## Fields whose values repeat become tokens (TASK-29): `token` (one value), `tokens` (a list);
+## with `ref_kind` they point at entries of that kind (`ref_store` "ref" = "kind/id",
+## "name" = the entry's name, for fields the data keeps as names). `base` values are always offered.
 
 const SIZES := ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"]
 const ABILITIES := ["str", "dex", "con", "int", "wis", "cha"]
 const SPEEDS := ["walk", "swim", "fly", "burrow", "climb"]
 const HIDDEN := ["id", "origin", "used_by", "counts"]  ## kept, not shown
+const SIZE_TOKENS := ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"]
+const ABILITY_NAMES := ["Strength", "Dexterity", "Constitution", "Intelligence", "Wisdom", "Charisma"]
+const DAMAGE_TYPES := ["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing",
+	"poison", "psychic", "radiant", "slashing", "thunder"]
+const CONDITIONS := ["blinded", "charmed", "deafened", "exhaustion", "frightened", "grappled", "incapacitated",
+	"invisible", "paralyzed", "petrified", "poisoned", "prone", "restrained", "stunned", "unconscious"]
+const SCHOOLS := ["Abjuration", "Conjuration", "Divination", "Enchantment", "Evocation", "Illusion",
+	"Necromancy", "Transmutation"]
+const RARITIES := ["common", "uncommon", "rare", "very rare", "legendary", "artifact", "varies"]
+const ALIGNMENTS := ["lawful good", "neutral good", "chaotic good", "lawful neutral", "neutral",
+	"chaotic neutral", "lawful evil", "neutral evil", "chaotic evil", "unaligned", "any alignment"]
+const DICE := ["d4", "d6", "d8", "d10", "d12", "d20", "d100"]
+## Token fields: "key" or "kind.key" (wins) -> [multi, base list, ref kind, ref store].
+const TOKENS := {
+	"tags": [true, []],
+	"size": [false, SIZE_TOKENS], "type": [false, []], "subtype": [false, []], "group": [false, []],
+	"alignment": [false, ALIGNMENTS], "attitude": [false, ["friendly", "neutral", "hostile"]],
+	"condition_immunities": [true, CONDITIONS], "immunities": [true, DAMAGE_TYPES],
+	"resistances": [true, DAMAGE_TYPES], "vulnerabilities": [true, DAMAGE_TYPES],
+	"languages": [true, []], "environments": [true, []],
+	"items.rarity": [false, RARITIES], "items.type": [true, []],
+	"school": [false, SCHOOLS], "subschool": [false, []], "casting_time": [false, []], "duration": [false, []],
+	"spells.classes": [true, []],
+	"spellcast_ability": [false, ABILITY_NAMES], "saving_throws": [true, ABILITY_NAMES],
+	"prof_armor": [true, []], "prof_weapon": [true, []], "prof_skills": [true, []], "prof_tools": [true, []],
+	"features.uses": [false, []], "tables.dice": [false, DICE],
+	"subclasses.class": [false, [], "classes", "name"], "subraces.parent": [false, [], "races", "name"],
+	"pcs.race": [false, [], "races", "ref"], "npcs.race": [false, [], "races", "name"],
+	"factions": [true, [], "factions", "ref"], "location": [false, [], "places", "ref"],
+}
+## Field types that may become tokens (others, e.g. markdown or json, stay as they are).
+const TOKENABLE := ["line", "list", "choice", "ref", "refs"]
 
 const COMMON := [["name", "line"], ["image", "image"], ["tags", "list"], ["description", "markdown"]]
 const CREATURE := [["token", "image"], ["size", "choice", SIZES], ["ac", "int", "Armor class"],
@@ -58,13 +93,27 @@ static func fields(kind: String, entry := {}) -> Array[Dictionary]:
 		var f := {"key": d[0], "type": d[1], "label": _label(d)}
 		if d[1] == "choice":
 			f["options"] = d[2]
-		out.append(f)
+		out.append(token_field(kind, f))
 		seen[d[0]] = true
 	for k: Variant in entry:
 		var key := str(k)
 		if key.begins_with("_") or seen.has(key) or key in HIDDEN:
 			continue
-		out.append({"key": key, "type": guess(entry[k], key), "label": key.capitalize()})
+		out.append(token_field(kind, {"key": key, "type": guess(entry[k], key), "label": key.capitalize()}))
+	return out
+
+
+## The field as a token field if its values repeat (TOKENS), else unchanged.
+static func token_field(kind: String, f: Dictionary) -> Dictionary:
+	var def: Variant = TOKENS.get(kind + "." + str(f.key), TOKENS.get(f.key))
+	if def == null or str(f.type) not in TOKENABLE:
+		return f
+	var out := f.duplicate()
+	out["type"] = "tokens" if def[0] else "token"
+	out["base"] = def[1]
+	if def.size() > 2:
+		out["ref_kind"] = def[2]
+		out["ref_store"] = def[3]
 	return out
 
 
@@ -96,7 +145,7 @@ static func empty(type: String) -> Variant:
 			return 0
 		"bool":
 			return false
-		"list", "refs", "features", "cell":
+		"list", "refs", "features", "cell", "tokens":
 			return []
 		"stats":
 			var s := {}

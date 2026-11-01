@@ -235,3 +235,16 @@ See the "Open questions" section of the concept (secrets marking, event log form
   window; the Packages window has "Import from link...". The contract for TASK-27 is in import-agent.md;
   `tools/fake_import_agent.py` follows it. Test: `tools/test_import_ui.gd`; screenshots via
   `tools/screenshot_import.gd` (`import_window.png`, `import_review.png`).
+
+- 2026-11-01: TASK-29 (Mochi): value tokens in the editor. `Schema.TOKENS` turns fields whose values repeat
+  into `token` (one value: click to switch, click again to clear) or `tokens` (a list: click to toggle):
+  tags, size, type, subtype, alignment, attitude, damage/condition immunities, resistances, vulnerabilities,
+  languages, environments, item rarity/type, spell school/subschool/casting time/duration/classes, class
+  spellcasting ability/saving throws/proficiencies, feature uses, table dice; guessed fields of other kinds
+  (classes, backgrounds) too. Base lists (sizes, abilities, damage types, conditions, schools, rarities,
+  alignments, dice) are always offered. `PackageDB.field_values(kind, key)` gives the known values, most used
+  first, spellings merged ("Very Rare" = "very rare"), cached until entries change. **TokenField**: the
+  selected tokens plus the top 12, "N more...", a search for long lists, "+" / Enter adds the typed value but
+  picks an existing one in another spelling. Ref tokens (pc race, factions, location: stored as `kind/id`;
+  npc race, subclass class, subrace parent: stored as names, as the data has them) offer the entries of their
+  kind; Ctrl+click opens the entry in a tab. Also in the import draft review. Test: `tools/test_tokens.gd`.

@@ -10,6 +10,7 @@ signal changed
 const NEW_PACKAGE := "__new__"
 
 var jobs: ImportJobs
+var db: PackageDB  ## the book, for the editor's value tokens (optional)
 var manager: PackageManager
 var input_edit: LineEdit
 var target_pick: OptionButton
@@ -276,6 +277,7 @@ func open_review(job_id: String) -> DraftReview:
 	_main.visible = false
 	review = DraftReview.new()
 	review.ask = ask
+	review.db = db
 	review.merged.connect(func(_e: Dictionary) -> void: _dirty = true)
 	review.back_requested.connect(close_review)
 	_page.add_child(review)

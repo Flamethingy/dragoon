@@ -36,6 +36,7 @@ var load_msec := 0
 var _by_name := {}  ## lower-case name -> Array of entries (all kinds)
 var _by_id := {}  ## "package/kind/id" -> entry
 var _task := -1
+var _values := {}  ## "kind.key" -> field_values() (cleared when entries change)
 
 
 ## The packages folder: res://data/packages when running from the project, else
@@ -146,6 +147,7 @@ func _load_all() -> void:
 
 
 func _finish() -> void:
+	_values.clear()
 	if _task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_task)
 		_task = -1
@@ -274,7 +276,42 @@ func package_name(id: String) -> String:
 
 ## Adds or replaces an entry after an edit, without reloading everything. `old_id`: its id
 ## before a rename. Returns the entry as the book holds it (with bookkeeping keys).
+## The values a field has across the loaded entries of a kind (TASK-29), most used first:
+## [{value, count}]. Strings and the strings in lists count; different spellings of the same
+## value ("Very Rare", "very rare") count as one, shown in its most used spelling.
+func field_values(kind: String, key: String) -> Array:
+	var cache_key := kind + "." + key
+	if _values.has(cache_key):
+		return _values[cache_key]
+	var counts := {}  ## lower -> {spelling: count}
+	for e: Dictionary in entries.get(kind, []):
+		var v: Variant = e.get(key)
+		var items: Array = v if v is Array else [v]
+		for x: Variant in items:
+			if not x is String or str(x).strip_edges() == "":
+				continue
+			var s := str(x).strip_edges()
+			var spellings: Dictionary = counts.get(s.to_lower(), {})
+			spellings[s] = int(spellings.get(s, 0)) + 1
+			counts[s.to_lower()] = spellings
+	var out := []
+	for low: String in counts:
+		var spellings: Dictionary = counts[low]
+		var best := ""
+		var total := 0
+		for s: String in spellings:
+			total += int(spellings[s])
+			if best == "" or int(spellings[s]) > int(spellings[best]):
+				best = s
+		out.append({"value": best, "count": total})
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return a.count > b.count if a.count != b.count else str(a.value).to_lower() < str(b.value).to_lower())
+	_values[cache_key] = out
+	return out
+
+
 func put_entry(entry: Dictionary, kind: String, store: EntryStore, old_id := "") -> Dictionary:
+	_values.clear()
 	remove_entry(store.id, kind, old_id if old_id != "" else str(entry.get("id", "")))
 	var e := EntryStore.strip(entry).duplicate(true)
 	e["_kind"] = kind
@@ -292,6 +329,7 @@ func put_entry(entry: Dictionary, kind: String, store: EntryStore, old_id := "")
 
 
 func remove_entry(package_id: String, kind: String, id: String) -> void:
+	_values.clear()
 	var key := "%s/%s/%s" % [package_id, kind, id]
 	var old: Dictionary = _by_id.get(key, {})
 	if old.is_empty():

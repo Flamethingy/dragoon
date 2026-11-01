@@ -11,6 +11,7 @@ signal back_requested
 var jobs: ImportJobs
 var job_id := ""
 var target: EntryStore
+var db: PackageDB  ## for the editor's value tokens (optional)
 var ask: Callable  ## (title, text, buttons [[label, value]], on_choice) from the import panel
 
 var current := {}  ## {kind, entry} being reviewed
@@ -63,6 +64,7 @@ func setup(import_jobs: ImportJobs, id: String, target_store: EntryStore) -> voi
 	inner.add_child(scroll)
 	editor = EntryEditor.new()
 	editor.name = "DraftEditor"
+	editor.db = db
 	editor.cancelled.connect(func() -> void: select(list.get_selected_items()[0] if list.is_anything_selected() else 0))
 	editor.deleted.connect(func() -> void: refresh())
 	scroll.add_child(editor)

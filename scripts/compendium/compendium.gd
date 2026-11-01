@@ -449,6 +449,7 @@ func _open_packages() -> void:
 func open_import(input := "") -> ImportPanel:
 	var panel := ImportPanel.new(db.root)
 	panel.name = "ImportPanel"
+	panel.db = db
 	panel.changed.connect(_reload)
 	add_child(panel)
 	panel.set_input(input)
@@ -1315,6 +1316,8 @@ func start_edit(view: EntryView) -> EntryEditor:
 	form.name_source = func(prefix: String) -> PackedStringArray: return db.suggest(prefix)
 	form.copy_targets = writable_stores().filter(func(t: EntryStore) -> bool: return t != store)
 	form.accounts = accounts()
+	form.db = db
+	form.entry_open_requested.connect(func(e: Dictionary) -> void: open_tab(e))
 	form.setup(store, kind, current if not current.is_empty() else view.entry)
 	var old_id := str(view.entry.get("id", ""))
 	form.saved.connect(func(saved_entry: Dictionary) -> void: _on_saved(view, store, kind, saved_entry, old_id))

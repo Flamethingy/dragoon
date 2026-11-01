@@ -13,10 +13,12 @@ signal cancelled
 signal deleted
 ## Open another entry in the editor (a feature, a duplicate, a copy in another store).
 signal open_requested(store: EntryStore, kind: String, id: String)
+signal entry_open_requested(entry: Dictionary)  ## Ctrl+click on a ref token (TASK-29)
 
 const SUGGESTIONS := 12
 
 var store: EntryStore
+var db: PackageDB  ## the loaded book: token fields offer its values (optional)
 var kind := ""
 var original := {}  ## the entry as opened (file version)
 var event_log: EventLog  ## campaign log, for edits during a session (optional)
@@ -145,6 +147,12 @@ func _add_field(f: Dictionary) -> void:
 			control = c
 		"choice":
 			control = _choice(key, str(value), f.options)
+		"token", "tokens":
+			var tokens := TokenField.new()
+			tokens.setup(f, TokenField.build_options(f, kind, db), value)
+			tokens.open_requested.connect(func(o: Dictionary) -> void: entry_open_requested.emit(o.entry))
+			_getters[key] = tokens.value
+			control = tokens
 		"list", "refs":
 			control = _list(key, value)
 		"image":

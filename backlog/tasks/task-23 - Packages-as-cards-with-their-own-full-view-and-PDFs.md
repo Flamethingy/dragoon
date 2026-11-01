@@ -4,6 +4,7 @@ title: Packages as cards with their own full view and PDFs
 status: To Do
 assignee: []
 created_date: '2026-11-01 13:20'
+updated_date: '2026-11-01 13:28'
 labels:
   - ui
   - data
@@ -34,4 +35,11 @@ Tamago fills `documents` from the Obsidian vault via `tools/import_obsidian.py`;
 - [ ] #3 The package full view (own tab) shows version, kind, description, clickable counts per kind, origin and dependencies
 - [ ] #4 Documents section lists the manifest's PDFs with title and size; Open launches the default viewer, 'Show in folder' and 'Add PDF...' work
 - [ ] #5 Package export/import includes docs/ and shows the total size first
+- [ ] #6 The package full view has a card-style 'Contents' overview: the package's entries as cards (same card look as the binder), grouped by kind with a header and count per kind (Monsters 395, Spells 12 ...), collapsible groups, a search field inside the package, and cards open in their own tab like everywhere else
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-11-01 (Nico): when opening a source, show an overview in card style of all elements in that source. Added as AC6. Big packages (Tome of Beasts 3 has ~400 monsters + ~2400 features) need paging or lazy loading per group. Features are better collapsed by default, since they are mostly reached via their monsters.
+<!-- SECTION:NOTES:END -->

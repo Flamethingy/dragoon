@@ -137,6 +137,28 @@ func cell_at(pos: Vector2) -> Vector2i:
 	return Vector2i(((pos - offset) / cell).floor())
 
 
+static var _placeholders := {}
+
+
+## A round token for creatures without a picture, coloured by kind (pcs, npcs, monsters).
+static func placeholder(kind: String) -> Texture2D:
+	if not _placeholders.has(kind):
+		var color: Color = {"pcs": Color("#2e6e60"), "npcs": Color("#3a5f9a")}.get(kind, Color("#8f3b3b"))
+		var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+		for y in 64:
+			for x in 64:
+				var d := Vector2(x - 31.5, y - 31.5).length()
+				if d <= 31.0:
+					img.set_pixel(x, y, Color(0.95, 0.9, 0.8) if d > 26.0 else color)
+		_placeholders[kind] = ImageTexture.create_from_image(img)
+	return _placeholders[kind]
+
+
+## The cell under a point on the screen (drops from the UI, TASK-34).
+func cell_at_screen(pos: Vector2) -> Vector2i:
+	return cell_at(get_canvas_transform().affine_inverse() * pos)
+
+
 ## True if a token of `id` fits at `at`: inside the map and not overlapping another
 ## token (tiny creatures may share).
 func can_place(id: String, at: Vector2i) -> bool:

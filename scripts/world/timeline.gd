@@ -250,6 +250,42 @@ func add_entry(kind: String, e: Dictionary, from_dir := "", by := "dm") -> Dicti
 	return copy
 
 
+## The entity a compendium entry becomes on the map (TASK-34). Monsters get a numbered copy
+## each time ("Goblin 1", "Goblin 2": their own entity, HP and events). NPCs and PCs of this
+## timeline or its world are placed themselves; one from a book gets a single copy here.
+## `e` is a PackageDB entry (with _kind, _package, _dir, _layer). Returns the ref.
+func token_entity(e: Dictionary, by := "dm") -> String:
+	var kind := str(e.get("_kind", ""))
+	var eid := str(e.get("id", ""))
+	if kind not in CREATURES or eid == "":
+		return ""
+	var layer := str(e.get("_layer", ""))
+	var own := layer == "timeline" or (layer == "world" and str(e.get("_package", "")) == world_id())
+	if own and kind != "monsters" and not entry("%s/%s" % [kind, eid]).is_empty():
+		return "%s/%s" % [kind, eid]
+	var source := "%s/%s/%s" % [e.get("_package", ""), kind, eid]
+	var number := 0
+	for c: Dictionary in created(kind).values():
+		if str(c.get("copy_of", "")) == source:
+			if kind != "monsters":
+				return "%s/%s" % [kind, c.id]  # the one copy of this NPC/PC
+			number = maxi(number, int(c.get("copy_number", 0)))
+	var copy := EntryStore.strip(e).duplicate(true)
+	copy.erase("id")
+	copy["copy_of"] = source
+	if kind == "monsters":
+		copy["copy_number"] = number + 1
+		copy["name"] = "%s %d" % [e.get("name", eid), number + 1]
+	copy.erase("draft")
+	var made := add_entry(kind, copy, str(e.get("_dir", "")), by)
+	return "%s/%s" % [kind, made.id]
+
+
+## Forgets the world files read so far (a map was added or its grid changed).
+func reload_world() -> void:
+	_world.clear()
+
+
 ## Replaces a timeline entry (`entity.edited`), or overrides a world entry in this timeline.
 func edit_entry(kind: String, e: Dictionary, by := "dm") -> Dictionary:
 	var copy := EntryStore.strip(e).duplicate(true)

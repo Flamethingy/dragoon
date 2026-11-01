@@ -40,6 +40,7 @@ func _ready() -> void:
 	table_ui = TableUI.new()
 	table_ui.table = table
 	table_ui.lobby = false
+	table_ui.packages_root = packages_root
 	table_ui.compendium_opener = func() -> void: show_view("compendium")
 	table.add_child(table_ui)
 	_layer = CanvasLayer.new()

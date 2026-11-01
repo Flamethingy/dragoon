@@ -12,6 +12,15 @@ var table: NetTable
 var lobby := true
 ## Called by the Compendium button instead of opening the overlay (the app switches views).
 var compendium_opener := Callable()
+## Packages folder for the token palette ("" = data/packages).
+var packages_root := ""
+var palette: TokenPalette  ## DM: monsters, NPCs and PCs to drag onto the map (TASK-34)
+var map_drop: TokenPalette.MapDrop
+var map_setup: MapSetup
+var _tokens_button: Button
+var _new_map_button: Button
+var _grid_button: Button
+var _root: Control
 
 var _lobby: Control
 var _timeline: LineEdit
@@ -49,6 +58,11 @@ func _ready() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.theme = UISkin.theme()
 	add_child(root)
+	_root = root
+	map_drop = TokenPalette.MapDrop.new()
+	map_drop.name = "MapDrop"
+	map_drop.table = table
+	root.add_child(map_drop)
 	_build_bar(root)
 	_build_notes(root)
 	sheet = SheetPanel.new()
@@ -88,6 +102,13 @@ func _refresh() -> void:
 	_roll_hidden.visible = dm
 	_maps.visible = dm
 	_book_button.visible = dm
+	_tokens_button.visible = dm
+	_new_map_button.visible = dm
+	_grid_button.visible = dm
+	if palette != null:
+		palette.visible = dm and _tokens_button.button_pressed
+		if palette.visible and palette.db != null and palette.db.timeline_dir != table.timeline_dir:
+			palette.reload()
 	var picking := online and not dm and table.my_pc == "" and not table.pc_choices.is_empty()
 	_picker.visible = picking
 	if picking:
@@ -283,6 +304,10 @@ func _build_bar(root: Control) -> void:
 	_maps.tooltip_text = "Show another map to everyone"
 	_maps.item_selected.connect(func(i: int) -> void: table.show_map_to_all(str(_maps.get_item_metadata(i))))
 	row.add_child(_maps)
+	_new_map_button = _bar_button(row, "New map...", "Add a map picture to the world and line up its grid", pick_map_picture)
+	_grid_button = _bar_button(row, "Grid...", "Line up the grid of this map (drag over one square)", func() -> void: setup_map())
+	_tokens_button = _bar_button(row, "Tokens", "Monsters, NPCs and PCs to drag onto the map", func() -> void: show_palette(_tokens_button.button_pressed))
+	_tokens_button.toggle_mode = true
 	_book_button = Button.new()
 	_book_button.text = "Compendium"
 	_book_button.tooltip_text = "Core, world and this timeline's entries; edit them (session edits become events)"
@@ -302,6 +327,76 @@ func _build_bar(root: Control) -> void:
 	_status.custom_minimum_size = Vector2(320, 0)
 	_status.theme_type_variation = UISkin.V_MUTED
 	row.add_child(_status)
+
+
+func _bar_button(row: Control, text: String, tip: String, action: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.tooltip_text = tip
+	b.pressed.connect(action)
+	row.add_child(b)
+	return b
+
+
+## DM: shows or hides the token palette at the left.
+func show_palette(on := true) -> TokenPalette:
+	_tokens_button.set_pressed_no_signal(on)
+	if on and palette == null:
+		palette = TokenPalette.new()
+		palette.name = "TokenPalette"
+		palette.table = table
+		palette.packages_root = packages_root
+		palette.anchor_bottom = 1.0
+		palette.offset_left = 12
+		palette.offset_top = 96
+		palette.offset_right = 292
+		palette.offset_bottom = -12
+		_root.add_child(palette)
+	if palette != null:
+		palette.visible = on
+		if on:
+			palette.reload()
+	return palette
+
+
+## DM: pick a picture for a new map of the world.
+func pick_map_picture() -> void:
+	var d := FileDialog.new()
+	d.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	d.access = FileDialog.ACCESS_FILESYSTEM
+	d.use_native_dialog = true
+	d.filters = PackedStringArray(["*.png, *.jpg, *.jpeg, *.webp ; Map pictures"])
+	d.file_selected.connect(func(path: String) -> void:
+		setup_map(path)
+		d.queue_free())
+	d.canceled.connect(d.queue_free)
+	add_child(d)
+	d.popup_centered_ratio(0.6)
+
+
+## DM: the map setup, for a new map from `picture` or (no picture) the grid of the current
+## map. Saving writes the world's maps.json and shows the map to everyone.
+func setup_map(picture := "") -> MapSetup:
+	if map_setup != null:
+		map_setup.queue_free()
+	map_setup = MapSetup.new()
+	map_setup.name = "MapSetup"
+	_root.add_child(map_setup)
+	var world := table.timeline.world_dir
+	if picture != "":
+		map_setup.new_map(world, picture)
+	else:
+		var e := table.timeline.world_entries("maps").get(table.map_id.get_file(), {}) as Dictionary
+		if e.is_empty():
+			_on_status("This map isn't one of the world's maps")
+			return map_setup
+		map_setup.edit_map(world, e)
+	map_setup.saved.connect(func(ref: String) -> void:
+		table.maps_changed(ref)
+		_maps.clear()  # refilled with the new map
+		_refresh())
+	map_setup.popup_centered(Vector2i(980, 620))
+	return map_setup
 
 
 ## DM: the compendium over the table, with this timeline's entries and event log (TASK-6).

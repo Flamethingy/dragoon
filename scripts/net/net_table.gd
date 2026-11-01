@@ -254,6 +254,36 @@ func show_map_to_all(id: String) -> void:
 	_set_status("Showing %s" % timeline.name_of(id))
 
 
+## DM: a compendium entry dropped on the map at `cell` (TASK-34): its entity in this
+## timeline (Timeline.token_entity: monsters get numbered copies) is placed there with a
+## `token.placed` event, or moved there if it is on this map already. Returns the ref.
+func drop_token(e: Dictionary, cell: Vector2i) -> String:
+	if not is_dm() or map_id == "":
+		return ""
+	var ref := timeline.token_entity(e)
+	if ref == "":
+		_set_status("Only monsters, NPCs and PCs go on the map")
+		return ""
+	var placed := Replay.tokens_on(map_id, event_log.effective())
+	if grid.tokens.has(ref) or placed.has(ref):
+		event_log.move_token(ref, map_id, grid.token_cell(ref) if grid.tokens.has(ref) else placed[ref], cell)
+	else:
+		event_log.place_token(ref, map_id, cell)
+	_apply_state(view_for(""))
+	_send_tables()
+	_set_status("%s placed at %s" % [timeline.name_of(ref), cell])
+	return ref
+
+
+## DM: the world's maps changed (added, grid aligned): reads them again and shows `id`.
+func maps_changed(id := "") -> void:
+	if not is_dm():
+		return
+	timeline.reload_world()
+	grid.map_id = ""  # rebuild the map even if it is the same one
+	show_map_to_all(id if id != "" else map_id)
+
+
 func _send_tables() -> void:
 	for peer_id: int in peers:
 		receive_table.rpc_id(peer_id, view_for(peers[peer_id]))
@@ -499,7 +529,8 @@ static func _hashes(view: Dictionary) -> Array:
 		return out
 	out.append(view.map.get("image", ""))
 	for t: Dictionary in view.tokens:
-		out.append(t.get("image", ""))
+		if str(t.get("image", "")) != "":  # no picture: a placeholder token
+			out.append(t.get("image", ""))
 	return out
 
 
@@ -525,7 +556,7 @@ func _apply_state(view: Dictionary) -> void:
 			token.set_meta("info", t)
 			grid.set_token_cell(id, cell, token.get_meta("cell") != cell)
 		else:
-			var tex := assets.texture(t.get("image", ""))
+			var tex := assets.texture(t.get("image", "")) if str(t.get("image", "")) != "" else TokenGrid.placeholder(str(t.get("kind", "")))
 			if tex:
 				grid.add_token_view(t, tex, cell)
 	for id: String in grid.tokens.keys():

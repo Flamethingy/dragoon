@@ -15,7 +15,7 @@ func _init() -> void:
 	DirAccess.make_dir_recursive_absolute(base.path_join("packages"))
 	var core := EntryStore.open(PackageDB.default_root().path_join("5e-core-rules"))
 	var mini := EntryStore.create_package(base.path_join("packages"), "mini-core")
-	mini.copy_entry(core, "monsters", "goblin")  # a monster card to drag
+	mini.copy_entry(core, "creatures", "goblin")  # a monster card to drag
 	App.settings_file = DIR.path_join("app.cfg")
 	ServerStatus.servers_file = DIR.path_join("servers.json")
 	Dock.layout_file = DIR.path_join("layout.json")
@@ -57,7 +57,7 @@ func _init() -> void:
 		await comp.db.loaded
 	for i in 5:
 		await process_frame
-	var card := comp.find_children("*", "EntryCard", true, false).filter(func(c: EntryCard) -> bool: return str(c.entry.get("_kind", "")) == "monsters").front() as EntryCard
+	var card := comp.find_children("*", "EntryCard", true, false).filter(func(c: EntryCard) -> bool: return str(c.entry.get("_kind", "")) == "creatures").front() as EntryCard
 	_check(card != null, "a monster card in the compendium window")
 	var outside := []
 	EntryDrag.hub.dropped_outside.connect(func(e: Dictionary, _at: Vector2i, from: Viewport) -> void: outside.append([e, from]))

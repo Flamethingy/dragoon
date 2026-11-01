@@ -16,7 +16,9 @@ const FORMAT := "dragoon-timeline"
 const START_ID := "prologue"
 const START_NAME := "Prologue"
 ## Kinds that can stand on a map.
-const CREATURES := ["pcs", "npcs", "monsters"]
+## Characters are referenced (one entity, one health pool, every token of it is that one);
+## creatures are copied for each token (5 goblins, 5 HP bars). TASK-43.
+const CREATURES := ["characters", "creatures"]
 ## Token fields every player sees; owners also get OWNER_FIELDS of their own PC.
 const TOKEN_FIELDS := ["name", "size", "token_style"]
 const OWNER_FIELDS := ["hp", "ac"]
@@ -36,6 +38,8 @@ var _created_count := -1  ## events_log.events.size() when _created was built
 func _init(timeline_folder: String, asset_cache: AssetCache = null) -> void:
 	folder = timeline_folder.simplify_path()
 	world_dir = folder.get_base_dir().get_base_dir()
+	KindMigration.ensure(world_dir)  # characters + creatures (TASK-43)
+	KindMigration.ensure(folder)
 	assets = asset_cache
 	info = _read(folder.path_join("timeline.json"), {})
 	events_log = EventLog.open(events_path(), chain_events(world_dir, str(info.get("parent", "")), int(info.get("fork_at", 0))))
@@ -215,8 +219,21 @@ func maps() -> PackedStringArray:
 	return refs("maps")
 
 
+## The characters players can play: those with owners or a class (NPCs have neither).
 func pcs() -> PackedStringArray:
-	return refs("pcs")
+	var out := PackedStringArray()
+	for ref in refs("characters"):
+		var e := entry(ref)
+		if not owners_of(e).is_empty() or (e.get("classes") is Array and not (e.classes as Array).is_empty()):
+			out.append(ref)
+	return out
+
+
+## A character's owners (player ids; old entries: `player`).
+static func owners_of(e: Dictionary) -> Array:
+	if e.get("owners") is Array:
+		return (e.owners as Array).map(func(o: Variant) -> String: return str(o)).filter(func(o: String) -> bool: return o != "")
+	return [str(e.player)] if str(e.get("player", "")) != "" else []
 
 
 func name_of(ref: String) -> String:
@@ -261,19 +278,19 @@ func token_entity(e: Dictionary, by := "dm") -> String:
 		return ""
 	var layer := str(e.get("_layer", ""))
 	var own := layer == "timeline" or (layer == "world" and str(e.get("_package", "")) == world_id())
-	if own and kind != "monsters" and not entry("%s/%s" % [kind, eid]).is_empty():
+	if own and kind != "creatures" and not entry("%s/%s" % [kind, eid]).is_empty():
 		return "%s/%s" % [kind, eid]
 	var source := "%s/%s/%s" % [e.get("_package", ""), kind, eid]
 	var number := 0
 	for c: Dictionary in created(kind).values():
 		if str(c.get("copy_of", "")) == source:
-			if kind != "monsters":
+			if kind != "creatures":
 				return "%s/%s" % [kind, c.id]  # the one copy of this NPC/PC
 			number = maxi(number, int(c.get("copy_number", 0)))
 	var copy := EntryStore.strip(e).duplicate(true)
 	copy.erase("id")
 	copy["copy_of"] = source
-	if kind == "monsters":
+	if kind == "creatures":
 		copy["copy_number"] = number + 1
 		copy["name"] = "%s %d" % [e.get("name", eid), number + 1]
 	copy.erase("draft")
@@ -316,7 +333,7 @@ func promote(ref: String, by := "dm") -> Dictionary:
 	for key in ["token", "party_token"]:
 		if e.get(key, null) == "":
 			e.erase(key)
-	if kind == "monsters":
+	if kind == "creatures":
 		for list_key in PackageDB.FEATURE_LISTS:
 			for fid: Variant in (e.get(list_key, []) if e.get(list_key) is Array else []):
 				if is_created("features/%s" % fid):
@@ -394,13 +411,14 @@ func set_color(account: String, color: String) -> bool:
 	return save_info() == OK
 
 
-## Who plays which PC (the PC's `player`); PCs without one are left out.
+## Who controls which character: ref -> [player ids] (`owners`); characters without
+## owners are left out. The DM controls everything anyway.
 func owners() -> Dictionary:
 	var out := {}
-	for ref in pcs():
-		var player := str(entry(ref).get("player", ""))
-		if player != "":
-			out[ref] = player
+	for ref in refs("characters"):
+		var o := owners_of(entry(ref))
+		if not o.is_empty():
+			out[ref] = o
 	return out
 
 
@@ -489,7 +507,8 @@ func pc_choices(owner_map: Dictionary) -> Array[Dictionary]:
 		if EntryStore.is_draft(e):
 			continue  # not finished: not offered to players
 		var token := str(e.get("token", ""))
-		var owner: String = owner_map.get(ref, "")
+		var owned: Array = owner_map.get(ref, [])
+		var owner: String = str(owned[0]) if not owned.is_empty() else ""
 		out.append({"id": ref, "name": str(e.get("name", ref)), "class": class_text(e),
 			"image": image_hash(token if token != "" else str(e.get("image", ""))),
 			"player": owner, "taken_by": player_name(owner) if owner != "" else ""})

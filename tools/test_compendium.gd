@@ -21,7 +21,7 @@ func _init() -> void:
 	var links := 0
 	var resolved := 0
 	var missing := 0
-	for m: Dictionary in db.entries.get("monsters", []):
+	for m: Dictionary in db.entries.get("creatures", []):
 		for k in PackageDB.FEATURE_LISTS:
 			for f: Dictionary in db.features_of(m, k):
 				if f.get("_missing", false):
@@ -46,23 +46,23 @@ func _init() -> void:
 	print("formatted %d entries in %d ms; %d wikilinks, %d resolve to an entry" % [formatted, Time.get_ticks_msec() - started, links, resolved])
 
 	var aboleth := db.resolve("Aboleth")
-	_check(aboleth.get("_kind") == "monsters", "Aboleth is a monster")
+	_check(aboleth.get("_kind") == "creatures", "Aboleth is a monster")
 	var bb := StatBlock.to_bbcode(aboleth)
 	for part in ["Armor Class", "Hit Points", "STR", "21 (+5)", "Challenge", "10 (5,900 XP)", "Tentacle", "Legendary Actions"]:
 		_check(bb.contains(part), "Aboleth block has '%s'" % part)
-	var goblin := db.get_entry("5e-core-rules", "monsters", "goblin")
+	var goblin := db.get_entry("5e-core-rules", "creatures", "goblin")
 	bb = StatBlock.to_bbcode(goblin)
 	print("goblin: ", goblin.get("actions"))
 	for part in ["Scimitar", "Shortbow", "Nimble Escape"]:
 		_check(bb.contains(part), "Goblin has '%s'" % part)
-	var lord: Dictionary = db.entries["monsters"].filter(func(m: Dictionary) -> bool: return m._package == "tome-of-beasts-3" and m._key == "bone lord").front()
+	var lord: Dictionary = db.entries["creatures"].filter(func(m: Dictionary) -> bool: return m._package == "tome-of-beasts-3" and m._key == "bone lord").front()
 	bb = StatBlock.to_bbcode(lord)
 	print("bone lord legendary_intro: ", str(lord.get("legendary_intro", "")).left(60))
 	_check(bb.contains("Legendary Actions") and not bb.contains("Missing feature"), "Bone Lord legendary actions resolve")
-	var with_intro: Dictionary = db.entries["monsters"].filter(func(m: Dictionary) -> bool: return str(m.get("legendary_intro", "")) != "").front()
+	var with_intro: Dictionary = db.entries["creatures"].filter(func(m: Dictionary) -> bool: return str(m.get("legendary_intro", "")) != "").front()
 	_check(StatBlock.to_bbcode(with_intro).contains(Markdown.to_bbcode(with_intro.legendary_intro).left(30)), "legendary_intro shown (%s)" % with_intro.name)
 	var bow := db.feature("5e-core-rules", "shortbow")
-	_check(StatBlock.to_bbcode(bow).contains("[url=entry:5e-core-rules/monsters/goblin]"), "Shortbow lists goblin in used_by")
+	_check(StatBlock.to_bbcode(bow).contains("[url=entry:5e-core-rules/creatures/goblin]"), "Shortbow lists goblin in used_by")
 	var arrow := db.resolve("Acid Arrow")
 	bb = StatBlock.to_bbcode(arrow)
 	for part in ["2nd-level evocation", "Casting Time", "Range", "27 m", "V, S, M (", "Duration", "Instantaneous"]:

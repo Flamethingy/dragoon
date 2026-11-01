@@ -92,7 +92,7 @@ func _init() -> void:
 	_check((c2[1] as Array).size() == 2 and int(c2[1][1].qty) == 2, "the same item again: more of it")
 	_check(EntryDrag.sheet_change(sheet, {"_kind": "spells", "id": "light"}).is_empty(), "a known spell is not added twice")
 	_check(EntryDrag.sheet_change(sheet, {"_kind": "spells", "id": "shield"})[1] == ["spells/light", "spells/shield"], "a new spell joins the spells")
-	_check(EntryDrag.sheet_change(sheet, {"_kind": "monsters", "id": "goblin"}).is_empty(), "a monster is not for the sheet")
+	_check(EntryDrag.sheet_change(sheet, {"_kind": "creatures", "id": "goblin"}).is_empty(), "a monster is not for the sheet")
 	_check(EntryDrag.link(potion) == "[[items/potion|Potion]]", "a note gets a link")
 	_check(EntryDrag.is_entry(EntryDrag.data(potion)) and EntryDrag.ref_of(EntryDrag.data(potion)) == "items/potion" and not EntryDrag.is_entry({"type": "x"}), "drag data")
 

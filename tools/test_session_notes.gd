@@ -17,7 +17,7 @@ func _init() -> void:
 	_check(notes.path.ends_with("notes.json"), "one notes.json per timeline (%s)" % notes.path)
 
 	var a := notes.add("The party reached the **old mill**.", "dm", 400, 14 * 60 + 30, "2026-11-01T20:15")
-	notes.add("Ask the miller about [[Goblin Chief]].\nTwo lines.", "ann", 400, 15 * 60, "", "npcs/mira")
+	notes.add("Ask the miller about [[Goblin Chief]].\nTwo lines.", "ann", 400, 15 * 60, "", "characters/mira")
 	var h := notes.heading(a)
 	_check(h.begins_with("2026-11-01 20:15 · Session 3 · "), "heading starts with real date and session (%s)" % h)
 	_check(h.contains(cal.format_moment(400, 14 * 60 + 30)), "heading has the in-world moment")
@@ -36,7 +36,7 @@ func _init() -> void:
 	if again.entries.size() == 2:
 		var b: Dictionary = again.entries[1]
 		_check(b.text == "Ask the miller about [[Goblin Chief]].\nTwo lines.", "multi-line text read back")
-		_check(b.by == "ann" and b.day == 400 and b.time == 900 and b.session == 3 and b.about == "npcs/mira", "entry data read back")
+		_check(b.by == "ann" and b.day == 400 and b.time == 900 and b.session == 3 and b.about == "characters/mira", "entry data read back")
 		_check(b.id == "n2" and str(b.real).length() == 16 and "T" in str(b.real), "real date defaults to now (%s)" % b.real)
 	again.add("Third.", "dm", 401)
 	_check(SessionNotes.open(CAMPAIGN, 3, cal).entries.size() == 3, "append after reopen")

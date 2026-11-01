@@ -1,0 +1,20 @@
+[
+	{
+		"alignment": "Neutral",
+		"attitude": "friendly",
+		"description": "The blacksmith of Thornwick: broad shoulders, soot to the elbows, a laugh you hear across the square.\n\n<reveal id=\"r1\" for=\"dm\">She buys stolen caravan iron from the Red Fang Clan and doesn't ask questions.</reveal>",
+		"factions": [],
+		"id": "mira",
+		"image": "",
+		"location": "places/thornwick",
+		"name": "Mira Hollowell",
+		"race": "Human",
+		"role": "Blacksmith",
+		"size": "Medium",
+		"stat_block": "core:5e-core-rules/creatures/commoner",
+		"tags": [
+			"smith"
+		],
+		"token": ""
+	}
+]

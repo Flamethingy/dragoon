@@ -8,7 +8,7 @@
  "calendar": "default",
  "description": "Example world for Dragoon (TASK-1).",
  "counts": {
-  "npcs": 1,
+  "characters": 1,
   "places": 3,
   "factions": 1,
   "lore": 1,

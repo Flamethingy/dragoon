@@ -37,11 +37,11 @@ func _init() -> void:
 	_check(ImageCache.decode(PackedByteArray()) == null, "an empty file too")
 
 	# --- Cards ----------------------------------------------------------------------------------------
-	var with_image := _art({"_kind": "monsters", "name": "Ogre", "type": "Giant", "image": "assets/ogre.png", "_dir": dir})
-	var misnamed := _art({"_kind": "monsters", "name": "Pot", "type": "Construct", "image": "assets/really-a-jpeg.png", "_dir": dir})
-	var missing := _art({"_kind": "monsters", "name": "Ghost", "type": "Undead", "image": "assets/nope.png", "_dir": dir})
-	var broken := _art({"_kind": "monsters", "name": "Blob", "type": "Ooze", "image": "assets/broken.png", "_dir": dir})
-	var none := _art({"_kind": "monsters", "name": "Thing", "type": "Abomination", "image": "", "_dir": dir})
+	var with_image := _art({"_kind": "creatures", "name": "Ogre", "type": "Giant", "image": "assets/ogre.png", "_dir": dir})
+	var misnamed := _art({"_kind": "creatures", "name": "Pot", "type": "Construct", "image": "assets/really-a-jpeg.png", "_dir": dir})
+	var missing := _art({"_kind": "creatures", "name": "Ghost", "type": "Undead", "image": "assets/nope.png", "_dir": dir})
+	var broken := _art({"_kind": "creatures", "name": "Blob", "type": "Ooze", "image": "assets/broken.png", "_dir": dir})
+	var none := _art({"_kind": "creatures", "name": "Thing", "type": "Abomination", "image": "", "_dir": dir})
 	var spell := _art({"_kind": "spells", "name": "Fireball", "image": ""})
 	for i in 60:
 		await process_frame

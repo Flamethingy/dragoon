@@ -11,7 +11,7 @@ const ART_COLORS := [Color8(102, 42, 58), Color8(190, 62, 59), Color8(90, 136, 1
 ## [text, hex colour] or [] for no badge.
 static func badge(e: Dictionary) -> Array:
 	match str(e.get("_kind", "")):
-		"monsters":
+		"creatures":
 			var cr: Variant = e.get("cr")
 			if cr == null:
 				return []
@@ -39,7 +39,7 @@ static func badge(e: Dictionary) -> Array:
 
 static func badge_label(e: Dictionary) -> String:
 	match str(e.get("_kind", "")):
-		"monsters": return "Challenge rating"
+		"creatures": return "Challenge rating"
 		"spells": return "Spell level (C = cantrip)"
 		"items": return "Rarity: " + str(e.get("rarity", ""))
 		"classes": return "Hit die"
@@ -51,7 +51,7 @@ static func badge_label(e: Dictionary) -> String:
 
 static func subtitle(e: Dictionary) -> String:
 	match str(e.get("_kind", "")):
-		"monsters":
+		"creatures":
 			return " ".join(PackedStringArray([str(e.get("size", "")), str(e.get("type", ""))])).strip_edges()
 		"spells":
 			var lv := int(e.get("level", 0)) if e.get("level") != null else 0
@@ -80,7 +80,7 @@ static func subtitle(e: Dictionary) -> String:
 static func chips(e: Dictionary) -> Array:
 	var out := []
 	match str(e.get("_kind", "")):
-		"monsters":
+		"creatures":
 			var ac := StatBlock._num(e.get("ac"))
 			out.append(["icon_shield", "AC", ac])
 			out.append(["icon_potion", "HP", StatBlock._num(e.get("hp"))])

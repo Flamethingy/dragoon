@@ -39,7 +39,7 @@ func _init() -> void:
 	await process_frame
 	book.open_drafts()
 	await _shot(out.path_join("drafts_page.png"))
-	var view := book.open_tab(book.db.get_entry("westmarch", "monsters", "bog-hag"))
+	var view := book.open_tab(book.db.get_entry("westmarch", "creatures", "bog-hag"))
 	var form := book.start_edit(view)
 	form.crop.selection = Rect2i(30, 40, 120, 150)
 	form.crop.queue_redraw()
@@ -47,7 +47,7 @@ func _init() -> void:
 	await _shot(out.path_join("draft_source_page.png"))
 	book.show_browse()
 	book.set_show_drafts(true)
-	book._select_kind("monsters")
+	book._select_kind("creatures")
 	await _shot(out.path_join("browse_show_drafts.png"))
 	quit()
 

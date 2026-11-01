@@ -28,22 +28,22 @@ func _init() -> void:
 	await _until(func() -> bool: return me.pc_choices.size() == 2 and me.pc_choices.all(func(c: Dictionary) -> bool: return me.assets.has(c.image)))
 	await _shot("table_picker.png")
 
-	me.claim_pc("pcs/borin")
-	await _until(func() -> bool: return me.grid.tokens.has("pcs/borin"))
+	me.claim_pc("characters/borin")
+	await _until(func() -> bool: return me.grid.tokens.has("characters/borin"))
 	me.add_note("We reached the forest road. The wolf looks **hungry**.")
 	dm.add_note("A goblin horn sounds from the trees.")
 	await _until(func() -> bool: return me.notes.entries.size() == 3)
 	await _shot("table_player.png")
 
-	me.change_hp("pcs/borin", -7)
+	me.change_hp("characters/borin", -7)
 	me.roll("Insight")
 	me.roll("2d6+3")
-	dm.roll("stealth", "monsters/goblin-chief")
-	me.open_sheet("pcs/borin")
-	await _until(func() -> bool: return int(me.sheets.get("pcs/borin", {}).get("hp", -1)) >= 0 and me._ui.sheet.visible and me.rolls.size() == 3)
+	dm.roll("stealth", "creatures/goblin-chief")
+	me.open_sheet("characters/borin")
+	await _until(func() -> bool: return int(me.sheets.get("characters/borin", {}).get("hp", -1)) >= 0 and me._ui.sheet.visible and me.rolls.size() == 3)
 	await _shot("table_sheet.png")
-	me.open_sheet("monsters/goblin-chief")
-	await _until(func() -> bool: return me._ui.sheet.ref == "monsters/goblin-chief")
+	me.open_sheet("creatures/goblin-chief")
+	await _until(func() -> bool: return me._ui.sheet.ref == "creatures/goblin-chief")
 	await _shot("table_sheet_info.png")
 	me._ui.sheet.close_sheet()
 
@@ -89,6 +89,6 @@ func _until(done: Callable, frames := 600) -> void:
 ## Borin without a player, so the picker has something to offer.
 func _free_borin() -> void:
 	var tl := Timeline.new(ProjectSettings.globalize_path(DIR + "/worlds/westmarch/timelines/red-fang"))
-	var e := tl.entry("pcs/borin").duplicate(true)
+	var e := tl.entry("characters/borin").duplicate(true)
 	e["player"] = ""
-	tl.edit_entry("pcs", e)
+	tl.edit_entry("characters", e)

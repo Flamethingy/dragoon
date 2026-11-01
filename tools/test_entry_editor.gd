@@ -28,7 +28,7 @@ func _init() -> void:
 	_check(book.db.count() > 1, "mini source loaded (%d)" % book.db.count())
 
 	# --- Read-only source: Edit shows the banner, Save is off -------------------------------
-	var goblin := book.db.get_entry("mini-core", "monsters", "goblin")
+	var goblin := book.db.get_entry("mini-core", "creatures", "goblin")
 	var view := book.open_tab(goblin)
 	view.edit_requested.emit(view.entry)
 	var form := view.editor
@@ -53,7 +53,7 @@ func _init() -> void:
 	form = book.start_edit(view)
 	_check(world in form.copy_targets, "and offered as copy target")
 	form.edit_copy_in(world)
-	var wkey := "sunken-coast/monsters/goblin"
+	var wkey := "sunken-coast/creatures/goblin"
 	_check(book.current_tab_key() == wkey, "the copy opens in its own tab (%s)" % book.current_tab_key())
 	var wview := book.open_view(wkey)
 	form = wview.editor if wview else null
@@ -102,13 +102,13 @@ func _init() -> void:
 
 	var saved := form.save()
 	_check(saved.get("name") == "Goblin Boss", "saved")
-	var on_disk := EntryStore.open(world.folder).find("monsters", "goblin")
+	var on_disk := EntryStore.open(world.folder).find("creatures", "goblin")
 	_check(on_disk.hp == 21 and on_disk.stats.str == 12 and int(on_disk.saves.dex) == 4 and int(on_disk.saves.wis) == 1 and on_disk.saves.size() == 2, "fields on disk (%s %s %s)" % [on_disk.hp, on_disk.stats, on_disk.saves])
 	_check(on_disk.senses == ["darkvision 18 m", "keen smell"] and on_disk.description.ends_with("[[Goblin]]"), "lists and Markdown on disk")
 	_check(new_id in on_disk.actions, "feature list on disk")
-	_check(not wview.is_editing() and book.db.get_entry("sunken-coast", "monsters", "goblin").name == "Goblin Boss", "back to the view, the book knows the new name")
+	_check(not wview.is_editing() and book.db.get_entry("sunken-coast", "creatures", "goblin").name == "Goblin Boss", "back to the view, the book knows the new name")
 	_check(book._tab_bar.get_tab_title(book._tab_index(wkey)) == "Goblin Boss", "tab title follows")
-	_check(book.db.get_entry("mini-core", "monsters", "goblin").name == "Goblin", "the source is untouched")
+	_check(book.db.get_entry("mini-core", "creatures", "goblin").name == "Goblin", "the source is untouched")
 
 	# Feature "Edit" opens the feature in its own tab.
 	form = book.start_edit(wview)
@@ -124,22 +124,22 @@ func _init() -> void:
 	book._tab_bar.current_tab = book._tab_index(wkey)
 	form.duplicate_entry()
 	var dkey := book.current_tab_key()
-	_check(dkey.begins_with("sunken-coast/monsters/goblin-boss") and world.has("monsters", dkey.get_file()), "duplicate opens (%s)" % dkey)
+	_check(dkey.begins_with("sunken-coast/creatures/goblin-boss") and world.has("creatures", dkey.get_file()), "duplicate opens (%s)" % dkey)
 	var dform := book.open_view(dkey).editor
 	dform.delete_entry()
-	_check(not world.has("monsters", dkey.get_file()) and book._tab_index(dkey) < 0 and book.db.get_entry("sunken-coast", "monsters", dkey.get_file()).is_empty(), "delete removes file entry, tab and card")
+	_check(not world.has("creatures", dkey.get_file()) and book._tab_index(dkey) < 0 and book.db.get_entry("sunken-coast", "creatures", dkey.get_file()).is_empty(), "delete removes file entry, tab and card")
 
 	# New entry of a new kind: a draft first (TASK-30); published, a bookmark appears.
-	var nform := book.create_entry(world, "npcs", "Mira")
-	_check(nform != null and world.has("npcs", "mira") and "npcs" in book.db.kinds_with(true) and "npcs" not in book.db.kinds(), "new NPC in the world, as a draft")
+	var nform := book.create_entry(world, "characters", "Mira")
+	_check(nform != null and world.has("characters", "mira") and "characters" in book.db.kinds_with(true) and "characters" not in book.db.kinds(), "new NPC in the world, as a draft")
 	_check(nform.find_child("SaveDraft", true, false) != null, "a new entry offers Save as draft")
 	_check(nform.find_child("Field_attitude", true, false) is TokenField, "NPC form has its own fields (attitude as tokens)")
 	nform.publish()
-	_check("npcs" in book.db.kinds() and not EntryStore.is_draft(world.find("npcs", "mira")), "Save publishes it")
-	_check(book._tabs.get_children().any(func(b: Button) -> bool: return b.text.begins_with("Npcs")), "Npcs bookmark added")
+	_check("characters" in book.db.kinds() and not EntryStore.is_draft(world.find("characters", "mira")), "Save publishes it")
+	_check(book._tabs.get_children().any(func(b: Button) -> bool: return b.text.begins_with("Characters")), "Characters bookmark added")
 
 	# Unlocking the source package.
-	book._tab_bar.current_tab = book._tab_index("mini-core/monsters/goblin")
+	book._tab_bar.current_tab = book._tab_index("mini-core/creatures/goblin")
 	form = book.start_edit(view)
 	var unlock: Button = form.find_children("*", "Button", true, false).filter(func(b: Button) -> bool: return b.text == "Unlock").front()
 	unlock.pressed.emit()
@@ -167,7 +167,7 @@ func _make_mini_source(folder: String) -> void:
 	var core := EntryStore.open(PackageDB.default_root().path_join("5e-core-rules"))
 	var mini := EntryStore.create_world(folder, "mini-core")
 	for id in ["goblin", "aboleth"]:
-		mini.copy_entry(core, "monsters", id)
+		mini.copy_entry(core, "creatures", id)
 	mini.manifest["kind"] = "source"
 	mini.manifest["name"] = "Mini Core"
 	EntryStore._write(mini.folder.path_join("package.json"), mini.manifest)

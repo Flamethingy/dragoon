@@ -22,7 +22,7 @@ const SEARCH_DELAY := 0.15
 const GRID_GAP := 14
 const SORTS := ["Name", "CR / Level", "Type", "Package"]
 const DETAIL_WIDTH := 430
-const KIND_ICONS := {"monsters": "icon_sword", "spells": "star", "items": "icon_chest",
+const KIND_ICONS := {"creatures": "icon_sword", "spells": "star", "items": "icon_chest",
 	"features": "icon_dagger", "classes": "icon_helmet", "races": "icon_armor"}
 
 var db := PackageDB.new()
@@ -628,9 +628,9 @@ func _select_kind(kind: String) -> void:
 	_level_values = _distinct(list, _level_of)
 	_level_values.sort()
 	_level.clear()
-	_level.add_item("Any CR" if kind == "monsters" else "Any level")
+	_level.add_item("Any CR" if kind == "creatures" else "Any level")
 	for v: Variant in _level_values:
-		_level.add_item(("CR " + StatBlock.cr_text(v)) if kind == "monsters" else StatBlock.level_text(v))
+		_level.add_item(("CR " + StatBlock.cr_text(v)) if kind == "creatures" else StatBlock.level_text(v))
 	_level.visible = not _level_values.is_empty()
 
 	_type_values = _distinct(list, _types_of)
@@ -653,7 +653,7 @@ func _distinct(list: Array, getter: Callable) -> Array:
 
 
 func _level_of(e: Dictionary) -> Array:
-	var v: Variant = e.get("cr") if e["_kind"] == "monsters" else e.get("level") if e["_kind"] == "spells" else null
+	var v: Variant = e.get("cr") if e["_kind"] == "creatures" else e.get("level") if e["_kind"] == "spells" else null
 	return [] if v == null else [float(v)]
 
 
@@ -878,7 +878,7 @@ func _build_detail(e: Dictionary) -> void:
 		_detail_box.add_child(grid)
 
 	# Ability scores as hexes.
-	if e.get("_kind") == "monsters" and e.get("stats") is Dictionary:
+	if e.get("_kind") == "creatures" and e.get("stats") is Dictionary:
 		var abilities := HBoxContainer.new()
 		abilities.alignment = BoxContainer.ALIGNMENT_CENTER
 		abilities.add_theme_constant_override("separation", 4)
@@ -1329,7 +1329,7 @@ func import_list(e: Dictionary) -> Array:
 	var target := import_target()
 	var out := [{"kind": kind, "id": str(e.get("id", "")), "name": str(e.get("name", "?")),
 		"there": target != null and _has_import(target, kind, e)}]
-	if kind == "monsters":
+	if kind == "creatures":
 		var from := EntryStore.open(str(e.get("_dir", "")))
 		for key: String in PackageDB.FEATURE_LISTS:
 			var ids: Array = e.get(key, []) if e.get(key) is Array else []
@@ -1447,7 +1447,7 @@ func take_entry(e: Dictionary) -> Dictionary:
 
 ## What a kind is called in the books (Nico, 2026-11-01: monsters are "Creatures", there
 ## are bandits and animals too). The data keeps its kind ids.
-const KIND_LABELS := {"monsters": "Creatures"}
+const KIND_LABELS := {"creatures": "Creatures"}
 
 
 static func kind_label(kind: String) -> String:

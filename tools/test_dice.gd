@@ -39,7 +39,7 @@ func _init() -> void:
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
 	Worlds.install_example(ProjectSettings.globalize_path(DIR + "/worlds"))
 	var camp := Timeline.new(ProjectSettings.globalize_path(TIMELINE), null)
-	var aria := camp.entry("pcs/aria")
+	var aria := camp.entry("characters/aria")
 	var feats := camp.entries("features")
 	_check(_f(aria, "Perception", feats) == ["1d20+4"], "Perception: the sheet's +4")
 	_check(_f(aria, "roll perception", feats) == ["1d20+4"], "'roll perception'")
@@ -51,7 +51,7 @@ func _init() -> void:
 	_check(_f(aria, "stealth with advantage", feats) == ["2d20kh1+5"] and _f(aria, "stealth dis", feats) == ["2d20kl1+5"], "advantage / disadvantage")
 	_check(_f(aria, "attack with Longbow", feats) == ["1d20+5", "1d8+3"] and _f(aria, "longbow", feats) == ["1d20+5", "1d8+3"], "attack: to hit and damage")
 	_check(_f(aria, "sleight of hand", feats) == ["1d20+3"], "multi-word skills")
-	_check(_f(camp.entry("monsters/goblin-chief"), "scimitar", feats) == ["1d20+4", "1d6+2"], "monster actions")
+	_check(_f(camp.entry("creatures/goblin-chief"), "scimitar", feats) == ["1d20+4", "1d6+2"], "monster actions")
 	_check(_f(aria, "dance", feats).is_empty(), "unknown names: nothing")
 
 	# --- At the table -------------------------------------------------------------------------------
@@ -61,14 +61,14 @@ func _init() -> void:
 	await process_frame
 	dm.host(PORT)
 	ann.join(ADDRESS, "Ann")
-	await _until(func() -> bool: return ann.my_pc == "pcs/aria")
+	await _until(func() -> bool: return ann.my_pc == "characters/aria")
 	ann.roll("Perception")
 	await _until(func() -> bool: return ann.rolls.size() == 1)
 	var entry: Dictionary = ann.rolls[0] if not ann.rolls.is_empty() else {}
 	_check(entry.get("who") == "Aria Windrunner" and entry.get("by") == "ann" and entry.results[0].label == "Perception" and entry.results[0].formula == "1d20+4", "Ann rolls Perception for Aria (%s)" % entry)
 	_check(dm.rolls.size() == 1 and dm.event_log.events.back().type == "dice.rolled", "the DM sees it, logged as dice.rolled")
 	var ev: Dictionary = dm.event_log.events.back()
-	_check(ev.entity == "pcs/aria" and ev.data.roll == "Perception" and ev.data.formula == "1d20+4" and int(ev.data.result) == int(entry.results[0].total), "event data per doc-1 (%s)" % ev.data)
+	_check(ev.entity == "characters/aria" and ev.data.roll == "Perception" and ev.data.formula == "1d20+4" and int(ev.data.result) == int(entry.results[0].total), "event data per doc-1 (%s)" % ev.data)
 	var ui: TableUI = ann._ui
 	_check(ui._rolls_text.get_parsed_text().contains("Perception") and ui._rolls_text.get_parsed_text().contains("Aria"), "Ann's roll log shows it")
 
@@ -81,11 +81,11 @@ func _init() -> void:
 	ann.roll("fly to the moon")
 	await _until(func() -> bool: return ann.status.contains("Can't roll"))
 	_check(ann.status.contains("don't know how to roll") and ann.rolls.size() == 3, "unknown names are refused")
-	ann.roll("perception", "monsters/goblin-chief")
+	ann.roll("perception", "creatures/goblin-chief")
 	await _until(func() -> bool: return ann.status.contains("not your sheet"))
 	_check(ann.status.contains("not your sheet"), "players roll only for their own PC")
 
-	dm.roll("stealth", "monsters/goblin-chief", true)
+	dm.roll("stealth", "creatures/goblin-chief", true)
 	_check(dm.rolls.size() == 4 and dm.rolls[3].hidden and dm.rolls[3].results[0].formula == "1d20+6", "the DM rolls hidden for the chief")
 	dm.roll("1d20")
 	await _until(func() -> bool: return ann.rolls.size() == 4)
@@ -93,9 +93,9 @@ func _init() -> void:
 	_check(not ui._rolls_text.get_parsed_text().contains("Stealth"), "...nor sees it in the log")
 
 	# The roll box and sheet links.
-	ann.open_sheet("pcs/aria")
-	await _until(func() -> bool: return ui.sheet.visible and ui.sheet.ref == "pcs/aria")
-	_check(ui.roll_ref() == "pcs/aria", "the roll box rolls for the open sheet")
+	ann.open_sheet("characters/aria")
+	await _until(func() -> bool: return ui.sheet.visible and ui.sheet.ref == "characters/aria")
+	_check(ui.roll_ref() == "characters/aria", "the roll box rolls for the open sheet")
 	_check(ui.sheet._body.get_parsed_text().contains("Longbow"), "the sheet lists its attacks")
 	ui.sheet._on_meta("roll:dex save")
 	await _until(func() -> bool: return ann.rolls.size() == 5)

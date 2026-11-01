@@ -72,7 +72,7 @@ func setup(e: Dictionary) -> void:
 			drafts_page.publish_all_requested.connect(book.publish_all)
 			box.add_child(drafts_page)
 		return
-	var monster: bool = e.get("_kind") == "monsters"
+	var monster: bool = e.get("_kind") == "creatures"
 	var left := VBoxContainer.new()
 	left.add_theme_constant_override("separation", 10)
 	var right := VBoxContainer.new()

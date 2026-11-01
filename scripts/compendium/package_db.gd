@@ -13,10 +13,10 @@ extends RefCounted
 signal loaded
 
 ## Kinds in display order (others found in packages are appended).
-const KINDS := ["monsters", "features", "spells", "items", "classes", "subclasses", "races", "subraces",
+const KINDS := ["creatures", "features", "spells", "items", "classes", "subclasses", "races", "subraces",
 	"backgrounds", "feats", "invocations", "infusions", "conditions", "diseases", "rules", "tables"]
 ## Kind order for resolving a wikilink name that exists in several kinds.
-const LINK_PRIORITY := ["classes", "spells", "monsters", "items", "races", "subclasses",
+const LINK_PRIORITY := ["classes", "spells", "creatures", "items", "races", "subclasses",
 	"subraces", "feats", "conditions", "rules", "backgrounds", "invocations", "infusions",
 	"diseases", "tables", "features"]
 ## Monster keys that list feature ids (in this order in a stat block).
@@ -88,6 +88,7 @@ func _load_all() -> void:
 		var id := folder.get_file()
 		if id.begins_with(".") or id in disabled:
 			continue  # being installed, or switched off in the Packages window
+		KindMigration.ensure(folder)  # characters + creatures (TASK-43)
 		var manifest: Variant = _read_json(folder.path_join("package.json"), problems)
 		if not manifest is Dictionary:
 			continue

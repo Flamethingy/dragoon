@@ -97,7 +97,7 @@ func _init() -> void:
 	await process_frame
 	dm.host(PORT)
 	ann.join("127.0.0.1:%d" % PORT, "Ann")
-	await _until(func() -> bool: return ann.my_pc == "pcs/aria")
+	await _until(func() -> bool: return ann.my_pc == "characters/aria")
 	_check(dm.tables.has("confusion-behavior") and ann.tables.has("confusion-behavior"), "both sides know the tables")
 	ann.roll_table("confusion-behavior")
 	await _until(func() -> bool: return ann.rolls.size() == 1)

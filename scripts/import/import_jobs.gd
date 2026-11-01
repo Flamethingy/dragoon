@@ -209,7 +209,7 @@ func merge(job_id: String) -> Dictionary:
 			var old_id := str(copy.id)
 			copy["id"] = target.free_id(kind, str(copy.get("name", old_id))) if target.has(kind, old_id) else old_id
 			ids["%s/%s" % [kind, old_id]] = str(copy.id)
-			if kind == "monsters":
+			if kind == "creatures":
 				for list_key in PackageDB.FEATURE_LISTS:
 					if copy.get(list_key) is Array:
 						copy[list_key] = copy[list_key].map(func(f: Variant) -> String: return str(ids.get("features/" + str(f), f)))

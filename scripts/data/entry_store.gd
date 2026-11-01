@@ -20,7 +20,7 @@ extends RefCounted
 const SOURCE := "source"
 const WORLD := "world"
 const TIMELINE := "timeline"
-const CREATURES := ["pcs", "npcs", "monsters"]
+const CREATURES := ["characters", "creatures"]
 ## Creature fields that stay entity edits even during a session (what something *is*).
 const TEXT_FIELDS := ["id", "name", "description", "image", "token", "tags", "origin", "source", "draft", "edited"]
 ## What to do when a published entry of the same name exists (publish, import).
@@ -40,6 +40,7 @@ var _kinds := {}  ## kind -> Array (file order)
 
 ## The store for a package or timeline folder; null if it is neither.
 static func open(path: String) -> EntryStore:
+	KindMigration.ensure(path)  # characters + creatures (TASK-43)
 	var s := EntryStore.new()
 	s.folder = path
 	if FileAccess.file_exists(path.path_join("package.json")):
@@ -217,7 +218,7 @@ func name_clash(kind: String, entry: Dictionary) -> Dictionary:
 func draft_parts(kind: String, entry_id: String) -> Array:
 	var out := []
 	var e := find(kind, entry_id)
-	if kind == "monsters":
+	if kind == "creatures":
 		for list_key in PackageDB.FEATURE_LISTS:
 			for fid: Variant in (e.get(list_key, []) if e.get(list_key) is Array else []):
 				var f := find("features", str(fid))
@@ -323,7 +324,7 @@ func copy_entry(from: EntryStore, kind: String, entry_id: String) -> Dictionary:
 	for key in ["image", "token", "party_token"]:
 		if str(copy.get(key, "")) != "":
 			copy[key] = _copy_asset(from, str(copy[key]))
-	if kind == "monsters":
+	if kind == "creatures":
 		for list_key in PackageDB.FEATURE_LISTS:
 			var ids: Array = copy.get(list_key, []) if copy.get(list_key) is Array else []
 			for i in ids.size():

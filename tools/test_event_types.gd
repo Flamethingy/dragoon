@@ -13,14 +13,14 @@ func _init() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(FILE))
 	var w := EventLog.open(FILE)
 	w.start_session(4)
-	var t := "pcs/thalia"
+	var t := "characters/thalia"
 	# Combat
-	w.append("combat.started", "", {"map": "maps/forest-road", "order": [{"entity": "monsters/goblin-chief", "initiative": 12}]})
+	w.append("combat.started", "", {"map": "maps/forest-road", "order": [{"entity": "creatures/goblin-chief", "initiative": 12}]})
 	w.append("initiative.rolled", t, {"total": 17, "formula": "1d20+3"})
-	w.append("initiative.rolled", "monsters/dire-wolf", {"total": 12})
+	w.append("initiative.rolled", "creatures/dire-wolf", {"total": 12})
 	w.append("combat.turn", "", {"round": 2, "turn": 1})
 	# Conditions, resources, death saves, rests
-	w.append("condition.applied", t, {"condition": "poisoned", "source": "monsters/giant-spider"})
+	w.append("condition.applied", t, {"condition": "poisoned", "source": "creatures/giant-spider"})
 	w.append("condition.applied", t, {"condition": "prone"})
 	w.append("condition.removed", t, {"condition": "prone"})
 	w.append("resource.used", t, {"resource": "spell_slots.1", "amount": 2})
@@ -36,15 +36,15 @@ func _init() -> void:
 	# Money, relationships, quests, travel, weather, party, drafts
 	w.append("currency.changed", t, {"delta": {"gp": 15, "sp": -3}, "reason": "goblin loot"})
 	w.append("currency.changed", t, {"delta": {"gp": -5}, "reason": "inn"})
-	w.append("relationship.changed", "npcs/mira", {"with": t, "from": "neutral", "to": "friendly", "reason": "saved her brother"})
+	w.append("relationship.changed", "characters/mira", {"with": t, "from": "neutral", "to": "friendly", "reason": "saved her brother"})
 	w.append("relationship.changed", "factions/red-fang-clan", {"with": "party", "from": 0, "to": -2})
 	w.append("quest.updated", "quests/red-fang-road", {"status": "open", "step": 1, "text": "Found the caravan"})
 	w.append("quest.updated", "quests/red-fang-road", {"step": 2, "text": "Freed the prisoner"})
 	w.append("quest.updated", "quests/red-fang-road", {"status": "done"})
-	w.append("party.split", "", {"groups": [[t], ["pcs/aria", "pcs/borin"]]})
+	w.append("party.split", "", {"groups": [[t], ["characters/aria", "characters/borin"]]})
 	w.append("party.arrived", t, {"place": "places/thornwick", "map": "maps/westmarch", "at": [8, 6]})
 	w.append("weather.changed", "", {"region": "places/westmarch", "weather": "heavy rain", "temperature": 9, "wind": "strong"})
-	w.append("assistant.drafted", "npcs/mira", {"assistant": "Tamago", "field": "description", "text": "A draft...", "status": "draft"})
+	w.append("assistant.drafted", "characters/mira", {"assistant": "Tamago", "field": "description", "text": "A draft...", "status": "draft"})
 	w.gain_item(t, "items/rope", 1)
 	w.gain_item(t, "items/moonstone-amulet", 1)
 	w.lose_item(t, "items/torch", 2)
@@ -68,7 +68,7 @@ func _init() -> void:
 	_check(s.inventory == [{"item": "items/moonstone-amulet", "qty": 2, "equipped": true}, {"item": "items/rope", "qty": 1}], "items on a list inventory keep its shape (%s)" % [s.inventory])
 	_check(base.inventory.size() == 2 and base.hp == 24, "the base entity is never changed")
 
-	var mira := Replay.entity_state({}, again.effective("npcs/mira"))
+	var mira := Replay.entity_state({}, again.effective("characters/mira"))
 	_check(mira.get("relations") == {t: "friendly"}, "relationship (%s)" % [mira.get("relations")])
 	_check(Replay.entity_state({}, again.effective("factions/red-fang-clan")).relations.party == -2, "faction standing")
 	var quest := Replay.entity_state({}, again.effective("quests/red-fang-road"))
@@ -88,13 +88,13 @@ func _init() -> void:
 			break
 	var mid := Replay.world_state(fight)
 	_check(mid.combat.active and mid.combat.round == 2 and mid.combat.map == "maps/forest-road", "rewound: combat running")
-	_check(mid.combat.order.map(func(c: Dictionary) -> String: return c.entity) == [t, "monsters/dire-wolf", "monsters/goblin-chief"], "initiative order (%s)" % [mid.combat.order])
+	_check(mid.combat.order.map(func(c: Dictionary) -> String: return c.entity) == [t, "creatures/dire-wolf", "creatures/goblin-chief"], "initiative order (%s)" % [mid.combat.order])
 	var split := []
 	for e in again.effective():
 		split.append(e)
 		if e.type == "party.split":
 			break
-	_check(Replay.world_state(split).party_groups == [[t], ["pcs/aria", "pcs/borin"]], "party split")
+	_check(Replay.world_state(split).party_groups == [[t], ["characters/aria", "characters/borin"]], "party split")
 
 	print("event types: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))
 	quit(1 if _failed > 0 else 0)

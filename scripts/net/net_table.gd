@@ -32,7 +32,7 @@ const PARTY := "party"  ## id of the group token on world maps
 ## What a sheet shows to someone who doesn't own it: the info page, no stats.
 const INFO_FIELDS := ["name", "size", "type", "subtype", "race", "alignment", "description", "image", "tags"]
 ## Sheet fields nobody changes from the table.
-const LOCKED_FIELDS := ["id", "player", "ref", "origin"]
+const LOCKED_FIELDS := ["id", "player", "owners", "ref", "origin"]
 
 ## Host: the timeline folder; empty = the example timeline data/worlds/westmarch/timelines/red-fang
 ## (the example world is copied there on first use).
@@ -56,7 +56,7 @@ var status := "Offline"
 var timeline: Timeline
 var event_log: EventLog
 var map_id := ""
-var owners := {}  ## pc ref -> player id (pcs.json `player`, plus picks of free PCs)
+var owners := {}  ## character ref -> [player ids] (its `owners`, plus picks of free PCs); the DM controls all
 var claims := {}  ## pc ref -> player id: free PCs picked in the lobby (table.json)
 var peers := {}  ## peer id -> player id (connected and greeted)
 var watching := {}  ## entity ref -> {peer id: true}: who has it open (gets reveal updates)
@@ -205,8 +205,10 @@ func view_for(player: String) -> Dictionary:
 	if world:
 		tokens.append(_party_token(members, placed, start, map.party_token))
 	for id: String in ids:
-		var owner: String = owners.get(id, "")
-		var t := timeline.token_view(id, owner, player == "" or (owner != "" and owner == player))
+		var owner := owner_of(id)
+		var t := timeline.token_view(id, owner, player == "" or owns(player, id))
+		if owners.has(id):
+			t["owners"] = owners[id]
 		if t.is_empty():
 			continue
 		_current_values(t)
@@ -247,7 +249,7 @@ func _party_token(members: Array, placed: Dictionary, start: Vector2i, image: St
 	var players := []
 	for pc: String in members:
 		names.append(timeline.name_of(pc))
-		players.append(owners[pc])
+		players.append_array(owners[pc])
 	if image == "":
 		image = timeline.token_view(members[0]).get("image", "")
 	return {"id": PARTY, "image": image, "name": "Party: %s" % ", ".join(names), "size": "medium",
@@ -274,7 +276,7 @@ func drop_token(e: Dictionary, cell: Vector2i) -> String:
 	e = import_to_world(e)
 	var ref := timeline.token_entity(e)
 	if ref == "":
-		_set_status("Only monsters, NPCs and PCs go on the map")
+		_set_status("Only creatures and characters go on the map")
 		return ""
 	var placed := Replay.tokens_on(map_id, event_log.effective())
 	if grid.tokens.has(ref) or placed.has(ref):
@@ -397,7 +399,7 @@ func _send_pc_lists() -> void:
 
 func _pc_of(player: String) -> String:
 	for pc: String in owners:
-		if owners[pc] == player:
+		if player in owners[pc]:
 			return pc
 	return ""
 
@@ -407,7 +409,7 @@ func _update_owners() -> void:
 	owners = timeline.owners()
 	for pc: String in claims:
 		if not owners.has(pc) and pc in timeline.pcs():
-			owners[pc] = claims[pc]
+			owners[pc] = [claims[pc]]
 
 
 func _table_file() -> String:
@@ -527,7 +529,7 @@ func request_pc(pc: String) -> void:
 	var player: String = peers.get(sender, "")
 	if player == "" or pc not in timeline.pcs():
 		return
-	var taken_by: String = owners.get(pc, "")
+	var taken_by := owner_of(pc)
 	if taken_by != "" and taken_by != player:
 		pc_denied.rpc_id(sender, "%s already plays %s" % [timeline.player_name(taken_by), timeline.name_of(pc)])
 		return
@@ -699,7 +701,18 @@ func _may_drag(entity: String) -> bool:
 	var info: Dictionary = token.get_meta("info", {})
 	if info.has("players"):  # the party token: anyone in the party
 		return my_player in info.players
-	return str(info.get("owner", "")) == my_player
+	return my_player in (info.get("owners", [info.get("owner", "")]) as Array)
+
+
+## True if `player` is one of the owners of `ref` (TASK-43). The DM controls everything.
+func owns(player: String, ref: String) -> bool:
+	return player != "" and player in (owners.get(ref, []) as Array)
+
+
+## The first owner of a character ("" = none).
+func owner_of(ref: String) -> String:
+	var o: Array = owners.get(ref, [])
+	return str(o[0]) if not o.is_empty() else ""
 
 
 ## Dropped a token here: the DM decides directly, players ask the DM.
@@ -730,7 +743,7 @@ func _handle_move(sender: int, entity: String, cell: Vector2i) -> void:
 		return
 	if sender != 1:
 		var player: String = peers.get(sender, "")
-		if player == "" or owners.get(entity, "") != player:
+		if player == "" or not owns(player, entity):
 			_deny(sender, entity, "that's not your token")
 			return
 	if not grid.can_place(entity, cell):
@@ -796,7 +809,7 @@ func _handle_step(sender: int, entity: String, dir: Vector2i, turn_only: bool) -
 		_handle_move(sender, entity, grid.token_cell(entity) + TokenGrid.FACINGS[facing])
 		if grid.token_facing(entity) == facing or entity == PARTY:
 			return
-	if sender != 1 and entity != PARTY and owners.get(entity, "") != peers.get(sender, ""):
+	if sender != 1 and entity != PARTY and not owns(str(peers.get(sender, "")), entity):
 		_deny(sender, entity, "that's not your token")
 		return
 	if entity != PARTY:  # the party token's members turn with it on the map only
@@ -1031,7 +1044,7 @@ func _on_token_clicked(_entity: String) -> void:
 ## The DM sees every sheet, a player the sheet of their own PC; everyone else only gets
 ## the info page (INFO_FIELDS, with reveals applied).
 func may_see_sheet(player: String, ref: String) -> bool:
-	return player == Reveal.DM or (player != "" and owners.get(ref, "") == player)
+	return player == Reveal.DM or owns(player, ref)
 
 
 ## Host: a creature's sheet as `player` may see it now: its entry plus its events
@@ -1066,7 +1079,7 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 	sheet["_kind"] = ref.get_slice("/", 0)
 	sheet["_full"] = full
 	sheet["_editable"] = full
-	sheet["_owner"] = timeline.player_name(owners.get(ref, "")) if owners.get(ref, "") != "" else ""
+	sheet["_owner"] = ", ".join((owners.get(ref, []) as Array).map(func(o: Variant) -> String: return timeline.player_name(str(o))))
 	return sheet
 
 

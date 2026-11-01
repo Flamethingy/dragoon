@@ -10,7 +10,7 @@ extends RefCounted
 
 const SIZE := 256  ## pixels of a composed token
 const RING := 0.07  ## ring width, part of the diameter
-const DEFAULT_BORDER := {"monsters": "#8f3b3b", "pcs": "#d8b45a", "npcs": "#3a5f9a"}
+const DEFAULT_BORDER := {"creatures": "#8f3b3b", "characters": "#d8b45a"}
 const DEFAULT_BACKGROUND := "#efe4d0"
 
 static var _cache := {}  ## key -> ImageTexture

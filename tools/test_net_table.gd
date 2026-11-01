@@ -25,19 +25,19 @@ func _init() -> void:
 	# --- Lobby: host, join with a player name, own PC from the timeline ---------------------
 	_check(dm.host(PORT) == OK, "DM hosts")
 	_check(dm.grid.map_id == "maps/forest-road", "DM shows the first map (%s)" % dm.grid.map_id)
-	_check(dm.owners == {"pcs/aria": "ann"}, "owners from the PCs (%s)" % [dm.owners])
+	_check(dm.owners == {"characters/aria": ["ann"]}, "owners from the PCs (%s)" % [dm.owners])
 	_check(ann.join(ADDRESS, "Ann") == OK, "Ann joins")
-	await _until(func() -> bool: return ann.my_pc == "pcs/aria" and ann.grid.tokens.has("pcs/aria"))
-	_check(ann.my_pc == "pcs/aria" and ann.my_player == "ann", "Ann (player ann) plays Aria right away")
+	await _until(func() -> bool: return ann.my_pc == "characters/aria" and ann.grid.tokens.has("characters/aria"))
+	_check(ann.my_pc == "characters/aria" and ann.my_player == "ann", "Ann (player ann) plays Aria right away")
 	_check(ann.pc_choices.size() == 2, "the PC list arrives too")
 	await _until(func() -> bool: return ann.pc_choices.all(func(c: Dictionary) -> bool: return ann.assets.has(c.image)))
 	_check(ann.pc_choices.all(func(c: Dictionary) -> bool: return ann.assets.texture(c.image) != null), "PC portraits arrive")
 	_check(ann.grid.map_id == "maps/forest-road" and ann.grid.grid_size.x > 0, "Ann sees the map with its grid")
-	_check(ann.grid.tokens.has("monsters/goblin-chief") and ann.grid.tokens.has("monsters/dire-wolf"), "Ann sees the monsters")
-	_check(ann.grid.token_cell("pcs/aria") == Vector2i(3, 6), "Aria at the party start")
-	_check(dm.grid.tokens.has("pcs/aria"), "Aria's token is on the DM's table too")
-	var aria_info: Dictionary = ann.grid.tokens["pcs/aria"].get_meta("info")
-	var chief_info: Dictionary = ann.grid.tokens["monsters/goblin-chief"].get_meta("info")
+	_check(ann.grid.tokens.has("creatures/goblin-chief") and ann.grid.tokens.has("creatures/dire-wolf"), "Ann sees the creatures")
+	_check(ann.grid.token_cell("characters/aria") == Vector2i(3, 6), "Aria at the party start")
+	_check(dm.grid.tokens.has("characters/aria"), "Aria's token is on the DM's table too")
+	var aria_info: Dictionary = ann.grid.tokens["characters/aria"].get_meta("info")
+	var chief_info: Dictionary = ann.grid.tokens["creatures/goblin-chief"].get_meta("info")
 	_check(aria_info.get("hp") == 27 and aria_info.get("owner") == "ann" and aria_info.get("class") == "Ranger 3", "own PC with HP, class and owner (%s)" % aria_info)
 	_check(chief_info.get("name") == "Goblin Chief" and not chief_info.has("hp"), "monster: name only, no HP")
 
@@ -60,38 +60,38 @@ func _init() -> void:
 	bob.join(ADDRESS, "Bob")
 	await _until(func() -> bool: return bob.pc_choices.size() == 2)
 	_check(bob.my_pc == "" and bob.my_player == "bob", "Bob has no PC yet")
-	var aria_choice: Array = bob.pc_choices.filter(func(c: Dictionary) -> bool: return c.id == "pcs/aria")
+	var aria_choice: Array = bob.pc_choices.filter(func(c: Dictionary) -> bool: return c.id == "characters/aria")
 	_check(not aria_choice.is_empty() and aria_choice[0].taken_by == "Ann", "Bob sees Aria is taken by Ann")
-	bob.claim_pc("pcs/aria")
+	bob.claim_pc("characters/aria")
 	await _until(func() -> bool: return bob.status.contains("already plays"))
 	_check(bob.status.contains("already plays") and bob.my_pc == "", "taken PC refused")
-	bob.claim_pc("pcs/borin")
-	await _until(func() -> bool: return bob.my_pc == "pcs/borin" and ann.grid.tokens.has("pcs/borin") and bob.grid.tokens.has("pcs/aria"))
-	_check(ann.grid.tokens.has("pcs/borin") and bob.grid.tokens.has("pcs/aria"), "both PCs on both tables")
-	var ann_bob_info: Dictionary = ann.grid.tokens["pcs/borin"].get_meta("info")
+	bob.claim_pc("characters/borin")
+	await _until(func() -> bool: return bob.my_pc == "characters/borin" and ann.grid.tokens.has("characters/borin") and bob.grid.tokens.has("characters/aria"))
+	_check(ann.grid.tokens.has("characters/borin") and bob.grid.tokens.has("characters/aria"), "both PCs on both tables")
+	var ann_bob_info: Dictionary = ann.grid.tokens["characters/borin"].get_meta("info")
 	_check(not ann_bob_info.has("hp") and ann_bob_info.get("owner") == "bob", "Ann doesn't get Borin's HP")
 
 	# --- Moves: own token only, tweened, logged ------------------------------------------
-	var start := ann.grid.token_cell("pcs/aria")
+	var start := ann.grid.token_cell("characters/aria")
 	var to := start + Vector2i(0, 2)
-	_check(ann._may_drag("pcs/aria") and not ann._may_drag("monsters/dire-wolf") and not ann._may_drag("pcs/borin"), "Ann may only drag Aria")
-	ann.grid.move_requested.emit("pcs/aria", to)
-	await _until(func() -> bool: return bob.grid.token_cell("pcs/aria") == to)
-	_check(bob.grid.token_cell("pcs/aria") == to and dm.grid.token_cell("pcs/aria") == to, "Aria's move reaches everyone")
-	var token: Sprite2D = bob.grid.tokens["pcs/aria"]
+	_check(ann._may_drag("characters/aria") and not ann._may_drag("creatures/dire-wolf") and not ann._may_drag("characters/borin"), "Ann may only drag Aria")
+	ann.grid.move_requested.emit("characters/aria", to)
+	await _until(func() -> bool: return bob.grid.token_cell("characters/aria") == to)
+	_check(bob.grid.token_cell("characters/aria") == to and dm.grid.token_cell("characters/aria") == to, "Aria's move reaches everyone")
+	var token: Sprite2D = bob.grid.tokens["characters/aria"]
 	var target := bob.grid.cell_center(to, 1.0)
 	_check(token.position.distance_to(target) > 1.0, "the token glides (not there yet)")
 	await _until(func() -> bool: return token.position.is_equal_approx(target), 2000)
 	_check(token.position.is_equal_approx(target), "and snaps onto the cell")
 	var e: Dictionary = dm.event_log.events.back()
-	_check(e.type == "token.moved" and e.entity == "pcs/aria" and e.by == "ann", "move logged as Ann's (%s)" % e.get("by"))
+	_check(e.type == "token.moved" and e.entity == "characters/aria" and e.by == "ann", "move logged as Ann's (%s)" % e.get("by"))
 	var events_before := dm.event_log.events.size()
-	ann.request_move.rpc_id(1, "monsters/dire-wolf", Vector2i(1, 1))  # bypassing the UI check
+	ann.request_move.rpc_id(1, "creatures/dire-wolf", Vector2i(1, 1))  # bypassing the UI check
 	await _until(func() -> bool: return ann.status.contains("not your token"))
 	_check(ann.status.contains("not your token") and dm.event_log.events.size() == events_before, "moving someone else's token is refused")
-	dm.grid.move_requested.emit("monsters/dire-wolf", Vector2i(2, 2))
-	await _until(func() -> bool: return ann.grid.token_cell("monsters/dire-wolf") == Vector2i(2, 2))
-	_check(ann.grid.token_cell("monsters/dire-wolf") == Vector2i(2, 2), "the DM moves anything")
+	dm.grid.move_requested.emit("creatures/dire-wolf", Vector2i(2, 2))
+	await _until(func() -> bool: return ann.grid.token_cell("creatures/dire-wolf") == Vector2i(2, 2))
+	_check(ann.grid.token_cell("creatures/dire-wolf") == Vector2i(2, 2), "the DM moves anything")
 
 	# --- Map change: images by hash, only new ones are sent -------------------------------
 	var received := ann.assets_received
@@ -99,18 +99,18 @@ func _init() -> void:
 	await _until(func() -> bool: return ann.grid.map_id == "maps/old-mill" and bob.grid.map_id == "maps/old-mill")
 	_check(ann.grid.map_id == "maps/old-mill", "players see the new map")
 	_check(ann.assets_received == received + 1, "only the new map image was sent (%d)" % (ann.assets_received - received))
-	_check(ann.grid.tokens.has("pcs/aria") and not ann.grid.tokens.has("monsters/goblin-chief"), "PCs come along, the chief stays behind")
-	_check(ann.grid.token_cell("pcs/aria") == Vector2i(2, 6), "Aria at the party start (%s)" % ann.grid.token_cell("pcs/aria"))
+	_check(ann.grid.tokens.has("characters/aria") and not ann.grid.tokens.has("creatures/goblin-chief"), "PCs come along, the chief stays behind")
+	_check(ann.grid.token_cell("characters/aria") == Vector2i(2, 6), "Aria at the party start (%s)" % ann.grid.token_cell("characters/aria"))
 	received = ann.assets_received
 	dm.show_map_to_all("maps/forest-road")
 	await _until(func() -> bool: return ann.grid.map_id == "maps/forest-road")
 	_check(ann.assets_received == received, "the old map comes from the cache")
-	_check(ann.grid.token_cell("pcs/aria") == to, "Aria back where she was on this map")
+	_check(ann.grid.token_cell("characters/aria") == to, "Aria back where she was on this map")
 
 	# --- World map: the party travels as one token (TASK-13) ------------------------------
 	dm.show_map_to_all("maps/westmarch")
 	await _until(func() -> bool: return ann.grid.map_id == "maps/westmarch" and ann.grid.tokens.has("party") and bob.grid.tokens.has("party"))
-	_check(ann.grid.tokens.has("party") and not ann.grid.tokens.has("pcs/aria") and not ann.grid.tokens.has("pcs/borin"), "one party token instead of the PCs")
+	_check(ann.grid.tokens.has("party") and not ann.grid.tokens.has("characters/aria") and not ann.grid.tokens.has("characters/borin"), "one party token instead of the PCs")
 	var party: Dictionary = ann.grid.tokens["party"].get_meta("info") if ann.grid.tokens.has("party") else {}
 	_check(str(party.get("name", "")).contains("Aria Windrunner") and str(party.get("name", "")).contains("Borin Stoneshield"), "named after its members (%s)" % party.get("name"))
 	_check(ann.grid.token_cell("party") == Vector2i(4, 9), "starts at the party start")
@@ -123,12 +123,12 @@ func _init() -> void:
 	_check(travel.size() == 2, "one event per member (%d)" % travel.size())
 	var movers := travel.map(func(ev: Dictionary) -> String: return ev.entity)
 	movers.sort()
-	_check(movers == ["pcs/aria", "pcs/borin"], "events for Aria and Borin (%s)" % [movers])
+	_check(movers == ["characters/aria", "characters/borin"], "events for Aria and Borin (%s)" % [movers])
 	_check(travel.all(func(ev: Dictionary) -> bool: return ev.type == "token.moved" and ev.data.get("group") == "party" 		and ev.data.get("to") == [8, 6] and ev.by == "ann"), "token.moved with group party, by Ann")
 	dm.show_map_to_all("maps/forest-road")
-	await _until(func() -> bool: return ann.grid.map_id == "maps/forest-road" and ann.grid.tokens.has("pcs/aria"))
-	_check(ann.grid.tokens.has("pcs/aria") and ann.grid.tokens.has("pcs/borin") and not ann.grid.tokens.has("party"), "a local map shows the members one by one")
-	_check(ann.grid.token_cell("pcs/aria") == to, "at their own positions on this map")
+	await _until(func() -> bool: return ann.grid.map_id == "maps/forest-road" and ann.grid.tokens.has("characters/aria"))
+	_check(ann.grid.tokens.has("characters/aria") and ann.grid.tokens.has("characters/borin") and not ann.grid.tokens.has("party"), "a local map shows the members one by one")
+	_check(ann.grid.token_cell("characters/aria") == to, "at their own positions on this map")
 	dm.show_map_to_all("maps/westmarch")
 	await _until(func() -> bool: return ann.grid.map_id == "maps/westmarch")
 	_check(ann.grid.token_cell("party") == Vector2i(8, 6), "back on the world map the party is where it travelled to")
@@ -138,13 +138,13 @@ func _init() -> void:
 	# --- Disconnect and rejoin without restarting the host ---------------------------------
 	ann.multiplayer.multiplayer_peer.close()
 	await _until(func() -> bool: return dm.peers.size() == 1)
-	_check(dm.peers.size() == 1 and dm.grid.tokens.has("pcs/aria"), "Ann left, Aria stays")
+	_check(dm.peers.size() == 1 and dm.grid.tokens.has("characters/aria"), "Ann left, Aria stays")
 	var ann2 := _table("Ann2", "ann")  # same cache folder: a restarted client
 	await process_frame
 	ann2.join(ADDRESS, "Ann")
-	await _until(func() -> bool: return ann2.my_pc == "pcs/aria" and ann2.grid.tokens.has("pcs/aria"))
-	_check(ann2.my_pc == "pcs/aria", "Ann gets Aria back by name")
-	_check(ann2.grid.token_cell("pcs/aria") == to, "at her last position")
+	await _until(func() -> bool: return ann2.my_pc == "characters/aria" and ann2.grid.tokens.has("characters/aria"))
+	_check(ann2.my_pc == "characters/aria", "Ann gets Aria back by name")
+	_check(ann2.grid.token_cell("characters/aria") == to, "at her last position")
 	_check(ann2.assets_received == 0, "everything from the disk cache (%d downloads)" % ann2.assets_received)
 
 	# --- Notes (TASK-14) ----------------------------------------------------------------
@@ -202,9 +202,9 @@ func _init() -> void:
 	await process_frame
 	dm.multiplayer.multiplayer_peer.close()
 	dm2.host(PORT + 1)
-	_check(dm2.owners.get("pcs/aria") == "ann" and dm2.owners.get("pcs/borin") == "bob", "who plays whom is kept (%s)" % [dm2.owners])
-	_check(dm2.grid.token_cell("pcs/aria") == to, "positions restored from the log")
-	_check(dm2.grid.token_cell("monsters/dire-wolf") == Vector2i(2, 2), "the DM's moves too")
+	_check(dm2.owners.get("characters/aria") == ["ann"] and dm2.owners.get("characters/borin") == ["bob"], "who plays whom is kept (%s)" % [dm2.owners])
+	_check(dm2.grid.token_cell("characters/aria") == to, "positions restored from the log")
+	_check(dm2.grid.token_cell("creatures/dire-wolf") == Vector2i(2, 2), "the DM's moves too")
 
 	print("net table: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))
 	quit(1 if _failed > 0 else 0)
@@ -242,6 +242,6 @@ func _check(ok: bool, what: String) -> void:
 ## Sets a PC's player in the timeline (an entity.edited event, as the editor would).
 func _set_player(timeline_dir: String, pc: String, player: String) -> void:
 	var tl := Timeline.new(ProjectSettings.globalize_path(timeline_dir))
-	var e := tl.entry("pcs/" + pc).duplicate(true)
+	var e := tl.entry("characters/" + pc).duplicate(true)
 	e["player"] = player
-	tl.edit_entry("pcs", e)
+	tl.edit_entry("characters", e)

@@ -53,36 +53,36 @@ func _init() -> void:
 	target = EntryStore.open(root.path_join("mini-source"))
 	_check(m.get("package") == "mini-source" and int(m.get("count", 0)) == 5, "a finished job lands in the package (%s)" % m)
 	_check(not target.is_read_only(), "...unlocking the chosen source package")
-	var hag := target.find("monsters", "bog-hag")
+	var hag := target.find("creatures", "bog-hag")
 	_check(EntryStore.is_draft(hag) and hag.origin.get("job") == job_id and hag.origin.get("import") == "image", "as drafts with origin and job (%s)" % hag.get("origin"))
 	_check(EntryStore.is_draft(target.find("features", "bog-hag-claws")), "features come along as drafts")
 	var page_rel := str(hag.get("source_page", ""))
 	_check(page_rel == "imports/%s/pages/1.png" % job_id and FileAccess.file_exists(root.path_join("mini-source").path_join(page_rel)), "the source page is copied (%s)" % page_rel)
-	var cooks := target.list("monsters").filter(func(e: Dictionary) -> bool: return e.name == "Ogre Cook")
-	_check(cooks.size() == 4 and not EntryStore.is_draft(target.find("monsters", "ogre-cook")) and int(target.find("monsters", "ogre-cook").hp) == 59, "a taken id gets a new one, the old entry stays")
+	var cooks := target.list("creatures").filter(func(e: Dictionary) -> bool: return e.name == "Ogre Cook")
+	_check(cooks.size() == 4 and not EntryStore.is_draft(target.find("creatures", "ogre-cook")) and int(target.find("creatures", "ogre-cook").hp) == 59, "a taken id gets a new one, the old entry stays")
 	_check(bool(jobs.status(job_id).merged) and int(jobs.merge(job_id).get("count", -1)) == 0, "merged once only")
 	_check(str(jobs.status(job_id).log).contains("5 draft(s) put into Mini Source"), "the log says so")
 	_check(not _tree_contains(base.path_join("data"), KEY), "the key is nowhere in data/ (job, drafts, packages)")
 
 	# Crop from the page.
-	var cropped := target.crop_picture("monsters", "bog-hag", Rect2i(50, 60, 100, 120))
+	var cropped := target.crop_picture("creatures", "bog-hag", Rect2i(50, 60, 100, 120))
 	var art_img := Image.load_from_file(root.path_join("mini-source/art/bog-hag.jpg"))
 	_check(cropped.get("image") == "art/bog-hag.jpg" and art_img != null and art_img.get_size() == Vector2i(100, 120), "crop writes art/<id>.jpg with the dragged size")
-	_check(target.crop_picture("monsters", "bog-hag", Rect2i(500, 500, 10, 10)).is_empty(), "a crop off the page does nothing")
+	_check(target.crop_picture("creatures", "bog-hag", Rect2i(500, 500, 10, 10)).is_empty(), "a crop off the page does nothing")
 
 	# Publishing.
-	var r := target.publish("monsters", "bog-hag")
-	_check(r.has("published") and not EntryStore.is_draft(target.find("monsters", "bog-hag")), "publish")
+	var r := target.publish("creatures", "bog-hag")
+	_check(r.has("published") and not EntryStore.is_draft(target.find("creatures", "bog-hag")), "publish")
 	_check(not EntryStore.is_draft(target.find("features", "bog-hag-claws")), "...with its features")
 	var draft_ids: Array = cooks.filter(func(e: Dictionary) -> bool: return EntryStore.is_draft(e)).map(func(e: Dictionary) -> String: return str(e.id))
-	r = target.publish("monsters", draft_ids[0])
+	r = target.publish("creatures", draft_ids[0])
 	_check(r.has("duplicate") and r.duplicate.id == "ogre-cook", "same name: asks first")
-	r = target.publish("monsters", draft_ids[0], EntryStore.REPLACE)
-	_check(r.has("published") and int(target.find("monsters", "ogre-cook").hp) == 60 and target.find("monsters", draft_ids[0]).is_empty(), "replace takes the old id")
-	r = target.publish("monsters", draft_ids[1], EntryStore.KEEP_BOTH)
+	r = target.publish("creatures", draft_ids[0], EntryStore.REPLACE)
+	_check(r.has("published") and int(target.find("creatures", "ogre-cook").hp) == 60 and target.find("creatures", draft_ids[0]).is_empty(), "replace takes the old id")
+	r = target.publish("creatures", draft_ids[1], EntryStore.KEEP_BOTH)
 	_check(r.has("published") and _published(target, "Ogre Cook") == 2, "keep both")
-	r = target.publish("monsters", draft_ids[2], EntryStore.SKIP)
-	_check(r.has("skipped") and target.find("monsters", draft_ids[2]).is_empty() and _published(target, "Ogre Cook") == 2, "skip throws the draft away")
+	r = target.publish("creatures", draft_ids[2], EntryStore.SKIP)
+	_check(r.has("skipped") and target.find("creatures", draft_ids[2]).is_empty() and _published(target, "Ogre Cook") == 2, "skip throws the draft away")
 
 	# --- The window --------------------------------------------------------------------------------
 	var screen := SubViewport.new()
@@ -114,7 +114,7 @@ func _init() -> void:
 	await _wait_done(jobs, str(job3.id))
 	panel.refresh_jobs()
 	var swamp := EntryStore.open(PackageManager.new(root).folder_of("swamp-finds"))
-	_check(swamp != null and swamp.layer == EntryStore.SOURCE and not swamp.is_read_only() and EntryStore.is_draft(swamp.find("monsters", "bog-hag")), "a new editable book package gets the drafts (TASK-39)")
+	_check(swamp != null and swamp.layer == EntryStore.SOURCE and not swamp.is_read_only() and EntryStore.is_draft(swamp.find("creatures", "bog-hag")), "a new editable book package gets the drafts (TASK-39)")
 	_check(str(jobs.status(str(job3.id)).target) == "swamp-finds", "the job now points at it")
 	var changed := [false]
 	panel.changed.connect(func() -> void: changed[0] = true)
@@ -162,13 +162,13 @@ func _init() -> void:
 	(book.find_child("ImportPanel", false, false) as ImportPanel).close()
 
 	# The editor shows the source page of an imported draft.
-	var draft_hag: Dictionary = book.db.get_entry("swamp-finds", "monsters", "bog-hag")
+	var draft_hag: Dictionary = book.db.get_entry("swamp-finds", "creatures", "bog-hag")
 	var view := book.open_tab(draft_hag)
 	var form := book.start_edit(view)
 	_check(form != null and form.find_child("SourcePage", true, false) is CropView and form.crop.texture != null, "the editor shows the source page")
 	form.crop.selection = Rect2i(10, 10, 60, 80)
 	form.apply_crop()
-	_check(str(EntryStore.open(PackageManager.new(root).folder_of("swamp-finds")).find("monsters", "bog-hag").get("image")) == "art/bog-hag.jpg", "and crops the picture")
+	_check(str(EntryStore.open(PackageManager.new(root).folder_of("swamp-finds")).find("creatures", "bog-hag").get("image")) == "art/bog-hag.jpg", "and crops the picture")
 	form.cancelled.emit()
 
 	# Publish all from one import job (no clashes in the new package for job3's own copies).
@@ -187,9 +187,9 @@ func _init() -> void:
 		q = book.find_child("DuplicateQuestion", false, false) as ConfirmationDialog
 		guard += 1
 	var swamp_after := EntryStore.open(PackageManager.new(root).folder_of("swamp-finds"))
-	var left := swamp_after.list("monsters").filter(func(e: Dictionary) -> bool: return EntryStore.is_draft(e) and e.origin.get("job") == str(job3.id))
+	var left := swamp_after.list("creatures").filter(func(e: Dictionary) -> bool: return EntryStore.is_draft(e) and e.origin.get("job") == str(job3.id))
 	_check(left.is_empty() and _published(swamp_after, "Ogre Cook") == 3, "every draft of that job is published (%s left)" % [left.map(func(e: Dictionary) -> String: return str(e.id))])
-	_check(swamp_after.list("monsters").any(func(e: Dictionary) -> bool: return EntryStore.is_draft(e) and e.origin.get("job") == str(job4.id)), "the other job's drafts stay drafts")
+	_check(swamp_after.list("creatures").any(func(e: Dictionary) -> bool: return EntryStore.is_draft(e) and e.origin.get("job") == str(job4.id)), "the other job's drafts stay drafts")
 
 	print("import ui: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))
 	quit(1 if _failed > 0 else 0)
@@ -206,7 +206,7 @@ func _wait_done(jobs: ImportJobs, id: String) -> Dictionary:
 
 
 func _published(store: EntryStore, entry_name: String) -> int:
-	return store.list("monsters").filter(func(e: Dictionary) -> bool: return e.get("name") == entry_name and not EntryStore.is_draft(e)).size()
+	return store.list("creatures").filter(func(e: Dictionary) -> bool: return e.get("name") == entry_name and not EntryStore.is_draft(e)).size()
 
 
 func _tree_contains(folder: String, text: String) -> bool:
@@ -222,8 +222,8 @@ func _tree_contains(folder: String, text: String) -> bool:
 func _mini_source(folder: String) -> void:
 	DirAccess.make_dir_recursive_absolute(folder)
 	EntryStore._write(folder.path_join("package.json"), {"format": "dragoon-package", "format_version": 1, "id": "mini-source",
-		"name": "Mini Source", "kind": "source", "version": "1.0.0", "counts": {"monsters": 1}})
-	EntryStore._write(folder.path_join("monsters.json"), [
+		"name": "Mini Source", "kind": "source", "version": "1.0.0", "counts": {"creatures": 1}})
+	EntryStore._write(folder.path_join("creatures.json"), [
 		{"id": "ogre-cook", "name": "Ogre Cook", "source": "Mini", "image": "", "size": "Large", "type": "Giant", "cr": 2, "hp": 59, "ac": 11, "actions": [], "description": ""}])
 
 

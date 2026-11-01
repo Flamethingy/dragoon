@@ -13,7 +13,7 @@ func _init() -> void:
 	root.add_child(book)
 	await book.db.loaded
 	await process_frame  # the book's own _on_loaded runs after this await resumes
-	book.open_tab(book.db.get_entry("5e-core-rules", "monsters", "goblin"))
+	book.open_tab(book.db.get_entry("5e-core-rules", "creatures", "goblin"))
 	book.open_tab(book.db.resolve("Fireball"))
 	book.open_tab(book.db.resolve("Aboleth"))
 	await _shot(out.path_join("compendium_tab_monster.png"))

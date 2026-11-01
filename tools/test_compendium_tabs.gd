@@ -14,9 +14,9 @@ func _init() -> void:
 	var book := await _book()
 	_check(book.current_tab_key() == "" and book._browse.visible, "starts on Browse")
 
-	var goblin := book.db.get_entry("5e-core-rules", "monsters", "goblin")
+	var goblin := book.db.get_entry("5e-core-rules", "creatures", "goblin")
 	var view := book.open_tab(goblin)
-	_check(view != null and book.tab_keys() == PackedStringArray(["5e-core-rules/monsters/goblin"]), "goblin in its own tab")
+	_check(view != null and book.tab_keys() == PackedStringArray(["5e-core-rules/creatures/goblin"]), "goblin in its own tab")
 	_check(view.visible and not book._browse.visible, "the tab is shown, the binder hidden")
 	await process_frame
 	await process_frame
@@ -77,7 +77,7 @@ func _init() -> void:
 	_check(book.tab_keys().size() == n - 1 and keys_before[1] not in book.tab_keys(), "Ctrl+W closes the shown tab")
 	_check(book.current_tab_key() != "", "a neighbour tab is shown")
 	book.close_tab(0)
-	_check(book.tab_keys().size() == n - 2 and "5e-core-rules/monsters/goblin" not in book.tab_keys(), "close button closes")
+	_check(book.tab_keys().size() == n - 2 and "5e-core-rules/creatures/goblin" not in book.tab_keys(), "close button closes")
 	book._tab_bar.move_tab(0, book._tab_bar.tab_count - 1)
 	var order := book.tab_keys()
 

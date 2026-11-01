@@ -61,38 +61,38 @@ func _init() -> void:
 	(card.find_child("Switch", true, false) as CheckButton).button_pressed = false
 	await book.db.loaded
 	await process_frame
-	_check(not manager.is_enabled("westmarch") and book.db.get_entry("westmarch", "npcs", "mira").is_empty(), "off: its entries are gone from the book")
+	_check(not manager.is_enabled("westmarch") and book.db.get_entry("westmarch", "characters", "mira").is_empty(), "off: its entries are gone from the book")
 	_check(book._kind == "packages" and _card(book, "westmarch") != null and _card(book, "westmarch").modulate.a < 1.0, "the card stays, dimmed")
 	book.set_package_enabled("westmarch", true)
 	await book.db.loaded
 	await process_frame
-	_check(not book.db.get_entry("westmarch", "npcs", "mira").is_empty(), "on again: entries are back")
+	_check(not book.db.get_entry("westmarch", "characters", "mira").is_empty(), "on again: entries are back")
 
 	# --- Full view ---------------------------------------------------------------------------------
 	mini = book.entry_for("mini-source", "packages", "mini-source")
 	var view := book.open_tab(mini)
 	await process_frame
 	var text := _texts(view)
-	_check(text.contains("version 1.2.0") and text.contains("Monsters 2") and text.contains("Imported from"), "version, counts and origin (%s)" % text.left(300))
-	_check(_bbcode(view).contains("pkgkind:mini-source/monsters") and _bbcode(view).contains("pdf:mini-source/docs/Mini%20Rules.pdf"), "counts and PDF links are links")
+	_check(text.contains("version 1.2.0") and text.contains("Creatures 2") and text.contains("Imported from"), "version, counts and origin (%s)" % text.left(300))
+	_check(_bbcode(view).contains("pkgkind:mini-source/creatures") and _bbcode(view).contains("pdf:mini-source/docs/Mini%20Rules.pdf"), "counts and PDF links are links")
 	_check(not view.edit_button.visible and not view.send_button.visible, "no Edit / Send on a package")
 	_check(view.documents_box.find_child("Doc_Mini Rules.pdf".validate_node_name(), true, false) != null and _texts(view.documents_box).contains("Mini Rules"), "the PDF is listed")
 	_check(_texts(view.documents_box).contains("KB") or _texts(view.documents_box).contains("bytes"), "with its size")
 	var contents := view.contents
-	_check(contents != null and contents.groups.has("monsters") and contents.groups.has("features"), "contents grouped by kind")
-	_check(contents.find_child("Cards_monsters", true, false).get_child_count() == 2 and contents.find_child("Cards_features", true, false) == null, "features start collapsed")
+	_check(contents != null and contents.groups.has("creatures") and contents.groups.has("features"), "contents grouped by kind")
+	_check(contents.find_child("Cards_creatures", true, false).get_child_count() == 2 and contents.find_child("Cards_features", true, false) == null, "features start collapsed")
 	contents.toggle("features")
 	_check(contents.find_child("Cards_features", true, false) != null, "a group opens")
 	contents.set_query("ogre")
-	_check(contents.find_child("Cards_monsters", true, false).get_child_count() == 1 and contents.find_child("Group_features", true, false) == null, "search inside the package")
+	_check(contents.find_child("Cards_creatures", true, false).get_child_count() == 1 and contents.find_child("Group_features", true, false) == null, "search inside the package")
 	contents.set_query("")
-	var first: EntryCard = contents.find_child("Cards_monsters", true, false).get_child(0)
+	var first: EntryCard = contents.find_child("Cards_creatures", true, false).get_child(0)
 	first.pressed.emit(first.entry)
-	_check(book.current_tab_key() == "mini-source/monsters/" + str(first.entry.id), "a card opens in its own tab")
+	_check(book.current_tab_key() == "mini-source/creatures/" + str(first.entry.id), "a card opens in its own tab")
 
 	# Counts link to Browse filtered.
-	book._follow("pkgkind:mini-source/monsters", view.entry, true)
-	_check(book.current_tab_key() == "" and book._kind == "monsters" and book._matches.size() == 2 and book._matches.all(func(e: Dictionary) -> bool: return e._package == "mini-source"), "count link: Browse filtered to the package")
+	book._follow("pkgkind:mini-source/creatures", view.entry, true)
+	_check(book.current_tab_key() == "" and book._kind == "creatures" and book._matches.size() == 2 and book._matches.all(func(e: Dictionary) -> bool: return e._package == "mini-source"), "count link: Browse filtered to the package")
 
 	# Add PDF.
 	var pdf := ProjectSettings.globalize_path(DIR + "/Another Book.pdf")
@@ -141,9 +141,9 @@ func _mini_source(folder: String) -> void:
 	EntryStore._write(folder.path_join("package.json"), {"format": "dragoon-package", "format_version": 1, "id": "mini-source",
 		"name": "Mini Source", "kind": "source", "version": "1.2.0", "created": "2026-11-01T12:00:00",
 		"imported_from": "test", "description": "A tiny homebrew book.\n\n## PDFs\n[Mini Rules](<docs/Mini Rules.pdf>)",
-		"counts": {"monsters": 2, "features": 1},
+		"counts": {"creatures": 2, "features": 1},
 		"documents": [{"file": "docs/Mini Rules.pdf", "title": "Mini Rules", "size": 23}]})
-	EntryStore._write(folder.path_join("monsters.json"), [
+	EntryStore._write(folder.path_join("creatures.json"), [
 		{"id": "ogre-cook", "name": "Ogre Cook", "source": "Mini", "image": "", "size": "Large", "type": "Giant", "cr": 2, "hp": 59, "ac": 11, "actions": ["ladle"], "description": ""},
 		{"id": "pixie-clerk", "name": "Pixie Clerk", "source": "Mini", "image": "", "size": "Tiny", "type": "Fey", "cr": 0.25, "hp": 2, "ac": 15, "actions": [], "description": ""}])
 	EntryStore._write(folder.path_join("features.json"), [

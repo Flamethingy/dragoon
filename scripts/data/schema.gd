@@ -15,7 +15,7 @@ const ABILITIES := ["str", "dex", "con", "int", "wis", "cha"]
 const SPEEDS := ["walk", "swim", "fly", "burrow", "climb"]
 const HIDDEN := ["id", "origin", "used_by", "counts", "draft", "edited", "source_page", "crop"]  ## kept, not shown
 ## Fields a finished entry should have filled (the Drafts page hints at empty ones).
-const REQUIRED := {"monsters": ["type", "cr", "ac", "hp", "description"], "spells": ["school", "description"],
+const REQUIRED := {"creatures": ["type", "cr", "ac", "hp", "description"], "spells": ["school", "description"],
 	"items": ["rarity", "description"], "features": ["text"], "tables": ["dice", "rows"], "notes": ["text"],
 	"maps": ["image"]}
 const SIZE_TOKENS := ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"]
@@ -45,7 +45,7 @@ const TOKENS := {
 	"prof_armor": [true, []], "prof_weapon": [true, []], "prof_skills": [true, []], "prof_tools": [true, []],
 	"features.uses": [false, []], "tables.dice": [false, DICE],
 	"subclasses.class": [false, [], "classes", "name"], "subraces.parent": [false, [], "races", "name"],
-	"pcs.race": [false, [], "races", "ref"], "npcs.race": [false, [], "races", "name"],
+	"characters.race": [false, [], "races", "ref"],
 	"factions": [true, [], "factions", "ref"], "location": [false, [], "places", "ref"],
 }
 ## Field types that may become tokens (others, e.g. markdown or json, stay as they are).
@@ -57,16 +57,17 @@ const CREATURE := [["token", "image"], ["size", "choice", SIZES], ["ac", "int", 
 	["saves", "bonuses", "Saving throws"], ["skills", "bonuses"], ["passive_perception", "int"],
 	["senses", "list"], ["languages", "list"]]
 const KINDS := {
-	"monsters": [["type", "line"], ["subtype", "line"], ["alignment", "line"], ["cr", "float", "Challenge rating"],
+	"creatures": [["type", "line"], ["subtype", "line"], ["alignment", "line"], ["cr", "float", "Challenge rating"],
 		["armor", "line", "Armor (text)"], ["vulnerabilities", "list"], ["resistances", "list"],
 		["immunities", "list"], ["condition_immunities", "list"], ["environments", "list"], ["spells", "list"],
 		["traits", "features"], ["actions", "features"], ["bonus_actions", "features"], ["reactions", "features"],
 		["legendary_intro", "markdown", "Legendary actions intro"], ["legendary_actions", "features"]],
-	"pcs": [["player", "line", "Player id"], ["race", "ref"], ["classes", "json"], ["background", "line"],
-		["alignment", "line"], ["proficiency_bonus", "int"], ["proficiencies", "list"], ["features", "refs"],
-		["spells", "refs"], ["inventory", "json"], ["factions", "refs"], ["location", "ref"]],
-	"npcs": [["role", "line"], ["race", "line"], ["alignment", "line"], ["attitude", "choice", ["", "friendly", "neutral", "hostile"]],
-		["location", "ref"], ["factions", "refs"], ["stat_block", "ref"]],
+	# PCs and NPCs in one (TASK-43): owners are the players who control it (the DM always
+	# does); NPCs may have manual traits instead of a class.
+	"characters": [["owners", "list", "Owners (player ids)"], ["race", "ref"], ["classes", "json"], ["background", "line"],
+		["role", "line"], ["alignment", "line"], ["attitude", "choice", ["", "friendly", "neutral", "hostile"]],
+		["proficiency_bonus", "int"], ["proficiencies", "list"], ["traits", "features"], ["features", "refs"],
+		["spells", "refs"], ["inventory", "json"], ["factions", "refs"], ["location", "ref"], ["stat_block", "ref"]],
 	"features": [["text", "markdown"], ["uses", "line"], ["cost", "line"], ["attack", "json"], ["save", "json"], ["damage", "json"]],
 	"spells": [["level", "int", "Level (0 = cantrip)"], ["school", "line"], ["subschool", "line"], ["casting_time", "line"],
 		["range_m", "float", "Range (m, 0 = self/touch)"], ["duration", "line"], ["concentration", "bool"], ["ritual", "bool"],
@@ -80,7 +81,7 @@ const KINDS := {
 	"notes": [["text", "markdown"], ["session", "int"], ["day", "int"], ["time", "int"], ["by", "line"], ["about", "ref"]],
 }
 ## Creature kinds get CREATURE fields after COMMON.
-const CREATURE_KINDS := ["monsters", "pcs", "npcs"]
+const CREATURE_KINDS := ["creatures", "characters"]
 
 
 ## The fields to edit for an entry of `kind` (its existing extra keys included).
@@ -177,17 +178,18 @@ static func blank(kind: String) -> Dictionary:
 	for f in fields(kind):
 		if not e.has(f.key):
 			e[f.key] = empty(f.type)
-	if kind == "monsters":
+	if kind == "creatures":
 		e["size"] = "Medium"
 		e["speed"] = {"walk": 9}
 	if kind == "maps":
 		e["kind"] = "local"
 		e["grid"] = {"size": 70, "offset": [0, 0]}
-	if kind == "pcs":
+	if kind == "characters":
+		e["owners"] = []
 		e["classes"] = []
 		e["inventory"] = []
 	if kind == "maps":
 		e["tokens"] = []
-	if kind in ["monsters", "spells", "items", "features"]:
+	if kind in ["creatures", "spells", "items", "features"]:
 		e["source"] = ""
 	return e

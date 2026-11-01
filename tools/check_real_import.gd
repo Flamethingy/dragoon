@@ -18,14 +18,14 @@ func _init() -> void:
 	print("merge: ", r)
 	var failed := 0
 	var store := EntryStore.open(pkg_root.path_join(str(r.get("package", ""))))
-	for kind in ["monsters", "spells", "items", "features", "tables"]:
+	for kind in ["creatures", "spells", "items", "features", "tables"]:
 		var list := store.list(kind)
 		var drafts := list.filter(func(e: Dictionary) -> bool: return EntryStore.is_draft(e))
 		print("%s: %d (%d drafts)" % [kind, list.size(), drafts.size()])
 		if drafts.size() != list.size():
 			failed += 1
 		for e: Dictionary in list:
-			if kind in ["monsters", "spells", "items"]:
+			if kind in ["creatures", "spells", "items"]:
 				var pic := str(e.get("image", ""))
 				var page := str(e.get("source_page", ""))
 				var ok := (pic == "" or FileAccess.file_exists(store.folder.path_join(pic))) \
@@ -33,7 +33,7 @@ func _init() -> void:
 				if not ok:
 					failed += 1
 					printerr("FAIL: ", kind, "/", e.id, " image=", pic, " page=", page)
-			if kind == "monsters":
+			if kind == "creatures":
 				for f: String in e.get("actions", []):
 					if store.find("features", f).is_empty():
 						failed += 1

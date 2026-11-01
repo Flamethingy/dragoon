@@ -15,13 +15,13 @@ func _init() -> void:
 	await book.db.loaded
 	await process_frame
 	var store := EntryStore.open(book.packages_root.path_join("sunken-coast"))
-	book.edit_entry(store, "monsters", "goblin")
+	book.edit_entry(store, "creatures", "goblin")
 	await _shot(out.path_join("editor_monster.png"))
 	var form := book.open_view(book.current_tab_key()).editor
 	form.find_child("Field_actions", true, false)
 	book.open_view(book.current_tab_key()).scroll_vertical = 900
 	await _shot(out.path_join("editor_monster_2.png"))
-	book.edit_entry(store, "npcs", "mira")
+	book.edit_entry(store, "characters", "mira")
 	var md := book.open_view(book.current_tab_key()).editor.find_child("Field_description", true, false)
 	var text: CodeEdit = md.find_child("Text", true, false)
 	text.text = "The smith of **Thornwick**. Friend of [[Gob"

@@ -70,8 +70,8 @@ func _init() -> void:
 	db.timeline_dir = red
 	db.world_filter = table.timeline.world_id()
 	db.load_now(packages)
-	var goblin: Dictionary = db.get_entry("bestiary", "monsters", "goblin")
-	var mira: Dictionary = db.get_entry("westmarch", "npcs", "mira")
+	var goblin: Dictionary = db.get_entry("bestiary", "creatures", "goblin")
+	var mira: Dictionary = db.get_entry("westmarch", "characters", "mira")
 	_check(not goblin.is_empty() and not mira.is_empty(), "the book has the bestiary goblin and the world's Mira")
 	_check(db.resolve("Elsewhere Elf").is_empty(), "not another world's entries")
 	var g1 := table.drop_token(goblin, Vector2i(1, 1))
@@ -86,8 +86,8 @@ func _init() -> void:
 	for t: Dictionary in table.view_for("").tokens:
 		hp[t.id] = t.get("hp")
 	_check(int(hp[g1]) == 2 and int(hp[g2]) == 7, "own HP per goblin (%s)" % [hp])
-	_check(table.drop_token(mira, Vector2i(4, 4)) == "npcs/mira" and table.drop_token(mira, Vector2i(5, 4)) == "npcs/mira", "a world NPC is placed itself, again = moved")
-	_check(table.grid.token_cell("npcs/mira") == Vector2i(5, 4), "Mira moved")
+	_check(table.drop_token(mira, Vector2i(4, 4)) == "characters/mira" and table.drop_token(mira, Vector2i(5, 4)) == "characters/mira", "a world NPC is placed itself, again = moved")
+	_check(table.grid.token_cell("characters/mira") == Vector2i(5, 4), "Mira moved")
 
 	# Dropped through the UI drop zone at a screen point.
 	var layer := CanvasLayer.new()  # like the table UI: screen coordinates, not the map's
@@ -98,15 +98,15 @@ func _init() -> void:
 	var screen := table.grid.get_canvas_transform() * table.grid.cell_center(Vector2i(6, 2), 1.0)
 	_check(drop._can_drop_data(screen, EntryDrag.data(goblin)) and not drop._can_drop_data(screen, {"x": 1}), "the drop zone takes compendium entries only")
 	drop._drop_data(screen, EntryDrag.data(goblin))
-	var g3 := "monsters/goblin-3"
+	var g3 := "creatures/goblin-3"
 	_check(table.grid.tokens.has(g3) and table.grid.token_cell(g3) == Vector2i(6, 2), "dropped at the cell under the mouse (%s)" % table.grid.token_cell(g3))
 	var card := EntryCard.new()
 	card.setup(goblin)
-	_check(EntryDrag.is_entry(card._get_drag_data(Vector2.ZERO)) and EntryDrag.ref_of(card._get_drag_data(Vector2.ZERO)) == "monsters/goblin", "compendium cards can be dragged")
+	_check(EntryDrag.is_entry(card._get_drag_data(Vector2.ZERO)) and EntryDrag.ref_of(card._get_drag_data(Vector2.ZERO)) == "creatures/goblin", "compendium cards can be dragged")
 	card.free()
 	var now := _snapshot(world)
-	_check(world_files.keys().all(func(f: String) -> bool: return f in ["monsters.json", "features.json", "package.json"] or now.get(f) == world_files[f]), "placing tokens leaves the other world files alone")
-	var in_world := EntryStore.open(world).list("monsters").filter(func(m: Dictionary) -> bool: return str(m.get("name", "")) == "Goblin")
+	_check(world_files.keys().all(func(f: String) -> bool: return f in ["creatures.json", "features.json", "package.json"] or now.get(f) == world_files[f]), "placing tokens leaves the other world files alone")
+	var in_world := EntryStore.open(world).list("creatures").filter(func(m: Dictionary) -> bool: return str(m.get("name", "")) == "Goblin")
 	_check(in_world.size() == 1, "the core goblin was imported into the world once (%d)" % in_world.size())
 
 	# --- Two timelines, one map -------------------------------------------------------------------
@@ -132,10 +132,10 @@ func _book(folder: String) -> void:
 	var img := Image.create(64, 64, false, Image.FORMAT_RGB8)
 	img.fill(Color.DARK_GREEN)
 	img.save_png(folder.path_join("assets/tokens/goblin.png"))
-	_write(folder.path_join("monsters.json"), [{"id": "goblin", "name": "Goblin", "type": "humanoid", "cr": 0.25, "ac": 15, "hp": 7,
+	_write(folder.path_join("creatures.json"), [{"id": "goblin", "name": "Goblin", "type": "humanoid", "cr": 0.25, "ac": 15, "hp": 7,
 		"size": "small", "description": "Small and mean.", "token": "assets/tokens/goblin.png"}])
 	var other := Worlds.create("Elsewhere", "default", folder.get_base_dir().get_base_dir().path_join("worlds"))
-	EntryStore.open(other).save("npcs", {"id": "elf", "name": "Elsewhere Elf", "description": "Not here."})
+	EntryStore.open(other).save("characters", {"id": "elf", "name": "Elsewhere Elf", "description": "Not here."})
 
 
 func _snapshot(folder: String) -> Dictionary:

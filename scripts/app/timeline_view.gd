@@ -26,7 +26,7 @@ func _ready() -> void:
 	head.add_child(heading)
 	filter_edit = LineEdit.new()
 	filter_edit.name = "Filter"
-	filter_edit.placeholder_text = "Filter: hp, pcs/aria, ann ..."
+	filter_edit.placeholder_text = "Filter: hp, characters/aria, ann ..."
 	filter_edit.custom_minimum_size = Vector2(260, 0)
 	filter_edit.text_changed.connect(func(_t: String) -> void: refresh())
 	head.add_child(filter_edit)

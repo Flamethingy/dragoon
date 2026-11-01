@@ -294,7 +294,7 @@ static var _placeholders := {}
 ## A round token for creatures without a picture, coloured by kind (pcs, npcs, monsters).
 static func placeholder(kind: String) -> Texture2D:
 	if not _placeholders.has(kind):
-		var color: Color = {"pcs": Color("#2e6e60"), "npcs": Color("#3a5f9a")}.get(kind, Color("#8f3b3b"))
+		var color: Color = {"characters": Color("#2e6e60")}.get(kind, Color("#8f3b3b"))
 		var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
 		for y in 64:
 			for x in 64:

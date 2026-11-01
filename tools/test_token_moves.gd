@@ -93,8 +93,8 @@ func _init() -> void:
 
 	# A numbered copy follows the token look of its world entry (Nico: the settings didn't show).
 	var core_dir := PackageDB.default_root().path_join("5e-core-rules")
-	var goblin := EntryStore.open(core_dir).find("monsters", "goblin")
-	goblin.merge({"_kind": "monsters", "_layer": "core", "_package": "5e-core-rules", "_dir": core_dir}, true)
+	var goblin := EntryStore.open(core_dir).find("creatures", "goblin")
+	goblin.merge({"_kind": "creatures", "_layer": "core", "_package": "5e-core-rules", "_dir": core_dir}, true)
 	var free := Vector2i(0, 0)
 	for y in 6:
 		for x in 6:
@@ -102,9 +102,9 @@ func _init() -> void:
 				free = Vector2i(x, y)
 	var copy_ref := table.drop_token(goblin, free)
 	var ws := table.timeline.world_store()
-	var wg := ws.find("monsters", "goblin")
+	var wg := ws.find("creatures", "goblin")
 	wg["token_style"] = {"border": "#00aa00", "background": "#112233", "faces": "left"}
-	ws.save("monsters", wg)
+	ws.save("creatures", wg)
 	table.refresh_tokens()
 	var shown: Variant = (grid.tokens[copy_ref].get_meta("info", {}) as Dictionary).get("token_style")
 	_check(shown is Dictionary and shown.border == "#00aa00", "a copy on the map takes the world goblin's new look (%s)" % [shown])

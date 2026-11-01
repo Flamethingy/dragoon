@@ -32,7 +32,7 @@ func show_entry(e: Dictionary) -> void:
 	var name := str(e.get("name", "?")).strip_edges()
 	letter = name.substr(0, 1).to_upper() if name != "" else "?"
 	texture = null
-	icon = type_icon(e) if e.get("_kind") == "monsters" else null
+	icon = type_icon(e) if e.get("_kind") == "creatures" else null
 	_path = CardData.image_path(e)
 	if _path != "":
 		ImageCache.request(_path, _on_image.bind(_path))

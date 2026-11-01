@@ -24,7 +24,7 @@ const SCHOOLS_ORDINAL := ["cantrip", "1st", "2nd", "3rd", "4th", "5th", "6th", "
 
 static func to_bbcode(e: Dictionary) -> String:
 	match str(e.get("_kind", "")):
-		"monsters":
+		"creatures":
 			return monster(e)
 		"spells":
 			return spell(e)
@@ -275,9 +275,9 @@ static func feature(e: Dictionary) -> String:
 	if users is Array and not users.is_empty():
 		var links := PackedStringArray()
 		for id: Variant in users:
-			var m: Dictionary = db.get_entry(str(e["_package"]), "monsters", str(id)) if db != null else {}
+			var m: Dictionary = db.get_entry(str(e["_package"]), "creatures", str(id)) if db != null else {}
 			var label := str(m.get("name", id))
-			links.append("[url=entry:%s/monsters/%s][color=#%s]%s[/color][/url]" % [e["_package"], id, Markdown.LINK.to_html(), Markdown.escape(label)])
+			links.append("[url=entry:%s/creatures/%s][color=#%s]%s[/color][/url]" % [e["_package"], id, Markdown.LINK.to_html(), Markdown.escape(label)])
 		bb += _heading("Used by %d monster%s" % [users.size(), "" if users.size() == 1 else "s"]) + ", ".join(links)
 	return bb + _footer(e)
 

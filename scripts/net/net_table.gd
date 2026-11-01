@@ -23,6 +23,7 @@ signal pcs_changed  ## lobby: the PC list or my PC changed
 signal entry_received(ref: String)  ## player: an entry I asked for arrived or changed
 signal accounts_changed  ## names or colors of the accounts changed
 signal sheet_received(ref: String)  ## a sheet I opened arrived or changed (TASK-10)
+signal rolls_changed  ## the roll log got a roll (TASK-12)
 
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
@@ -66,6 +67,9 @@ var assets_received := 0  ## images downloaded this run (tests check the cache w
 var entries := {}  ## ref -> the entry as the host let me see it (request_entry)
 var accounts := {}  ## id -> {name, color "#rrggbb"}; "dm" = the DM (both sides)
 var sheets := {}  ## ref -> the sheet as the host let me see it (open_sheet)
+var rolls: Array = []  ## the roll log as I may see it (this session), oldest first
+var rng := RandomNumberGenerator.new()  ## host: rolls the dice
+const ROLL_LOG_SIZE := 100
 var sheet_watchers := {}  ## host: ref -> {peer id: true} who has the sheet open
 var _state := {}  ## the last table view from the host
 var _requested := {}  ## sha -> true while downloading
@@ -116,7 +120,8 @@ func _ready() -> void:
 
 
 func is_online() -> bool:
-	return multiplayer.multiplayer_peer != null and not multiplayer.multiplayer_peer is OfflineMultiplayerPeer
+	var peer := multiplayer.multiplayer_peer
+	return peer != null and not peer is OfflineMultiplayerPeer 		and peer.get_connection_status() != MultiplayerPeer.CONNECTION_DISCONNECTED
 
 
 func is_dm() -> bool:
@@ -152,6 +157,8 @@ func host(port := DEFAULT_PORT) -> Error:
 	_open_notes()
 	accounts = campaign.accounts()
 	_apply_accounts()
+	rng.randomize()
+	_load_rolls()
 	_apply_state(view_for(""))
 	_set_status("Hosting %s on port %d (%d events in the log)" % [campaign.info.get("name", campaign.id()), port, event_log.events.size()])
 	return OK
@@ -333,6 +340,7 @@ func hello(name_given: String) -> void:
 	peers[sender] = player
 	pc_list.rpc_id(sender, campaign.pc_choices(owners), _pc_of(player), player)
 	receive_accounts.rpc_id(sender, accounts)
+	sync_rolls.rpc_id(sender, _rolls_for(player))
 	sync_notes.rpc_id(sender, notes.session, _notes_for(player), notes.names)
 	receive_table.rpc_id(sender, view_for(player))
 	var who := campaign.player_name(player)
@@ -688,8 +696,10 @@ func start_next_session() -> void:
 		return
 	event_log.start_session(event_log.session + 1)
 	_open_notes()
+	_load_rolls()
 	for peer_id: int in peers:
 		sync_notes.rpc_id(peer_id, notes.session, _notes_for(peers[peer_id]), notes.names)
+		sync_rolls.rpc_id(peer_id, _rolls_for(peers[peer_id]))
 	_set_status("Session %d started" % event_log.session)
 
 
@@ -835,6 +845,14 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 		sheet["_hp_max"] = int(campaign.entry(ref).get("hp", 0))
 		if sheet.has("classes"):
 			sheet["_class"] = campaign.class_text(sheet)
+		var attacks := []
+		var features := campaign.entries("features")
+		for key in ["features", "actions", "bonus_actions", "reactions"]:
+			for fid: Variant in sheet.get(key, []):
+				var f: Variant = features.get(str(fid), {})
+				if f is Dictionary and f.get("attack") is Dictionary:
+					attacks.append(str(f.get("name", fid)))
+		sheet["_attacks"] = attacks
 	else:
 		for key: String in INFO_FIELDS:
 			if view.has(key):
@@ -1006,6 +1024,137 @@ func _deny_sheet(sender: int, reason: String) -> void:
 @rpc("authority", "call_remote", "reliable")
 func sheet_denied(reason: String) -> void:
 	_set_status("Can't change that: " + reason)
+
+
+# --- Dice (TASK-12) --------------------------------------------------------------------------
+
+## Rolls by name for a creature ("Perception", "Dex save", "attack with Longsword", "initiative",
+## "... with advantage") or a formula ("2d6+3"). `ref` "" = my PC (players) or a plain formula.
+## The host rolls, logs dice.rolled and shows it to everyone; `hidden` (DM only) shows it
+## to the DM alone.
+func roll(query: String, ref := "", hidden := false) -> void:
+	if is_dm():
+		_handle_roll(1, query, ref, hidden)
+	elif is_online():
+		request_roll.rpc_id(1, query, ref)
+
+
+## Player -> DM.
+@rpc("any_peer", "call_remote", "reliable")
+func request_roll(query: String, ref: String) -> void:
+	if is_dm():
+		_handle_roll(multiplayer.get_remote_sender_id(), query.left(200), ref, false)
+
+
+func _handle_roll(sender: int, query: String, ref: String, hidden: bool) -> Dictionary:
+	var player := _sender_player(sender)
+	if player == "":
+		return {}
+	if ref == "" and player != Reveal.DM:
+		ref = _pc_of(player)
+	if ref != "" and not may_see_sheet(player, ref):
+		_deny_roll(sender, "that's not your sheet")
+		return {}
+	var sheet := sheet_for(Reveal.DM, ref) if ref != "" else {}
+	var asked := Dice.resolve(sheet, query, campaign.entries("features")) if not sheet.is_empty() else []
+	if asked.is_empty():
+		if not Dice.is_formula(query):
+			_deny_roll(sender, "I don't know how to roll \"%s\"" % query.strip_edges())
+			return {}
+		asked = [{"label": "", "formula": query.replace(" ", "")}]
+	var results := []
+	for a: Dictionary in asked:
+		var r := Dice.roll(str(a.formula), rng)
+		r["label"] = a.label
+		results.append(r)
+	var who := str(sheet.get("name", "")) if not sheet.is_empty() else campaign.player_name(player)
+	var data := {"roll": str(asked[0].label) if str(asked[0].label) != "" else str(asked[0].formula),
+		"formula": results[0].formula, "result": results[0].total, "dice": results[0].dice,
+		"results": results, "who": who, "hidden": hidden and player == Reveal.DM}
+	var e := event_log.append("dice.rolled", ref, data, player)
+	var entry := _roll_entry(e)
+	_add_roll(entry)
+	if not entry.hidden:
+		for peer_id: int in peers:
+			roll_added.rpc_id(peer_id, entry)
+	return entry
+
+
+## A dice.rolled event as the roll log shows it.
+static func _roll_entry(e: Dictionary) -> Dictionary:
+	var d: Dictionary = e.get("data", {})
+	return {"id": e.get("id", 0), "by": e.get("by", ""), "who": d.get("who", ""), "results": d.get("results", []),
+		"hidden": bool(d.get("hidden", false)), "real": e.get("real", "")}
+
+
+func _add_roll(entry: Dictionary) -> void:
+	rolls.append(entry)
+	if rolls.size() > ROLL_LOG_SIZE:
+		rolls = rolls.slice(rolls.size() - ROLL_LOG_SIZE)
+	rolls_changed.emit()
+
+
+## Host: this session's rolls from the log (so a restart or a late joiner sees them).
+func _load_rolls() -> void:
+	rolls = []
+	for e in event_log.events:
+		if e.type == "dice.rolled" and int(e.session) == event_log.session and not event_log.is_undone(e.id):
+			rolls.append(_roll_entry(e))
+	rolls = rolls.slice(maxi(0, rolls.size() - ROLL_LOG_SIZE))
+	rolls_changed.emit()
+
+
+func _rolls_for(_player: String) -> Array:
+	return rolls.filter(func(r: Dictionary) -> bool: return not r.hidden)
+
+
+## DM -> players: a new roll.
+@rpc("authority", "call_remote", "reliable")
+func roll_added(entry: Dictionary) -> void:
+	_add_roll(entry)
+
+
+## DM -> player: the session's rolls (on join, new session).
+@rpc("authority", "call_remote", "reliable")
+func sync_rolls(list: Array) -> void:
+	rolls = list
+	rolls_changed.emit()
+
+
+func _deny_roll(sender: int, reason: String) -> void:
+	if sender == 1:
+		_set_status("Can't roll: " + reason)
+	else:
+		roll_denied.rpc_id(sender, reason)
+
+
+## DM -> player.
+@rpc("authority", "call_remote", "reliable")
+func roll_denied(reason: String) -> void:
+	_set_status("Can't roll: " + reason)
+
+
+## One roll as BBCode for the log: "Aria · Perception: [14] + 4 = 18".
+static func roll_bbcode(entry: Dictionary, names := {}) -> String:
+	var lines := PackedStringArray()
+	for r: Dictionary in entry.get("results", []):
+		var total := "[b]%d[/b]" % int(r.get("total", 0))
+		if r.get("crit") == "20":
+			total = "[b][color=#%s]%d (nat 20)[/color][/b]" % [UISkin.GREEN.to_html(false), int(r.total)]
+		elif r.get("crit") == "1":
+			total = "[b][color=#%s]%d (nat 1)[/color][/b]" % [UISkin.RED.to_html(false), int(r.total)]
+		var label := str(r.get("label", ""))
+		lines.append("%s%s  [color=#%s]%s[/color]  = %s" % [Markdown.escape(label) + ": " if label != "" else "",
+			Markdown.escape(str(r.get("formula", ""))), Markdown.MUTED.to_html(false),
+			Markdown.escape(str(r.get("text", "")).get_slice(" = ", 0)), total])
+	var who := str(entry.get("who", ""))
+	var by := str(names.get(entry.get("by", ""), entry.get("by", "")))
+	var head := Markdown.escape(who if who != "" else by)
+	if by != "" and who != "" and who != by:
+		head += " [color=#%s](%s)[/color]" % [Markdown.MUTED.to_html(false), Markdown.escape(by)]
+	if entry.get("hidden", false):
+		head += " [color=#%s][i]hidden[/i][/color]" % Markdown.MUTED.to_html(false)
+	return "[font_size=12]%s[/font_size]\n%s" % [head, "\n".join(lines)]
 
 
 func _set_status(text: String) -> void:

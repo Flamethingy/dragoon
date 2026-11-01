@@ -32,6 +32,9 @@ var _notes_title: Label
 var _notes_text: RichTextLabel
 var _note_edit: TextEdit
 var _next_session: Button
+var _rolls_text: RichTextLabel
+var roll_edit: LineEdit
+var _roll_hidden: CheckBox
 
 
 func _ready() -> void:
@@ -54,6 +57,7 @@ func _ready() -> void:
 	table.notes_changed.connect(_show_notes)
 	table.table_changed.connect(_refresh)
 	table.accounts_changed.connect(_refresh)
+	table.rolls_changed.connect(_show_rolls)
 	_refresh()
 	_show_notes()
 
@@ -67,6 +71,7 @@ func _refresh() -> void:
 	if not online:
 		sheet.hide()
 	_next_session.visible = dm
+	_roll_hidden.visible = dm
 	_maps.visible = dm
 	_book_button.visible = dm
 	var picking := online and not dm and table.my_pc == "" and not table.pc_choices.is_empty()
@@ -325,12 +330,13 @@ func _build_notes(root: Control) -> void:
 	_notes_text = RichTextLabel.new()
 	_notes_text.bbcode_enabled = true
 	_notes_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_notes_text.custom_minimum_size = Vector2(0, 80)
 	_notes_text.scroll_following = true
 	_notes_text.selection_enabled = true
 	col.add_child(_notes_text)
 	_note_edit = TextEdit.new()
 	_note_edit.placeholder_text = "Write a note (markdown)... Ctrl+Enter adds it"
-	_note_edit.custom_minimum_size = Vector2(0, 90)
+	_note_edit.custom_minimum_size = Vector2(0, 70)
 	_note_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_note_edit.gui_input.connect(func(event: InputEvent) -> void:
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ENTER and event.ctrl_pressed:
@@ -346,6 +352,57 @@ func _build_notes(root: Control) -> void:
 	add.size_flags_horizontal = Control.SIZE_SHRINK_END
 	add.pressed.connect(_submit_note)
 	col.add_child(add)
+
+	var rolls_title := Label.new()
+	rolls_title.text = "Rolls"
+	rolls_title.theme_type_variation = UISkin.V_HEADING
+	col.add_child(rolls_title)
+	_rolls_text = RichTextLabel.new()
+	_rolls_text.bbcode_enabled = true
+	_rolls_text.custom_minimum_size = Vector2(0, 170)
+	_rolls_text.scroll_following = true
+	_rolls_text.selection_enabled = true
+	col.add_child(_rolls_text)
+	var roll_row := HBoxContainer.new()
+	col.add_child(roll_row)
+	roll_edit = LineEdit.new()
+	roll_edit.placeholder_text = "Perception, Dex save, Longsword, 2d6+3"
+	roll_edit.tooltip_text = "Roll by name for the open sheet (or your PC), or a formula; add \"with advantage\" / \"dis\""
+	roll_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	roll_edit.text_submitted.connect(func(_t: String) -> void: _submit_roll())
+	roll_row.add_child(roll_edit)
+	_roll_hidden = CheckBox.new()
+	_roll_hidden.text = "Hidden"
+	_roll_hidden.tooltip_text = "Only you (the DM) see this roll"
+	roll_row.add_child(_roll_hidden)
+	var roll_button := Button.new()
+	roll_button.text = "Roll"
+	roll_button.pressed.connect(_submit_roll)
+	roll_row.add_child(roll_button)
+
+
+## Rolls the roll box: for the open sheet if it is mine to roll (my PC, the DM: any), else
+## my PC / a plain formula.
+func _submit_roll() -> void:
+	var text := roll_edit.text.strip_edges()
+	if text == "":
+		return
+	table.roll(text, roll_ref(), _roll_hidden.button_pressed)
+	roll_edit.text = ""
+
+
+## Who the roll box rolls for: the open sheet if I may roll for it.
+func roll_ref() -> String:
+	if sheet.visible and bool(sheet.sheet.get("_editable", false)):
+		return sheet.ref
+	return ""
+
+
+func _show_rolls() -> void:
+	var parts := PackedStringArray()
+	for r: Dictionary in table.rolls:
+		parts.append(NetTable.roll_bbcode(r, table.notes.names))
+	_rolls_text.text = "\n".join(parts) if not parts.is_empty() else "[color=#%s]No rolls yet.[/color]" % Markdown.MUTED.to_html(false)
 
 
 func _submit_note() -> void:

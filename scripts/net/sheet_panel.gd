@@ -77,6 +77,7 @@ func _init() -> void:
 	_body.bbcode_enabled = true
 	_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_body.selection_enabled = true
+	_body.meta_clicked.connect(_on_meta)
 	col.add_child(_body)
 
 
@@ -103,6 +104,13 @@ func show_sheet(s: Dictionary) -> void:
 	_filling = false
 	_body.text = to_bbcode(s)
 	show()
+
+
+## Links in the sheet: "roll:<name>" rolls it for this creature.
+func _on_meta(meta: Variant) -> void:
+	var m := str(meta)
+	if m.begins_with("roll:") and table != null:
+		table.roll(m.substr(5), ref, Input.is_key_pressed(KEY_SHIFT) and table.is_dm())
 
 
 func close_sheet() -> void:
@@ -133,13 +141,14 @@ static func to_bbcode(s: Dictionary) -> String:
 		var stats: Dictionary = s.get("stats", {}) if s.get("stats") is Dictionary else {}
 		bb += "[table=6]"
 		for a: String in StatBlock.ABILITIES:
-			bb += "[cell padding=2,2,2,0][center][b]%s[/b][/center][/cell]" % a.to_upper()
+			bb += "[cell padding=2,2,2,0][center][b][url=roll:%s check]%s[/url][/b][/center][/cell]" % [a, a.to_upper()]
 		for a: String in StatBlock.ABILITIES:
 			var score := int(stats.get(a, 10))
 			bb += "[cell padding=2,0,2,2][center]%d (%s)[/center][/cell]" % [score, StatBlock._signed(floori((score - 10) / 2.0))]
 		bb += "[/table]\n" + StatBlock._rule()
-		bb += StatBlock._bonuses("Saving Throws", s.get("saves"))
-		bb += StatBlock._bonuses("Skills", s.get("skills"))
+		bb += _roll_list("Saving Throws", s.get("saves"), " save")
+		bb += _roll_list("Skills", s.get("skills"), "")
+		bb += StatBlock._field("Rolls", "[url=roll:initiative]Initiative[/url]" + _attacks(s))
 		var senses := StatBlock._join(s.get("senses", []))
 		if s.get("passive_perception") != null:
 			senses += ("" if senses == "" else ", ") + "passive Perception %s" % StatBlock._num(s.passive_perception)
@@ -165,6 +174,26 @@ static func to_bbcode(s: Dictionary) -> String:
 	if not bool(s.get("_full", false)):
 		bb += "\n\n[color=#%s][i]Only its player and the DM see the stats.[/i][/color]" % Markdown.MUTED.to_html(false)
 	return bb
+
+
+## "Saving Throws DEX +5, WIS +2" with each one a roll link.
+static func _roll_list(label: String, values: Variant, suffix: String) -> String:
+	if not values is Dictionary or values.is_empty():
+		return ""
+	var parts := PackedStringArray()
+	for k: String in values:
+		var name := k.to_upper() if k in StatBlock.ABILITIES else k.replace("_", " ").capitalize()
+		parts.append("[url=roll:%s%s]%s %s[/url]" % [k.replace("_", " "), suffix, name, StatBlock._signed(int(values[k]))])
+	return StatBlock._field(label, ", ".join(parts))
+
+
+## Attack links for the sheet's features that have an attack (needs StatBlock.db or the
+## sheet's `_attacks` names from the host).
+static func _attacks(s: Dictionary) -> String:
+	var out := ""
+	for name: Variant in s.get("_attacks", []):
+		out += ", [url=roll:attack with %s]%s[/url]" % [str(name).to_lower(), Markdown.escape(str(name))]
+	return out
 
 
 static func _item(ref: String, qty: int) -> String:

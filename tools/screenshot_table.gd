@@ -36,8 +36,11 @@ func _init() -> void:
 	await _shot("table_player.png")
 
 	me.change_hp("pcs/borin", -7)
+	me.roll("Insight")
+	me.roll("2d6+3")
+	dm.roll("stealth", "monsters/goblin-chief")
 	me.open_sheet("pcs/borin")
-	await _until(func() -> bool: return int(me.sheets.get("pcs/borin", {}).get("hp", -1)) >= 0 and me._ui.sheet.visible)
+	await _until(func() -> bool: return int(me.sheets.get("pcs/borin", {}).get("hp", -1)) >= 0 and me._ui.sheet.visible and me.rolls.size() == 3)
 	await _shot("table_sheet.png")
 	me.open_sheet("monsters/goblin-chief")
 	await _until(func() -> bool: return me._ui.sheet.ref == "monsters/goblin-chief")

@@ -168,3 +168,14 @@ See the "Open questions" section of the concept (secrets marking, event log form
   `hp.changed`, `change_field` -> `sheet.changed` (id/player/origin locked), checked by the host; pcs.json is
   never written. Open sheets and token hovers update for everyone who has them open. Test:
   `tools/test_sheets.gd`; screenshots `table_sheet.png`, `table_sheet_info.png`.
+
+- 2026-11-01: TASK-12 (Mochi): dice that know the stats. `Dice` (`scripts/dice/dice.gd`): formulas (`2d6+3`, `d20`,
+  `4d6kh3`, `2d20kl1+5`, max 100 dice), rolls with natural 20/1 marked, and `resolve(sheet, name, features)`:
+  skills (the sheet's bonus, else ability modifier), saves ("Dex save", "dexterity saving throw"), ability checks,
+  initiative, attacks by feature name ("attack with Longbow" -> to hit + damage from the feature's `attack`),
+  "with advantage"/"adv"/"dis". At the table the host rolls (`NetTable.roll`), logs `dice.rolled` (doc-1 fields
+  `roll`, `formula`, `result`, `dice` plus `results`, `who`, `hidden`) and sends it to everyone; players roll
+  only for their own PC; the DM can roll hidden (only the DM sees it). Roll log + roll box ("Hidden" for the
+  DM) under the notes; on the sheet, abilities, saves, skills, initiative and attacks are roll links. A late
+  joiner / restarted host gets the session's rolls from the log. Fix: `is_online()` is false once the peer is
+  disconnected (no error spam when the host closes). Test: `tools/test_dice.gd`.

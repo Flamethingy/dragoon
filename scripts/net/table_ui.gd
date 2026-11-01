@@ -20,6 +20,8 @@ var map_setup: MapSetup
 var _tokens_button: Button
 var _new_map_button: Button
 var _grid_button: Button
+var _combat_button: Button
+var _turn_button: Button
 var _root: Control
 
 var _lobby: Control
@@ -105,6 +107,10 @@ func _refresh() -> void:
 	_tokens_button.visible = dm
 	_new_map_button.visible = dm
 	_grid_button.visible = dm
+	var fighting := dm and table.in_combat()
+	_combat_button.visible = dm
+	_combat_button.text = "End combat" if fighting else "Start combat"
+	_turn_button.visible = fighting
 	if palette != null:
 		palette.visible = dm and _tokens_button.button_pressed
 		if palette.visible and palette.db != null and palette.db.timeline_dir != table.timeline_dir:
@@ -308,6 +314,15 @@ func _build_bar(root: Control) -> void:
 	_grid_button = _bar_button(row, "Grid...", "Line up the grid of this map (drag over one square)", func() -> void: setup_map())
 	_tokens_button = _bar_button(row, "Tokens", "Monsters, NPCs and PCs to drag onto the map", func() -> void: show_palette(_tokens_button.button_pressed))
 	_tokens_button.toggle_mode = true
+	_combat_button = _bar_button(row, "Start combat", "Start or end a combat on this map; an ended combat is saved as an encounter", func() -> void:
+		if table.in_combat():
+			table.end_combat()
+		else:
+			table.start_combat()
+		_refresh())
+	_combat_button.name = "Combat"
+	_turn_button = _bar_button(row, "Next turn", "The next creature's turn (a new round after the last)", func() -> void: table.next_turn())
+	_turn_button.name = "NextTurn"
 	_book_button = Button.new()
 	_book_button.text = "Compendium"
 	_book_button.tooltip_text = "Core, world and this timeline's entries; edit them (session edits become events)"

@@ -275,6 +275,54 @@ func drop_token(e: Dictionary, cell: Vector2i) -> String:
 	return ref
 
 
+# --- Combat (TASK-35) -----------------------------------------------------------------------
+
+## True while a combat runs in this timeline.
+func in_combat() -> bool:
+	return event_log != null and bool(Replay.world_state(event_log.effective()).combat.active)
+
+
+## DM: starts a combat on the current map with the creatures on it (`combat.started`).
+func start_combat() -> Dictionary:
+	if not is_dm() or in_combat():
+		return {}
+	var order := []
+	for id: String in grid.tokens:
+		if "/" in id:
+			order.append({"entity": id, "initiative": 0})
+	var e := event_log.append("combat.started", "", {"map": map_id, "order": order})
+	_set_status("Combat on %s" % timeline.name_of(map_id))
+	table_changed.emit()
+	return e
+
+
+## DM: the next turn (and round, after the last in the order): `combat.turn`.
+func next_turn() -> Dictionary:
+	if not is_dm() or not in_combat():
+		return {}
+	var c: Dictionary = Replay.world_state(event_log.effective()).combat
+	var turn := int(c.turn) + 1
+	var round_now := int(c.round)
+	if turn >= maxi((c.order as Array).size(), 1):
+		turn = 0
+		round_now += 1
+	var e := event_log.append("combat.turn", "", {"round": round_now, "turn": turn})
+	_set_status("Round %d, turn %d" % [round_now, turn + 1])
+	return e
+
+
+## DM: ends the combat (`combat.ended`); it is saved as an encounter of the timeline.
+## Returns the encounter ({} if none was made).
+func end_combat(reason := "") -> Dictionary:
+	if not is_dm() or not in_combat():
+		return {}
+	event_log.append("combat.ended", "", {"reason": reason} if reason != "" else {})
+	var made := Encounters.open(timeline.folder).sync(event_log, timeline)
+	_set_status("Combat over%s" % ("" if made.is_empty() else ": saved as \"%s\"" % made[0].name))
+	table_changed.emit()
+	return made[0] if not made.is_empty() else {}
+
+
 ## DM: the world's maps changed (added, grid aligned): reads them again and shows `id`.
 func maps_changed(id := "") -> void:
 	if not is_dm():

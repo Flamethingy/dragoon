@@ -6,8 +6,9 @@ extends Node
 ## session (or the DM closing it) goes back to the start screen.
 ## The last used world, timeline, name, address and port are kept in `settings_file`.
 
-const VIEWS := ["table", "compendium", "notes", "timeline"]
-const VIEW_NAMES := {"table": "Table", "compendium": "Compendium", "notes": "Notes", "timeline": "Timeline"}
+const VIEWS := ["table", "compendium", "notes", "timeline", "encounters"]
+const VIEW_NAMES := {"table": "Table", "compendium": "Compendium", "notes": "Notes", "timeline": "Timeline", "encounters": "Encounters"}
+const DM_VIEWS := ["compendium", "timeline", "encounters"]
 
 static var settings_file := "user://app.cfg"
 
@@ -21,6 +22,7 @@ var view := ""  ## "" = start screen, else one of VIEWS
 var book: Compendium
 var notes_view: NotesView
 var timeline_view: TimelineView
+var encounters_view: EncountersView
 
 var _layer: CanvasLayer
 var _bar: PanelContainer
@@ -134,7 +136,7 @@ func leave() -> void:
 func show_view(which: String) -> void:
 	if which != "" and not table.is_online():
 		which = ""
-	if which in ["compendium", "timeline"] and not table.is_dm():
+	if which in DM_VIEWS and not table.is_dm():
 		which = "table"  # the DM's views
 	view = which
 	start.visible = which == ""
@@ -144,7 +146,7 @@ func show_view(which: String) -> void:
 		_drop_book()
 	for v: String in _view_buttons:
 		(_view_buttons[v] as Button).set_pressed_no_signal(v == which)
-		(_view_buttons[v] as Button).visible = table.is_dm() or v in ["table", "notes"]
+		(_view_buttons[v] as Button).visible = table.is_dm() or v not in DM_VIEWS
 	if which == "compendium":
 		if book == null:
 			book = _new_book()
@@ -179,6 +181,20 @@ func show_view(which: String) -> void:
 		timeline_view.refresh()
 	if timeline_view != null:
 		timeline_view.visible = which == "timeline"
+	if which == "encounters":
+		if encounters_view == null or encounters_view.events_log != table.event_log:
+			if encounters_view != null:
+				encounters_view.queue_free()
+			encounters_view = EncountersView.new()
+			encounters_view.name = "EncountersView"
+			encounters_view.timeline = table.timeline
+			encounters_view.events_log = table.event_log
+			encounters_view.calendar = table.notes.calendar
+			encounters_view.assets = table.assets
+			_place(encounters_view)
+		encounters_view.refresh()
+	if encounters_view != null:
+		encounters_view.visible = which == "encounters"
 
 
 func _place(c: Control) -> void:
@@ -214,7 +230,7 @@ func _on_table_changed() -> void:
 		show_view("")
 	elif table.is_online():
 		for v: String in _view_buttons:
-			(_view_buttons[v] as Button).visible = table.is_dm() or v in ["table", "notes"]
+			(_view_buttons[v] as Button).visible = table.is_dm() or v not in DM_VIEWS
 
 
 func _build_bar(root: Control) -> void:

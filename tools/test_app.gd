@@ -63,6 +63,9 @@ func _init() -> void:
 	dm.show_view("timeline")
 	await process_frame
 	_check(dm.timeline_view.visible and not dm.book.visible and dm.timeline_view.tree.get_root().get_child_count() == dm.table.event_log.events.size(), "timeline view lists the events")
+	dm.show_view("encounters")
+	await process_frame
+	_check(dm.encounters_view != null and dm.encounters_view.visible and not dm.timeline_view.visible, "encounters view")
 	dm.show_view("notes")
 	await process_frame
 	_check(dm.notes_view.visible and not dm.timeline_view.visible, "notes view")
@@ -85,7 +88,7 @@ func _init() -> void:
 	_check(pl.join("127.0.0.1:%d" % PORT, "Ann") == OK, "join as Ann")
 	await _until(func() -> bool: return pl.table.my_pc == "pcs/aria")
 	_check(pl.view == "table" and pl._bar.visible, "player sees the table")
-	_check(not pl._view_buttons.compendium.visible and not pl._view_buttons.timeline.visible and pl._view_buttons.notes.visible, "player has table and notes only")
+	_check(not pl._view_buttons.compendium.visible and not pl._view_buttons.timeline.visible and not pl._view_buttons.encounters.visible and pl._view_buttons.notes.visible, "player has table and notes only")
 	pl.show_view("timeline")
 	_check(pl.view == "table", "no timeline view for players")
 	pl.leave()

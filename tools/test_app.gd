@@ -20,6 +20,7 @@ func _init() -> void:
 	DirAccess.make_dir_recursive_absolute(base.path_join("packages"))
 	App.settings_file = DIR.path_join("app.cfg")
 	ServerStatus.servers_file = DIR.path_join("servers.json")
+	Dock.layout_file = DIR.path_join("layout.json")
 	await process_frame
 
 	# --- First start: the example world, the start screen --------------------------------------
@@ -66,35 +67,63 @@ func _init() -> void:
 	(_find(dm.start, "Timeline_red-fang") as Button).pressed.emit()
 	_check(dm.table.is_dm() and dm.table.timeline_dir == red, "clicking a timeline hosts it")
 	_check(dm.view == "table" and not dm.start.visible and dm._bar.visible, "table view after hosting")
+	var views := dm.dock.get_parent() as Control  # headless: a 64 px window, give the panels room
+	views.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	views.size = Vector2(1600, 950)
+	_check(dm.dock.is_shown("session") and dm.dock.place_of("session") == "right", "the session log opens as a panel (TASK-37)")
+	_check(dm.dock.has_panel("sheet") and not dm.dock.is_shown("sheet"), "the sheet panel waits for a sheet")
+	var ui_sheet := dm.table_ui.sheet
+	ui_sheet.show_sheet({"ref": "pcs/aria", "name": "Aria", "_editable": true, "inventory": []})
+	_check(dm.dock.is_shown("sheet") and dm.dock.place_of("sheet") == "left", "a sheet opens its panel")
+	_check(ui_sheet._can_drop_data(Vector2.ZERO, EntryDrag.data({"_kind": "items", "id": "rope", "name": "Rope"})), "an item can be dropped on the sheet")
+	_check(not ui_sheet._can_drop_data(Vector2.ZERO, EntryDrag.data({"_kind": "monsters", "id": "goblin"})), "a monster can't")
+	dm.dock.hide_panel("sheet")
+	_check(not ui_sheet.visible and ui_sheet.ref == "", "closing the panel closes the sheet")
+	ui_sheet.show_sheet({"ref": "pcs/aria", "name": "Aria"})
+	ui_sheet.close_sheet()
+	_check(not dm.dock.is_shown("sheet"), "the sheet's own close button closes the panel")
 	dm.show_view("compendium")
 	await process_frame
-	_check(dm.book != null and dm.book.visible and dm.book.closable and dm.book.scope() == "core" and dm.book.find_child("TimelinePick", true, false) == null, "compendium view: the core book, no timeline picker")
+	_check(dm.book != null and dm.dock.is_shown("compendium") and dm.book.closable and dm.book.scope() == "core" and dm.book.find_child("TimelinePick", true, false) == null, "compendium view: the core book, no timeline picker")
+	_check(dm.dock.free_rect().size.x > 600, "the compendium doesn't cover the map")
 	var core_book := dm.book
 	dm.show_view("world")
 	await process_frame
-	_check(dm.book.scope() == "world" and dm.book.world_dir == str(west._dir) and not core_book.visible, "world view: the world's book")
+	_check(dm.book.scope() == "world" and dm.book.world_dir == str(west._dir) and dm.book != core_book and dm.dock.is_shown("compendium"), "world view: the world's book, beside the core book")
 	dm.show_view("timeline")
 	await process_frame
 	_check(dm.book.scope() == "timeline" and dm.book.timeline_dir == red and dm.book.event_log == dm.table.event_log, "timeline view: the timeline's book")
+	var tl_book := dm.book
+	var lantern := {"_kind": "items", "id": "storm-lantern", "name": "Storm Lantern", "weight": 2}
+	_check(tl_book._can_drop_data(Vector2.ZERO, EntryDrag.data(lantern)), "a core entry can be dropped on the timeline's book")
+	var before := dm.table.event_log.events.size()
+	tl_book._drop_data(Vector2.ZERO, EntryDrag.data(lantern))
+	_check(dm.table.timeline.entry("items/storm-lantern").get("name") == "Storm Lantern", "dropped on the timeline: the entry is in the timeline")
+	_check(dm.table.event_log.events.size() == before + 1 and str(dm.table.event_log.events.back().get("type")) == "entity.created", "...as an entity.created event")
 	dm.show_view("events")
 	await process_frame
-	_check(dm.timeline_view.visible and not dm.book.visible and dm.timeline_view.tree.get_root().get_child_count() == dm.table.event_log.events.size(), "events view lists the events")
+	_check(dm.dock.is_shown("events") and dm.dock.place_of("events") == "bottom" and dm.timeline_view.tree.get_root().get_child_count() == dm.table.event_log.events.size(), "events view lists the events")
 	dm.show_view("encounters")
 	await process_frame
-	_check(dm.encounters_view != null and dm.encounters_view.visible and not dm.timeline_view.visible, "encounters view")
+	_check(dm.encounters_view != null and dm.dock.is_shown("encounters"), "encounters view")
 	dm.show_view("notes")
 	await process_frame
-	_check(dm.notes_view.visible and not dm.timeline_view.visible, "notes view")
+	_check(dm.dock.is_shown("notes") and dm.dock.place_of("notes") == "left" and dm.dock.is_shown("events"), "notes view, the others stay open")
 	dm.table.add_note("The wolves fled north.")
 	await process_frame
 	dm.notes_view.refresh()
 	_check(dm.notes_view.text.text.contains("wolves fled"), "notes view shows the timeline's notes")
+	dm.toggle_view("notes")
+	_check(not dm.dock.is_shown("notes") and not dm._view_buttons.notes.button_pressed, "the bar button closes it again")
+	dm.dock.detach("events")
 	dm.show_view("table")
-	_check(dm.table.is_online() and not dm.notes_view.visible and dm.view == "table", "back to the table, still hosting")
+	_check(dm.table.is_online() and not dm.dock.is_shown("compendium") and dm.view == "table", "back to the table, still hosting")
+	_check(dm.dock.place_of("events") == "window", "own windows stay open")
 	dm.table_ui._book_button.pressed.emit()
-	_check(dm.view == "compendium", "the table's Compendium button switches the view")
+	_check(dm.view == "compendium" and dm.dock.is_shown("compendium"), "the table's Compendium button opens the book")
 	dm.books.compendium.close_requested.emit()
-	_check(dm.view == "table", "closing the compendium goes back to the table")
+	_check(dm.view == "table" and not dm.dock.is_shown("compendium"), "closing the compendium goes back to the table")
+	dm.dock.save_layout()
 
 	# --- A player joins from another app ---------------------------------------------------------
 	var pl := _app("Player")
@@ -117,6 +146,7 @@ func _init() -> void:
 	await _until(func() -> bool: return check.poll(), 600)
 	_check(check.info.get("players") == ["Ann"] and int(check.info.get("online", 0)) == 1, "players online in the status (%s)" % [check.info])
 	_check(pl.view == "table" and pl._bar.visible, "player sees the table")
+	_check(pl.dock.is_shown("session") and not pl.dock.is_shown("events"), "the player's panels: their saved session panel, not the DM's")
 	_check(not pl._view_buttons.compendium.visible and not pl._view_buttons.timeline.visible and not pl._view_buttons.encounters.visible and pl._view_buttons.notes.visible, "player has table and notes only")
 	pl.show_view("timeline")
 	_check(pl.view == "table", "no timeline view for players")

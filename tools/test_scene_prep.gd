@@ -65,16 +65,15 @@ func _init() -> void:
 	_check(table.map_id == cave and is_equal_approx(table.grid.cell, 35.0), "the new map is shown with its grid")
 	var world_files := _snapshot(world)
 
-	var palette := TokenPalette.new()
-	palette.table = table
-	palette.packages_root = packages
-	palette.size = Vector2(300, 600)
-	root.add_child(palette)
-	await process_frame
-	var goblin := _row(palette, "Goblin")
-	var mira := _row(palette, "Mira Hollowell")
-	_check(not goblin.is_empty() and not mira.is_empty(), "palette lists book monsters and world NPCs")
-	_check(_row(palette, "Elsewhere Elf").is_empty(), "not another world's entries")
+	# The timeline's book: core, its world, the timeline (what the DM drags from, TASK-37).
+	var db := PackageDB.new()
+	db.timeline_dir = red
+	db.world_filter = table.timeline.world_id()
+	db.load_now(packages)
+	var goblin: Dictionary = db.get_entry("bestiary", "monsters", "goblin")
+	var mira: Dictionary = db.get_entry("westmarch", "npcs", "mira")
+	_check(not goblin.is_empty() and not mira.is_empty(), "the book has the bestiary goblin and the world's Mira")
+	_check(db.resolve("Elsewhere Elf").is_empty(), "not another world's entries")
 	var g1 := table.drop_token(goblin, Vector2i(1, 1))
 	var g2 := table.drop_token(goblin, Vector2i(2, 1))
 	_check(g1 != g2 and table.timeline.name_of(g1) == "Goblin 1" and table.timeline.name_of(g2) == "Goblin 2", "numbered goblins (%s, %s)" % [g1, g2])
@@ -89,24 +88,22 @@ func _init() -> void:
 	_check(int(hp[g1]) == 2 and int(hp[g2]) == 7, "own HP per goblin (%s)" % [hp])
 	_check(table.drop_token(mira, Vector2i(4, 4)) == "npcs/mira" and table.drop_token(mira, Vector2i(5, 4)) == "npcs/mira", "a world NPC is placed itself, again = moved")
 	_check(table.grid.token_cell("npcs/mira") == Vector2i(5, 4), "Mira moved")
-	_check(palette.shown.all(func(e: Dictionary) -> bool: return not e.has("copy_of")), "copies don't clutter the palette")
 
 	# Dropped through the UI drop zone at a screen point.
 	var layer := CanvasLayer.new()  # like the table UI: screen coordinates, not the map's
 	root.add_child(layer)
-	var drop := TokenPalette.MapDrop.new()
+	var drop := MapDrop.new()
 	drop.table = table
 	layer.add_child(drop)
 	var screen := table.grid.get_canvas_transform() * table.grid.cell_center(Vector2i(6, 2), 1.0)
-	_check(drop._can_drop_data(screen, TokenPalette.drag_data(goblin)) and not drop._can_drop_data(screen, {"x": 1}), "the drop zone takes compendium entries only")
-	drop._drop_data(screen, TokenPalette.drag_data(goblin))
+	_check(drop._can_drop_data(screen, EntryDrag.data(goblin)) and not drop._can_drop_data(screen, {"x": 1}), "the drop zone takes compendium entries only")
+	drop._drop_data(screen, EntryDrag.data(goblin))
 	var g3 := "monsters/goblin-3"
 	_check(table.grid.tokens.has(g3) and table.grid.token_cell(g3) == Vector2i(6, 2), "dropped at the cell under the mouse (%s)" % table.grid.token_cell(g3))
-	palette.refresh()
-	await process_frame
-	await process_frame
-	var dragged: Variant = palette.list._get_drag_data(palette.list.get_item_rect(palette.shown.find(goblin)).get_center()) if palette.list.item_count > 0 else null
-	_check(TokenPalette.is_entry_drag(dragged), "palette rows can be dragged")
+	var card := EntryCard.new()
+	card.setup(goblin)
+	_check(EntryDrag.is_entry(card._get_drag_data(Vector2.ZERO)) and EntryDrag.ref_of(card._get_drag_data(Vector2.ZERO)) == "monsters/goblin", "compendium cards can be dragged")
+	card.free()
 	_check(_snapshot(world) == world_files, "placing tokens leaves the world files alone")
 
 	# --- Two timelines, one map -------------------------------------------------------------------
@@ -136,19 +133,6 @@ func _book(folder: String) -> void:
 		"size": "small", "description": "Small and mean.", "token": "assets/tokens/goblin.png"}])
 	var other := Worlds.create("Elsewhere", "default", folder.get_base_dir().get_base_dir().path_join("worlds"))
 	EntryStore.open(other).save("npcs", {"id": "elf", "name": "Elsewhere Elf", "description": "Not here."})
-
-
-func _row(palette: TokenPalette, entry_name: String) -> Dictionary:
-	palette.search.text = entry_name
-	palette.refresh()
-	for e in palette.shown:
-		if e.name == entry_name:
-			palette.search.text = ""
-			palette.refresh()
-			return e
-	palette.search.text = ""
-	palette.refresh()
-	return {}
 
 
 func _snapshot(folder: String) -> Dictionary:

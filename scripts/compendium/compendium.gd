@@ -1282,6 +1282,64 @@ func _restore_tabs(state: Variant) -> void:
 
 # --- Timeline (TASK-6, TASK-32) ---------------------------------------------------------------
 
+## Dropping an entry from another book (TASK-37): a timeline's book makes it the timeline's
+## own (entity.created), a world's book copies it into the world. The core book takes none.
+func _can_drop_data(_at: Vector2, data: Variant) -> bool:
+	if not EntryDrag.is_entry(data) or scope() == "core":
+		return false
+	var e := EntryDrag.entry_of(data)
+	return str(e.get("_layer", "")) != scope() and str(e.get("_kind", "")) not in [PACKAGES, DRAFTS, ""]
+
+
+func _drop_data(_at: Vector2, data: Variant) -> void:
+	take_entry(EntryDrag.entry_of(data))
+
+
+## While an entry this book can take is dragged, a drop zone covers the book (its cards
+## would otherwise catch the drop); it goes away when the drag ends.
+func _drop_zone(on: bool) -> void:
+	var zone := get_node_or_null("DropZone") as Label
+	if not on:
+		if zone != null:
+			zone.queue_free()
+		return
+	if zone == null:
+		zone = Label.new()
+		zone.name = "DropZone"
+		zone.text = "Drop here: it becomes this %s's own" % scope()
+		zone.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		zone.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		zone.add_theme_color_override("font_color", UISkin.CREAM)
+		zone.add_theme_font_size_override("font_size", 22)
+		var bg := StyleBoxFlat.new()
+		bg.bg_color = Color(UISkin.WINE, 0.55)
+		zone.add_theme_stylebox_override("normal", bg)
+		zone.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		zone.mouse_filter = Control.MOUSE_FILTER_STOP
+		zone.set_drag_forwarding(Callable(), _can_drop_data, _drop_data)
+		add_child(zone)
+
+
+## Makes a dropped entry this book's own. Returns the new entry ({} if not).
+func take_entry(e: Dictionary) -> Dictionary:
+	var kind := str(e.get("_kind", ""))
+	var made := {}
+	if scope() == "timeline":
+		var store := timeline_store()
+		if store != null:
+			if event_log != null:
+				store.timeline.events_log = event_log  # in a session: the table's live log
+			made = store.timeline.add_entry(kind, e, str(e.get("_dir", "")))
+	elif scope() == "world":
+		var target: EntryStore = writable_stores()[0]
+		made = target.copy_entry(EntryStore.open(str(e.get("_dir", ""))), kind, str(e.get("id", "")))
+	if not made.is_empty():
+		_status.text = "%s is in the %s now" % [made.get("name", "?"), scope()]
+		_stores.clear()
+		_reload()
+	return made
+
+
 ## "core", "world" or "timeline" (see timeline_dir / world_dir).
 func scope() -> String:
 	return "timeline" if timeline_dir != "" else "world" if world_dir != "" else "core"
@@ -1825,6 +1883,10 @@ func _exit_tree() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		_save_tabs()
+	elif what == NOTIFICATION_DRAG_BEGIN:
+		_drop_zone(is_visible_in_tree() and _can_drop_data(Vector2.ZERO, get_viewport().gui_get_drag_data()))
+	elif what == NOTIFICATION_DRAG_END:
+		_drop_zone(false)
 
 
 func _input(event: InputEvent) -> void:

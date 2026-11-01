@@ -1,17 +1,20 @@
 class_name App
 extends Node
 ## The whole app in one scene (TASK-33): starts on the start screen (StartScreen: host as DM,
-## join as player, compendium without a session). In a session the table, compendium, notes
-## and timeline are views switched with the bar at the top, without restarting; leaving the
-## session (or the DM closing it) goes back to the start screen.
+## join as player, compendium without a session). In a session the table is always there and
+## the other views are panels around it (Dock, TASK-37: docked, tabbed or in their own OS
+## window) toggled with the bar at the top; leaving the session (or the DM closing it) goes
+## back to the start screen.
 ## The last used world, timeline, name, address and port are kept in `settings_file`.
 
-const VIEWS := ["table", "compendium", "world", "timeline", "events", "notes", "encounters"]
-const VIEW_NAMES := {"table": "Table", "compendium": "Compendium", "world": "World", "timeline": "Timeline",
+const VIEWS := ["table", "session", "compendium", "world", "timeline", "events", "notes", "encounters"]
+const VIEW_NAMES := {"table": "Table", "session": "Session", "compendium": "Compendium", "world": "World", "timeline": "Timeline",
 	"events": "Events", "notes": "Notes", "encounters": "Encounters"}
 const DM_VIEWS := ["compendium", "world", "timeline", "events", "encounters"]
 ## The views that are books (TASK-39): the core compendium, the world's and the timeline's.
 const BOOK_VIEWS := ["compendium", "world", "timeline"]
+## Panels the table's UI brings (the session log with notes and rolls, the open sheet).
+const KEEP_PANELS := ["session", "sheet"]
 
 static var settings_file := "user://app.cfg"
 
@@ -27,6 +30,8 @@ var books := {}  ## book view -> Compendium (in a session)
 var notes_view: NotesView
 var timeline_view: TimelineView
 var encounters_view: EncountersView
+
+var dock: Dock  ## the panels around the table (TASK-37)
 
 var _layer: CanvasLayer
 var _bar: PanelContainer
@@ -58,6 +63,12 @@ func _ready() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.theme = UISkin.theme()
 	_layer.add_child(root)
+	dock = Dock.new()
+	dock.name = "Dock"
+	root.add_child(dock)
+	table_ui.use_dock(dock)
+	dock.panel_hidden.connect(func(_id: String) -> void: _sync_buttons())
+	dock.panel_shown.connect(func(_id: String) -> void: _sync_buttons())
 	_build_bar(root)
 	start = StartScreen.new()
 	start.name = "Start"
@@ -94,6 +105,7 @@ func host(timeline_dir: String, port := NetTable.DEFAULT_PORT) -> Error:
 	if err == OK:
 		_remember({"world": timeline_dir.get_base_dir().get_base_dir(), "timeline": timeline_dir, "port": port})
 		show_view("table")
+		_open_panels()
 	return err
 
 
@@ -105,6 +117,7 @@ func join(address: String, player_name: String) -> Error:
 	var err := table.join(address, player_name)
 	if err == OK:
 		show_view("table")
+		_open_panels()
 	return err
 
 
@@ -143,7 +156,9 @@ func leave() -> void:
 
 # --- Views ----------------------------------------------------------------------------------
 
-## Shows a view of the session ("" = the start screen).
+## The views of a session are panels around the table (TASK-37): docked left, right or at the
+## bottom, tabbed, or in their own OS window; the bar toggles them. "table" puts the docked
+## ones away (map only); "" is the start screen.
 func show_view(which: String) -> void:
 	if which != "" and not table.is_online():
 		which = ""
@@ -152,14 +167,42 @@ func show_view(which: String) -> void:
 	view = which
 	start.visible = which == ""
 	_bar.visible = which != ""
+	dock.visible = which != ""
 	if which == "":
 		start.refresh(start.world_dir(), start.timeline_dir())
+		dock.hide_all()
 		_drop_books()
-	for v: String in _view_buttons:
-		(_view_buttons[v] as Button).set_pressed_no_signal(v == which)
-		(_view_buttons[v] as Button).visible = table.is_dm() or v not in DM_VIEWS
-	if which in BOOK_VIEWS:
-		if not books.has(which):
+		_drop_views()
+	elif which == "table":
+		for id: String in dock.panels:
+			if dock.place_of(id) in Dock.AREAS:
+				dock.hide_panel(id)
+	else:
+		_panel(which)
+		dock.show_panel(which)
+		if which in BOOK_VIEWS:
+			book = books[which]
+		_refresh_view(which)
+	_sync_buttons()
+
+
+## Shows or hides a panel (the bar's buttons).
+func toggle_view(which: String) -> void:
+	if which != "table" and dock.has_panel(which) and dock.is_shown(which):
+		dock.hide_panel(which)
+		view = "table"
+		_sync_buttons()
+	else:
+		show_view(which)
+
+
+## Makes the control of a view and registers it with the dock (once per session).
+func _panel(which: String) -> Control:
+	if dock.has_panel(which):
+		return (dock.panels[which].holder as Control).get_child(0)
+	var c: Control
+	match which:
+		"compendium", "world", "timeline":
 			var b := _new_book()
 			b.name = "Book_" + which
 			b.closable = true
@@ -168,59 +211,89 @@ func show_view(which: String) -> void:
 			elif which == "timeline":
 				b.timeline_dir = table.timeline_dir
 				b.event_log = table.event_log  # session edits become events
-			b.close_requested.connect(func() -> void: show_view("table"))
-			_layer.get_node("Views").add_child(b)
-			_bar.move_to_front()
+			b.close_requested.connect(func() -> void: toggle_view(which))
 			books[which] = b
-		book = books[which]
-	for v: String in books:
-		(books[v] as Compendium).visible = v == which
-	if which == "notes":
-		if notes_view == null:
+			c = b
+		"notes":
 			notes_view = NotesView.new()
 			notes_view.name = "NotesView"
 			notes_view.table = table
-			_place(notes_view)
-		notes_view.refresh()
-	if notes_view != null:
-		notes_view.visible = which == "notes"
-	if which == "events":
-		if timeline_view == null or timeline_view.event_log != table.event_log:
-			if timeline_view != null:
-				timeline_view.queue_free()
+			c = notes_view
+		"events":
 			timeline_view = TimelineView.new()
 			timeline_view.name = "TimelineView"
 			timeline_view.event_log = table.event_log
 			timeline_view.timeline = table.timeline
 			timeline_view.calendar = table.notes.calendar
-			_place(timeline_view)
-		timeline_view.refresh()
-	if timeline_view != null:
-		timeline_view.visible = which == "events"
-	if which == "encounters":
-		if encounters_view == null or encounters_view.events_log != table.event_log:
-			if encounters_view != null:
-				encounters_view.queue_free()
+			c = timeline_view
+		"encounters":
 			encounters_view = EncountersView.new()
 			encounters_view.name = "EncountersView"
 			encounters_view.timeline = table.timeline
 			encounters_view.events_log = table.event_log
 			encounters_view.calendar = table.notes.calendar
 			encounters_view.assets = table.assets
-			_place(encounters_view)
-		encounters_view.refresh()
-	if encounters_view != null:
-		encounters_view.visible = which == "encounters"
+			c = encounters_view
+	dock.add_panel(which, VIEW_NAMES[which], c, _default_place(which))
+	return c
 
 
-func _place(c: Control) -> void:
-	c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	c.offset_top = 56
-	c.offset_left = 12
-	c.offset_right = -12
-	c.offset_bottom = -12
-	_layer.get_node("Views").add_child(c)
-	_bar.move_to_front()
+## Where a view goes the first time: the compendium is its own book window (TASK-37).
+func _default_place(which: String) -> String:
+	match which:
+		"compendium":
+			return "window" if DisplayServer.get_name() != "headless" else "right"
+		"world", "timeline":
+			return "right"
+		"notes":
+			return "left"
+	return "bottom"
+
+
+func _refresh_view(which: String) -> void:
+	match which:
+		"notes":
+			notes_view.refresh()
+		"events":
+			timeline_view.refresh()
+		"encounters":
+			encounters_view.refresh()
+
+
+func _sync_buttons() -> void:
+	for v: String in _view_buttons:
+		var b: Button = _view_buttons[v]
+		b.set_pressed_no_signal(dock.is_shown(v) if v != "table" else view == "table")
+		b.visible = table.is_dm() or v not in DM_VIEWS
+
+
+## The panels of the session that was left (a new session builds new ones).
+func _drop_views() -> void:
+	for id: String in dock.panels.keys():
+		if id in KEEP_PANELS:
+			continue
+		var holder: Control = dock.panels[id].holder
+		dock.panels.erase(id)
+		holder.queue_free()
+	notes_view = null
+	timeline_view = null
+	encounters_view = null
+
+
+## After hosting or joining: the panels that were open last time (the session log at first).
+func _open_panels() -> void:
+	var allowed := ["session", "sheet", "notes"]
+	if table.is_dm():
+		allowed.append_array(DM_VIEWS)
+	var saved: Dictionary = Dock.load_layout().get("panels", {})
+	for id: String in saved:
+		if id in allowed and id != "sheet" and bool((saved[id] as Dictionary).get("open", false)):
+			if id in VIEWS:
+				_panel(id)
+			dock.show_panel(id)
+	if not dock.panels.keys().any(func(id: String) -> bool: return dock.is_shown(id)):
+		dock.show_panel("session")  # the first time (or all were closed): the session log
+	_sync_buttons()
 
 
 func _new_book() -> Compendium:
@@ -247,8 +320,7 @@ func _on_table_changed() -> void:
 	if not table.is_online() and view != "" and (view != "compendium" or not books.is_empty()):
 		show_view("")
 	elif table.is_online():
-		for v: String in _view_buttons:
-			(_view_buttons[v] as Button).visible = table.is_dm() or v not in DM_VIEWS
+		_sync_buttons()
 
 
 func _build_bar(root: Control) -> void:
@@ -263,14 +335,12 @@ func _build_bar(root: Control) -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	_bar.add_child(row)
-	var group := ButtonGroup.new()
 	for v: String in VIEWS:
 		var b := Button.new()
 		b.name = "View_" + v
 		b.text = VIEW_NAMES[v]
 		b.toggle_mode = true
-		b.button_group = group
-		b.pressed.connect(show_view.bind(v))
+		b.pressed.connect(toggle_view.bind(v))
 		row.add_child(b)
 		_view_buttons[v] = b
 	var leave_button := Button.new()

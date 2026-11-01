@@ -115,6 +115,25 @@ func _on_meta(meta: Variant) -> void:
 		table.roll(m.substr(5), ref, Input.is_key_pressed(KEY_SHIFT) and table.is_dm())
 
 
+## A compendium item, spell or feature dropped on the sheet joins its list (TASK-37):
+## inventory, spells or features, as a sheet.changed event through the table.
+func _can_drop_data(_at: Vector2, data: Variant) -> bool:
+	return ref != "" and bool(sheet.get("_editable", false)) and EntryDrag.is_entry(data) 		and EntryDrag.SHEET_LISTS.has(str(EntryDrag.entry_of(data).get("_kind", "")))
+
+
+func _drop_data(_at: Vector2, data: Variant) -> void:
+	add_entry(EntryDrag.entry_of(data))
+
+
+## Adds an item / spell / feature to this sheet; false if it can't (or has it already).
+func add_entry(e: Dictionary) -> bool:
+	var change := EntryDrag.sheet_change(sheet, e)
+	if change.is_empty() or table == null:
+		return false
+	table.change_field(ref, change[0], change[1])
+	return true
+
+
 func close_sheet() -> void:
 	if ref != "":
 		table.close_sheet(ref)

@@ -12,12 +12,10 @@ var table: NetTable
 var lobby := true
 ## Called by the Compendium button instead of opening the overlay (the app switches views).
 var compendium_opener := Callable()
-## Packages folder for the token palette ("" = data/packages).
+## Packages folder ("" = data/packages).
 var packages_root := ""
-var palette: TokenPalette  ## DM: monsters, NPCs and PCs to drag onto the map (TASK-34)
-var map_drop: TokenPalette.MapDrop
+var map_drop: MapDrop  ## takes compendium entries dragged onto the map (TASK-37)
 var map_setup: MapSetup
-var _tokens_button: Button
 var _new_map_button: Button
 var _grid_button: Button
 var _combat_button: Button
@@ -42,6 +40,7 @@ var _color: ColorPickerButton
 var _book_button: Button
 var _book: Compendium
 var sheet: SheetPanel
+var dock: Dock  ## the app's panels (TASK-37); null when the table runs on its own
 
 var _notes_panel: PanelContainer
 var _notes_title: Label
@@ -61,7 +60,7 @@ func _ready() -> void:
 	root.theme = UISkin.theme()
 	add_child(root)
 	_root = root
-	map_drop = TokenPalette.MapDrop.new()
+	map_drop = MapDrop.new()
 	map_drop.name = "MapDrop"
 	map_drop.table = table
 	root.add_child(map_drop)
@@ -104,17 +103,12 @@ func _refresh() -> void:
 	_roll_hidden.visible = dm
 	_maps.visible = dm
 	_book_button.visible = dm
-	_tokens_button.visible = dm
 	_new_map_button.visible = dm
 	_grid_button.visible = dm
 	var fighting := dm and table.in_combat()
 	_combat_button.visible = dm
 	_combat_button.text = "End combat" if fighting else "Start combat"
 	_turn_button.visible = fighting
-	if palette != null:
-		palette.visible = dm and _tokens_button.button_pressed
-		if palette.visible and palette.db != null and palette.db.timeline_dir != table.timeline_dir:
-			palette.reload()
 	var picking := online and not dm and table.my_pc == "" and not table.pc_choices.is_empty()
 	_picker.visible = picking
 	if picking:
@@ -312,8 +306,6 @@ func _build_bar(root: Control) -> void:
 	row.add_child(_maps)
 	_new_map_button = _bar_button(row, "New map...", "Add a map picture to the world and line up its grid", pick_map_picture)
 	_grid_button = _bar_button(row, "Grid...", "Line up the grid of this map (drag over one square)", func() -> void: setup_map())
-	_tokens_button = _bar_button(row, "Tokens", "Monsters, NPCs and PCs to drag onto the map", func() -> void: show_palette(_tokens_button.button_pressed))
-	_tokens_button.toggle_mode = true
 	_combat_button = _bar_button(row, "Start combat", "Start or end a combat on this map; an ended combat is saved as an encounter", func() -> void:
 		if table.in_combat():
 			table.end_combat()
@@ -351,27 +343,6 @@ func _bar_button(row: Control, text: String, tip: String, action: Callable) -> B
 	b.pressed.connect(action)
 	row.add_child(b)
 	return b
-
-
-## DM: shows or hides the token palette at the left.
-func show_palette(on := true) -> TokenPalette:
-	_tokens_button.set_pressed_no_signal(on)
-	if on and palette == null:
-		palette = TokenPalette.new()
-		palette.name = "TokenPalette"
-		palette.table = table
-		palette.packages_root = packages_root
-		palette.anchor_bottom = 1.0
-		palette.offset_left = 12
-		palette.offset_top = 96
-		palette.offset_right = 292
-		palette.offset_bottom = -12
-		_root.add_child(palette)
-	if palette != null:
-		palette.visible = on
-		if on:
-			palette.reload()
-	return palette
 
 
 ## DM: pick a picture for a new map of the world.
@@ -428,6 +399,27 @@ func open_compendium() -> Compendium:
 	return _book
 
 
+## In the app the session log (notes and rolls) and the open sheet are panels of the dock
+## (TASK-37) instead of fixed boxes over the map: dockable, tabbed or in their own window.
+func use_dock(d: Dock) -> void:
+	dock = d
+	_notes_panel.get_parent().remove_child(_notes_panel)
+	d.add_panel("session", "Session", _notes_panel, "right")
+	sheet.get_parent().remove_child(sheet)
+	d.add_panel("sheet", "Sheet", sheet, "left")
+	# The sheet shows and hides itself (a token click, its close button); its panel follows,
+	# and closing the panel closes the sheet. (Only the property counts: switching tabs hides
+	# the holder, not the sheet.)
+	sheet.visibility_changed.connect(func() -> void:
+		if not sheet.visible and d.is_shown("sheet"):
+			d.hide_panel("sheet")
+		elif sheet.visible and sheet.ref != "" and not d.is_shown("sheet"):
+			d.show_panel("sheet"))
+	d.panel_hidden.connect(func(id: String) -> void:
+		if id == "sheet" and sheet.visible:
+			sheet.close_sheet())
+
+
 # --- Session notes ------------------------------------------------------------------------
 
 func _build_notes(root: Control) -> void:
@@ -472,6 +464,9 @@ func _build_notes(root: Control) -> void:
 			_submit_note()
 			_note_edit.accept_event())
 	col.add_child(_note_edit)
+	# A compendium entry dropped into the note becomes a [[link]] (TASK-37).
+	_note_edit.set_drag_forwarding(Callable(), func(_at: Vector2, data: Variant) -> bool: return EntryDrag.is_entry(data),
+		func(_at: Vector2, data: Variant) -> void: _note_edit.insert_text_at_caret(EntryDrag.link(EntryDrag.entry_of(data))))
 	RevealPopup.attach(_note_edit, func() -> Dictionary: return table.accounts,
 		func(from: int, to: int, who: PackedStringArray) -> void:
 			var r := Reveal.apply(_note_edit.text, from, to, who, Reveal.next_id([_note_edit.text]))

@@ -120,6 +120,15 @@ func _draw() -> void:
 		draw_dashed_line(side[0], side[1], c, 2.0, 6.0)
 
 
+## Cards can be dragged out of the book (TASK-37): onto the map, a sheet, a note, a timeline.
+func _get_drag_data(_at: Vector2) -> Variant:
+	if str(entry.get("_kind", "")) in ["packages", "drafts", ""]:
+		return null
+	if is_inside_tree() and get_viewport().gui_is_dragging():
+		set_drag_preview(EntryDrag.preview(entry))
+	return EntryDrag.data(entry)
+
+
 func _gui_input(event: InputEvent) -> void:
 	if not (event is InputEventMouseButton and event.pressed):
 		return

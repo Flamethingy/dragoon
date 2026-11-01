@@ -131,7 +131,7 @@ def num(v, default=0):
         return int(v)
     if isinstance(v, (int, float)):
         return v
-    s = str(v).strip()
+    s = str(v).strip().replace(",", ".")  # vault uses German decimal commas ("0,25")
     m = re.match(r"^(\d+)\s*/\s*(\d+)$", s)  # CR "1/4"
     if m:
         return int(m.group(1)) / int(m.group(2))
@@ -215,7 +215,7 @@ def parse_feature(name: str, text: str) -> dict:
     a = re.search(r"(Melee|Ranged|Melee or Ranged) (Weapon|Spell) Attack:\s*([+-]\d+) to hit", text, re.I)
     if a:
         attack = {"kind": f"{a.group(1).lower()} {a.group(2).lower()}", "to_hit": int(a.group(3))}
-        r = re.search(r"to hit,\s*(?:reach\s*)?([\d.,/ ]+)\s*(m|ft|')", text, re.I)
+        r = re.search(r"to hit,\s*(?:reach\s*|range\s*)?([\d.,/ ]+?)\s*(m|ft|')", text, re.I)
         if r:
             attack["range"] = f"{r.group(1).strip()} {r.group(2)}"
         attack["damage"] = [{"dice": d.replace(" ", ""), "average": int(avg), "type": t.lower()}
@@ -345,7 +345,7 @@ def convert_generic(fm: dict, body: str, images: set[str]) -> dict:
         elif isinstance(v, (int, float, bool)) or v is None:
             entry[sk] = v
         else:
-            entry[sk] = num(v) if re.fullmatch(r"-?\d+(\.\d+)?", str(v).strip()) else clean_str(v)
+            entry[sk] = num(v) if re.fullmatch(r"-?\d+([.,]\d+)?", str(v).strip()) else clean_str(v)
     entry["description"] = convert_embeds(strip_dataview(body), images)
     return entry
 

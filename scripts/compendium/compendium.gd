@@ -93,6 +93,10 @@ var _stores := {}  ## package id -> EntryStore
 ## Packages as cards (TASK-23): every installed package (on or off) as an entry of kind
 ## "packages", with _enabled, _count, _counts (entries loaded per kind).
 const PACKAGES := "packages"
+const DRAFTS := "drafts"  ## the Drafts page (TASK-30)
+const PARTS := ["features", "tables"]  ## published along with their entries
+var show_drafts := false  ## "Show drafts" in the binder
+var _show_drafts: CheckBox
 var manager: PackageManager
 var package_cards: Array = []
 
@@ -111,6 +115,8 @@ func _ready() -> void:
 	_fill_campaigns()
 	db.campaign_dir = campaign_dir
 	_open_campaign_log()
+	for pkg in ImportJobs.new(packages_root).merge_finished():  # imports finished while the book was closed
+		PackageManager.new(packages_root).set_enabled(pkg, true)
 	db.load_async(packages_root)
 
 
@@ -312,6 +318,12 @@ func _build_filters() -> Control:
 	_sort.size_flags_horizontal = Control.SIZE_SHRINK_END
 	_sort.custom_minimum_size = Vector2(170, 0)
 	row.add_child(_sort)
+	_show_drafts = CheckBox.new()
+	_show_drafts.name = "ShowDrafts"
+	_show_drafts.text = "Show drafts"
+	_show_drafts.tooltip_text = "Also show unfinished entries (marked Draft)"
+	_show_drafts.toggled.connect(set_show_drafts)
+	row.add_child(_show_drafts)
 	var new := Button.new()
 	new.text = "New..."
 	new.tooltip_text = "Create an entry in a world package"
@@ -394,13 +406,14 @@ func _on_loaded() -> void:
 	_build_package_cards()
 	_build_bookmarks()
 	if _kind == PACKAGES:  # after switching a package on/off: stay on the packages
-		(_tabs.get_child(_tabs.get_child_count() - 1) as Button).button_pressed = true
+		(_tabs.get_node("Bookmark_packages") as Button).button_pressed = true
 		_select_kind(PACKAGES)
-	elif _tabs.get_child_count() > 1:
-		var keep := db.kinds().find(_kind)  # after a reload, stay on the same kind
+	elif _tabs.get_child_count() > 2:
+		var kinds := db.kinds_with(show_drafts)
+		var keep := kinds.find(_kind)  # after a reload, stay on the same kind
 		var i := keep if keep >= 0 else 0
 		(_tabs.get_child(i) as Button).button_pressed = true
-		_select_kind(db.kinds()[i])
+		_select_kind(kinds[i])
 	else:
 		_matches = []
 		_render_page()
@@ -414,12 +427,12 @@ func _build_bookmarks() -> void:
 	for c in _tabs.get_children():
 		_tabs.remove_child(c)
 		c.queue_free()
-	for k in db.kinds():
+	for k in db.kinds_with(show_drafts):
 		var tab := Button.new()
 		tab.theme_type_variation = UISkin.V_TAB
 		tab.toggle_mode = true
 		tab.button_group = _tab_group
-		tab.text = "%s  %d" % [k.capitalize(), db.entries[k].size()]
+		tab.text = "%s  %d" % [k.capitalize(), db.list(k, show_drafts).size()]
 		tab.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		tab.pressed.connect(_select_kind.bind(k))
 		tab.button_pressed = k == _kind
@@ -434,6 +447,14 @@ func _build_bookmarks() -> void:
 	pk.pressed.connect(_select_kind.bind(PACKAGES))
 	pk.button_pressed = _kind == PACKAGES
 	_tabs.add_child(pk)
+	var dr := Button.new()
+	dr.name = "Bookmark_drafts"
+	dr.theme_type_variation = UISkin.V_TAB
+	dr.text = "Drafts  %d" % db.draft_count()
+	dr.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	dr.tooltip_text = "Every unfinished entry, grouped by package"
+	dr.pressed.connect(open_drafts)
+	_tabs.add_child(dr)
 
 
 ## The Packages window; after changes the book reloads.
@@ -449,7 +470,7 @@ func _open_packages() -> void:
 func open_import(input := "") -> ImportPanel:
 	var panel := ImportPanel.new(db.root)
 	panel.name = "ImportPanel"
-	panel.db = db
+	panel.drafts_requested.connect(func() -> void: open_drafts.call_deferred())
 	panel.changed.connect(_reload)
 	add_child(panel)
 	panel.set_input(input)
@@ -1008,7 +1029,7 @@ func _on_tab_changed(_index: int) -> void:
 	for k: String in _open_views:
 		_open_views[k].back_button.disabled = _back_target(k) == null
 		_open_views[k].send_button.visible = campaign_dir != "" and _open_views[k].entry.get("_layer") != "campaign" \
-			and _open_views[k].entry.get("_kind") != PACKAGES
+			and _open_views[k].entry.get("_kind") not in [PACKAGES, DRAFTS] and not EntryStore.is_draft(_open_views[k].entry)
 	_browse.visible = key == ""
 	_browse_button.set_pressed_no_signal(key == "")
 	for k: String in _open_views:
@@ -1304,7 +1325,7 @@ func writable_stores() -> Array:
 
 
 ## Turns a full-view tab into the editor for its entry.
-func start_edit(view: EntryView) -> EntryEditor:
+func start_edit(view: EntryView, is_new := false) -> EntryEditor:
 	var store := store_for(view.entry)
 	if store == null:
 		_status.text = "Can't find the package folder of %s" % view.entry.get("name", "?")
@@ -1317,7 +1338,11 @@ func start_edit(view: EntryView) -> EntryEditor:
 	form.copy_targets = writable_stores().filter(func(t: EntryStore) -> bool: return t != store)
 	form.accounts = accounts()
 	form.db = db
+	form.is_new = is_new
 	form.entry_open_requested.connect(func(e: Dictionary) -> void: open_tab(e))
+	form.entries_changed.connect(func(s: EntryStore, changes: Array) -> void:
+		_apply_changes(s, changes)
+		_drafts_changed())
 	form.setup(store, kind, current if not current.is_empty() else view.entry)
 	var old_id := str(view.entry.get("id", ""))
 	form.saved.connect(func(saved_entry: Dictionary) -> void: _on_saved(view, store, kind, saved_entry, old_id))
@@ -1329,7 +1354,7 @@ func start_edit(view: EntryView) -> EntryEditor:
 
 
 ## Opens an entry of a store in a tab and starts editing it (new entries, copies, features).
-func edit_entry(store: EntryStore, kind: String, id: String) -> EntryEditor:
+func edit_entry(store: EntryStore, kind: String, id: String, is_new := false) -> EntryEditor:
 	var e := store.find(kind, id)
 	if e.is_empty():
 		return null
@@ -1337,7 +1362,7 @@ func edit_entry(store: EntryStore, kind: String, id: String) -> EntryEditor:
 	var held := db.put_entry(e, kind, store)
 	_after_db_change(kind)
 	var view := open_tab(held)
-	return start_edit(view) if view else null
+	return start_edit(view, is_new) if view else null
 
 
 func _on_saved(view: EntryView, store: EntryStore, kind: String, saved_entry: Dictionary, old_id: String) -> void:
@@ -1355,6 +1380,7 @@ func _on_saved(view: EntryView, store: EntryStore, kind: String, saved_entry: Di
 	if t >= 0:
 		_tab_bar.set_tab_title(t, str(held.get("name", "?")))
 	_after_db_change(kind)
+	_drafts_changed()
 	_status.text = "Saved %s" % held.get("name", "?")
 
 
@@ -1435,11 +1461,115 @@ func _build_package_cards() -> void:
 
 ## The entries of a kind in the binder (the package cards for "packages").
 func list_of(kind: String) -> Array:
-	return package_cards if kind == PACKAGES else db.entries.get(kind, [])
+	return package_cards if kind == PACKAGES else db.list(kind, show_drafts)
+
+
+## The "Show drafts" tickbox: drafts join the binder (marked) or leave it.
+func set_show_drafts(on: bool) -> void:
+	show_drafts = on
+	_show_drafts.set_pressed_no_signal(on)
+	if not db.is_loaded:
+		return
+	_build_bookmarks()
+	if _kind != "":
+		_select_kind(_kind)
+
+
+## The Drafts page in its own tab.
+func open_drafts() -> EntryView:
+	return open_tab(entry_for("", DRAFTS, DRAFTS))
+
+
+## Publishes every draft of a package (or of one import job in it); same-name entries are
+## asked about one by one (replace / keep both / skip; Cancel stops).
+func publish_all(package_id: String, job := "") -> void:
+	var todo := db.all_drafts().filter(func(e: Dictionary) -> bool:
+		return e["_package"] == package_id and (job == "" or DraftsPage.job_of(e) == job))
+	# main entries first (they take their features and tables along), loose parts last
+	todo.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return int(a["_kind"] in PARTS) < int(b["_kind"] in PARTS))
+	var store := store_for(todo[0]) if not todo.is_empty() else null
+	if store == null:
+		return
+	if store.is_read_only():
+		store.unlock()  # publishing in a source package is the explicit choice
+	_publish_next(store, todo, 0, 0)
+
+
+func _publish_next(store: EntryStore, todo: Array, i: int, done: int) -> void:
+	if i >= todo.size():
+		_drafts_changed()
+		_status.text = "Published %d draft(s)" % done
+		return
+	_publish_one(store, todo[i], EntryStore.ASK, func(r: Dictionary) -> void:
+		if r.has("cancelled"):
+			_drafts_changed()
+			return
+		_publish_next(store, todo, i + 1, done + (1 if r.has("published") else 0)))
+
+
+func _publish_one(store: EntryStore, e: Dictionary, mode: String, done: Callable) -> void:
+	var kind := str(e["_kind"])
+	var now := store.find(kind, str(e.id))
+	if now.is_empty() or not EntryStore.is_draft(now):
+		done.call({})  # went along with its entry (or was thrown away with it)
+		return
+	if kind in PARTS and mode == EntryStore.ASK:
+		mode = EntryStore.KEEP_BOTH  # "Claws" exists a hundred times; never ask for parts
+	var r := store.publish(kind, str(e.id), mode)
+	if r.has("duplicate"):
+		var dialog := ConfirmationDialog.new()
+		dialog.name = "DuplicateQuestion"
+		dialog.title = "Already published"
+		dialog.dialog_text = "\"%s\" is already in %s.\nReplace it, keep both, or throw this draft away?" % [e.get("name", "?"), store.name]
+		dialog.ok_button_text = "Replace"
+		dialog.add_button("Keep both", false, EntryStore.KEEP_BOTH)
+		dialog.add_button("Skip (discard draft)", false, EntryStore.SKIP)
+		dialog.confirmed.connect(func() -> void:
+			_drop(dialog)
+			_publish_one(store, e, EntryStore.REPLACE, done))
+		dialog.custom_action.connect(func(action: StringName) -> void:
+			_drop(dialog)
+			_publish_one(store, e, str(action), done))
+		dialog.canceled.connect(func() -> void:
+			_drop(dialog)
+			done.call({"cancelled": true}))
+		add_child(dialog)
+		dialog.popup_centered()
+		return
+	var changes: Array = [[kind, str(e.id)]] + r.get("removed", []) + r.get("parts", [])
+	if r.has("published"):
+		changes.append([kind, str(r.published.id)])
+	_apply_changes(store, changes)
+	done.call(r)
+
+
+## Re-reads changed entries of a store into the book (gone ones are dropped).
+func _apply_changes(store: EntryStore, changes: Array) -> void:
+	for c: Array in changes:
+		db.remove_entry(store.id, str(c[0]), str(c[1]))
+		var e := store.find(str(c[0]), str(c[1]))
+		if not e.is_empty():
+			db.put_entry(e, str(c[0]), store)
+
+
+## After drafts changed: bookmarks, the binder and an open Drafts page catch up.
+func _drafts_changed() -> void:
+	_build_bookmarks()
+	if _kind != "" and db.is_loaded:
+		var keep := _page
+		_refresh_list()
+		_page = mini(keep, _pages() - 1)
+		_render_page()
+	var page := open_view(EntryView.key_of(entry_for("", DRAFTS, DRAFTS)))
+	if page and page.drafts_page:
+		page.drafts_page.refresh(db)
 
 
 ## An entry by package, kind and id (package cards too).
 func entry_for(package_id: String, kind: String, id: String) -> Dictionary:
+	if kind == DRAFTS:
+		return {"id": DRAFTS, "_kind": DRAFTS, "_package": "", "_package_name": "", "name": "Drafts", "_key": "drafts"}
 	if kind == PACKAGES:
 		for e: Dictionary in package_cards:
 			if e.id == id:
@@ -1635,7 +1765,7 @@ func new_world(world_name: String) -> EntryStore:
 
 func create_entry(store: EntryStore, kind: String, entry_name: String) -> EntryEditor:
 	var e := store.create(kind, entry_name)
-	return edit_entry(store, kind, str(e.id))
+	return edit_entry(store, kind, str(e.id), true)
 
 
 func _close_all_tabs() -> void:
@@ -1694,3 +1824,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		handled = false
 	if handled:
 		get_viewport().set_input_as_handled()
+
+
+## Takes a finished question out of the tree at once (the next one may take its name).
+func _drop(dialog: Node) -> void:
+	if dialog.get_parent():
+		dialog.get_parent().remove_child(dialog)
+	dialog.queue_free()

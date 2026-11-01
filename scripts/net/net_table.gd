@@ -1111,7 +1111,7 @@ func load_tables(packages_root := "") -> void:
 		var list: Variant = JSON.parse_string(FileAccess.get_file_as_string(file))
 		if list is Array:
 			for t: Variant in list:
-				if t is Dictionary and t.has("id"):
+				if t is Dictionary and t.has("id") and not EntryStore.is_draft(t):  # drafts stay out of play (TASK-30)
 					tables[str(t.id)] = t
 
 

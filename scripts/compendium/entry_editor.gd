@@ -14,11 +14,17 @@ signal deleted
 ## Open another entry in the editor (a feature, a duplicate, a copy in another store).
 signal open_requested(store: EntryStore, kind: String, id: String)
 signal entry_open_requested(entry: Dictionary)  ## Ctrl+click on a ref token (TASK-29)
+## Other entries of the store changed with this one (publishing: its features and tables, a
+## replaced entry): [[kind, id]] to re-read (or drop, if gone) (TASK-30).
+signal entries_changed(store: EntryStore, changes: Array)
 
 const SUGGESTIONS := 12
 
 var store: EntryStore
 var db: PackageDB  ## the loaded book: token fields offer its values (optional)
+var is_new := false  ## a just created entry: "Save as draft" / "Save" (publish) (TASK-30)
+var publish_button: Button
+var crop: CropView  ## the source page of imported entries (source_page)
 var kind := ""
 var original := {}  ## the entry as opened (file version)
 var event_log: EventLog  ## campaign log, for edits during a session (optional)
@@ -59,7 +65,16 @@ func _build() -> void:
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.clip_text = true
 	bar.add_child(title)
-	save_button = _button(bar, "Save", "Save the changes (Ctrl+S)", save)
+	var draft := EntryStore.is_draft(original)
+	if is_new:
+		_button(bar, "Save as draft", "Save it unfinished: hidden from the book and players until published", save).name = "SaveDraft"
+		save_button = _button(bar, "Save", "Save and publish it", publish)
+	else:
+		save_button = _button(bar, "Save", "Save the changes (Ctrl+S)" + (" (stays a draft)" if draft else ""), save)
+		publish_button = _button(bar, "Publish" if draft else "Back to draft",
+			"Make it visible in the book (and to players)" if draft else "Hide it again until it is finished",
+			publish if draft else back_to_draft)
+		publish_button.name = "Publish" if draft else "BackToDraft"
 	_button(bar, "Cancel", "Back to the view without saving", func() -> void: cancelled.emit())
 	var dup := _button(bar, "Duplicate", "A copy of this entry under a new id", duplicate_entry)
 	var del := _button(bar, "Delete", "Delete this entry", _confirm_delete)
@@ -69,8 +84,12 @@ func _build() -> void:
 	status.text = "%s · %s (%s)" % [kind.capitalize(), store.name, store.layer]
 	add_child(status)
 
+	if draft:
+		status.text += " · draft"
 	if store.is_read_only():
 		add_child(_read_only_banner())
+		if publish_button:
+			publish_button.disabled = true
 		for b: Button in [save_button, dup, del]:
 			b.disabled = true
 			b.tooltip_text = "The source package is read-only"
@@ -82,6 +101,45 @@ func _build() -> void:
 	add_child(_form)
 	for f in Schema.fields(kind, original):
 		_add_field(f)
+	if str(original.get("source_page", "")) != "":
+		_source_page()
+
+
+## Imported entries: the page they came from, with a crop box for the picture (TASK-28/30).
+func _source_page() -> void:
+	var head := Label.new()
+	head.theme_type_variation = UISkin.V_HEADING
+	head.text = "Source page"
+	add_child(head)
+	var origin: Dictionary = original.get("origin", {}) if original.get("origin") is Dictionary else {}
+	var note := Label.new()
+	note.theme_type_variation = UISkin.V_MUTED
+	note.text = "%s%s · drag a box around the picture" % [str(origin.get("file", origin.get("url", "?"))).get_file(),
+		"  · page %d" % int(origin.page) if origin.has("page") else ""]
+	add_child(note)
+	crop = CropView.new()
+	crop.name = "SourcePage"
+	crop.custom_minimum_size = Vector2(0, 520)
+	var img := ImageCache.decode(FileAccess.get_file_as_bytes(store.folder.path_join(str(original.source_page))))
+	var c: Array = original.get("crop", []) if original.get("crop") is Array else []
+	crop.show_page(ImageTexture.create_from_image(img) if img else null,
+		Rect2i(int(c[0]), int(c[1]), int(c[2]), int(c[3])) if c.size() == 4 else Rect2i())
+	add_child(crop)
+	var use := _button(self, "Use selection as picture", "Crop the box from the page into this entry's picture", apply_crop)
+	use.name = "UseCrop"
+	use.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	use.disabled = store.is_read_only()
+
+
+func apply_crop() -> void:
+	var r := store.crop_picture(kind, str(original.get("id", "")), crop.selection)
+	if r.is_empty():
+		_say("Drag a box on the page first.", true)
+		return
+	original["image"] = r.image
+	original["crop"] = r.crop
+	_build()
+	_say("Picture cropped from the page.")
 
 
 func _button(parent: Control, text: String, tip: String, action: Callable) -> Button:
@@ -486,6 +544,73 @@ func save() -> Dictionary:
 	return original
 
 
+# --- Drafts (TASK-30) ---------------------------------------------------------------------
+
+## Saves and publishes: a published entry of the same name asks replace / keep both / skip
+## first (on_duplicate ASK); the other choices go straight through.
+func publish(on_duplicate := EntryStore.ASK) -> Dictionary:
+	var got := collect()
+	if got.has("error"):
+		_say(got.error, true)
+		return {}
+	var e: Dictionary = got.entry
+	e["draft"] = true
+	var r := store.commit(kind, original, e, event_log)
+	if r.error != OK:
+		_say("Couldn't save: %s" % error_string(r.error), true)
+		return {}
+	original = EntryStore.strip(store.find(kind, str(e.id))).duplicate(true)
+	var p := store.publish(kind, str(e.id), on_duplicate)
+	if p.has("duplicate"):
+		_ask_duplicate(p.duplicate)
+		return p
+	if p.has("error"):
+		_say(str(p.error), true)
+		return p
+	var changes: Array = p.get("removed", []) + p.get("parts", [])
+	if not changes.is_empty():
+		entries_changed.emit(store, changes)
+	if p.has("skipped"):
+		deleted.emit()
+		return p
+	original = EntryStore.strip(p.published).duplicate(true)
+	is_new = false
+	_say("Published")
+	saved.emit(original)
+	return p
+
+
+## A published entry goes back to being a draft.
+func back_to_draft() -> Dictionary:
+	var e := store.unpublish(kind, str(original.get("id", "")))
+	if e.is_empty():
+		return {}
+	original = EntryStore.strip(e).duplicate(true)
+	_say("Back to draft")
+	saved.emit(original)
+	return e
+
+
+func _ask_duplicate(dup: Dictionary) -> void:
+	var dialog := ConfirmationDialog.new()
+	dialog.name = "DuplicateQuestion"
+	dialog.title = "Already published"
+	dialog.dialog_text = "\"%s\" is already in %s.
+Replace it, keep both, or throw this draft away?" % [dup.get("name", "?"), store.name]
+	dialog.ok_button_text = "Replace"
+	dialog.add_button("Keep both", false, EntryStore.KEEP_BOTH)
+	dialog.add_button("Skip (discard draft)", false, EntryStore.SKIP)
+	dialog.confirmed.connect(func() -> void:
+		_drop(dialog)
+		publish(EntryStore.REPLACE))
+	dialog.custom_action.connect(func(action: StringName) -> void:
+		_drop(dialog)
+		publish(str(action)))
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered()
+
+
 func duplicate_entry() -> void:
 	var copy := store.duplicate_entry(kind, str(original.get("id", "")))
 	if not copy.is_empty():
@@ -525,3 +650,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if not store.is_read_only():
 			save()
 		get_viewport().set_input_as_handled()
+
+
+## Takes a finished question out of the tree at once (the next one may take its name).
+func _drop(dialog: Node) -> void:
+	if dialog.get_parent():
+		dialog.get_parent().remove_child(dialog)
+	dialog.queue_free()

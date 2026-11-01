@@ -28,7 +28,8 @@ var campaign_world := ""  ## the campaign's world package id (campaign.json `wor
 const CAMPAIGN_SKIP := ["campaign", "notes", "table"]
 const LAYERS := ["campaign", "world", "core"]
 var packages: Array[Dictionary] = []  ## manifests, sorted by name
-var entries := {}  ## kind -> Array[Dictionary], sorted by name
+var entries := {}  ## kind -> Array[Dictionary], sorted by name (published entries only)
+var drafts := {}  ## kind -> Array[Dictionary] of drafts (TASK-30): kept out of lists, search, links
 var errors: PackedStringArray = []
 var is_loaded := false
 var load_msec := 0
@@ -124,8 +125,19 @@ func _load_all() -> void:
 						e["_key"] = str(e.get("name", "")).to_lower()
 						bucket.append(e)
 	var by_name_key := func(a: Dictionary, b: Dictionary) -> bool: return a["_key"] < b["_key"]
+	var found_drafts := {}
 	for kind: String in found:
-		found[kind].sort_custom(by_name_key)
+		var all: Array = found[kind]
+		var published := all.filter(func(x: Dictionary) -> bool: return not EntryStore.is_draft(x))
+		if published.size() != all.size():
+			found_drafts[kind] = all.filter(func(x: Dictionary) -> bool: return EntryStore.is_draft(x))
+			found_drafts[kind].sort_custom(by_name_key)
+		found[kind] = published
+	for kind: String in found.keys():
+		if found[kind].is_empty():
+			found.erase(kind)
+		else:
+			found[kind].sort_custom(by_name_key)
 	found_packages.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return str(a.get("name", "")).to_lower() < str(b.get("name", "")).to_lower())
 	var names := {}
@@ -134,10 +146,14 @@ func _load_all() -> void:
 		for e: Dictionary in found[kind]:
 			names.get_or_add(e["_key"], []).append(e)
 			ids["%s/%s/%s" % [e["_package"], kind, e.get("id", "")]] = e
+	for kind: String in found_drafts:
+		for e: Dictionary in found_drafts[kind]:
+			ids["%s/%s/%s" % [e["_package"], kind, e.get("id", "")]] = e  # reachable by id, not by name
 	# Hand over in one go (the main thread only reads after `loaded`).
 	packages = found_packages
 	campaign_world = world
 	entries = found
+	drafts = found_drafts
 	_by_name = names
 	_by_id = ids
 	errors = problems
@@ -177,6 +193,41 @@ func kinds() -> PackedStringArray:
 	rest.sort()
 	out.append_array(PackedStringArray(rest))
 	return out
+
+
+## The entries of a kind, with its drafts if asked (sorted by name).
+func list(kind: String, with_drafts := false) -> Array:
+	var out: Array = entries.get(kind, [])
+	if not with_drafts or not drafts.has(kind):
+		return out
+	out = out + drafts[kind]
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["_key"] < b["_key"])
+	return out
+
+
+## Kinds with entries (or drafts, if asked), in display order.
+func kinds_with(with_drafts: bool) -> PackedStringArray:
+	var out := kinds()
+	if with_drafts:
+		for k: String in drafts:
+			if k not in out:
+				out.append(k)
+	return out
+
+
+## Every draft of every package and the campaign.
+func all_drafts() -> Array:
+	var out := []
+	for k: String in drafts:
+		out.append_array(drafts[k])
+	return out
+
+
+func draft_count() -> int:
+	var n := 0
+	for k: String in drafts:
+		n += drafts[k].size()
+	return n
 
 
 func count() -> int:
@@ -313,6 +364,7 @@ func field_values(kind: String, key: String) -> Array:
 func put_entry(entry: Dictionary, kind: String, store: EntryStore, old_id := "") -> Dictionary:
 	_values.clear()
 	remove_entry(store.id, kind, old_id if old_id != "" else str(entry.get("id", "")))
+	remove_entry(store.id, kind, str(entry.get("id", "")))  # renamed onto an id that was there
 	var e := EntryStore.strip(entry).duplicate(true)
 	e["_kind"] = kind
 	e["_package"] = store.id
@@ -320,10 +372,12 @@ func put_entry(entry: Dictionary, kind: String, store: EntryStore, old_id := "")
 	e["_dir"] = store.folder
 	e["_layer"] = "campaign" if store.layer == EntryStore.CAMPAIGN else "world" if store.layer == EntryStore.WORLD else "core"
 	e["_key"] = str(e.get("name", "")).to_lower()
-	var list: Array = entries.get_or_add(kind, [])
-	var at := list.bsearch_custom(e, func(a: Dictionary, b: Dictionary) -> bool: return a["_key"] < b["_key"])
-	list.insert(at, e)
-	_by_name.get_or_add(e["_key"], []).append(e)
+	var draft := EntryStore.is_draft(e)
+	var bucket: Array = (drafts if draft else entries).get_or_add(kind, [])
+	var at := bucket.bsearch_custom(e, func(a: Dictionary, b: Dictionary) -> bool: return a["_key"] < b["_key"])
+	bucket.insert(at, e)
+	if not draft:
+		_by_name.get_or_add(e["_key"], []).append(e)
 	_by_id["%s/%s/%s" % [store.id, kind, e.get("id", "")]] = e
 	return e
 
@@ -335,10 +389,13 @@ func remove_entry(package_id: String, kind: String, id: String) -> void:
 	if old.is_empty():
 		return
 	_by_id.erase(key)
-	var list: Array = entries.get(kind, [])
-	var i := list.find(old)
-	if i >= 0:
-		list.remove_at(i)
+	for bucket: Dictionary in [entries, drafts]:
+		var list: Array = bucket.get(kind, [])
+		var i := list.find(old)
+		if i >= 0:
+			list.remove_at(i)
+			if list.is_empty() and is_same(bucket, drafts):
+				bucket.erase(kind)
 	var same: Array = _by_name.get(old["_key"], [])
 	same.erase(old)
 	if same.is_empty():

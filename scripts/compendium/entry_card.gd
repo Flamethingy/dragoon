@@ -16,6 +16,16 @@ var selected := false:
 		_restyle()
 
 var _hover := false
+var draft_info := false  ## Drafts page: kind, last edit and missing fields instead of the subtitle
+
+
+## "Monster · 11-01 14:30" for a draft card.
+static func draft_line(e: Dictionary) -> String:
+	var when := str(e.get("edited", ""))
+	var parts := PackedStringArray([str(e.get("_kind", "")).capitalize().trim_suffix("s")])
+	if when.length() >= 16:
+		parts.append(when.substr(5, 5) + " " + when.substr(11, 5))  # 11-01 14:30
+	return " · ".join(parts)
 
 
 func setup(e: Dictionary) -> void:
@@ -53,13 +63,41 @@ func setup(e: Dictionary) -> void:
 	box.add_child(name)
 	var sub := Label.new()
 	sub.theme_type_variation = UISkin.V_MUTED
-	sub.text = CardData.subtitle(e)
+	sub.text = draft_line(e) if draft_info else CardData.subtitle(e)
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sub.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	sub.clip_text = true
 	sub.add_theme_font_size_override("font_size", 12)
 	sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_child(sub)
+
+	if draft_info:
+		var missing := Schema.missing(str(e.get("_kind", "")), e)
+		if not missing.is_empty():
+			var warn := Label.new()
+			warn.name = "Missing"
+			warn.text = "Missing: " + ", ".join(missing)
+			warn.add_theme_color_override("font_color", Color(0.72, 0.2, 0.15))
+			warn.add_theme_font_size_override("font_size", 11)
+			warn.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			warn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+			warn.clip_text = true
+			warn.tooltip_text = warn.text
+			warn.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			box.add_child(warn)
+	if EntryStore.is_draft(e):
+		var tag := Label.new()
+		tag.name = "DraftTag"
+		tag.text = " Draft "
+		tag.add_theme_color_override("font_color", Color.WHITE)
+		tag.add_theme_font_size_override("font_size", 11)
+		var bg := StyleBoxFlat.new()
+		bg.bg_color = Color(0.45, 0.3, 0.22, 0.9)
+		bg.set_corner_radius_all(4)
+		tag.add_theme_stylebox_override("normal", bg)
+		tag.position = Vector2(SIZE.x - 58, 4)
+		tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		art.add_child(tag)
 
 	if e.get("_kind") == "packages":
 		var on := CheckButton.new()
@@ -79,6 +117,17 @@ func _restyle() -> void:
 	modulate = Color(1.04, 1.04, 1.04) if _hover and not selected else Color.WHITE
 	if entry.get("_kind") == "packages" and not bool(entry.get("_enabled", true)):
 		modulate.a = 0.5  # switched off: dimmed
+
+
+## Drafts get a dashed frame.
+func _draw() -> void:
+	if not EntryStore.is_draft(entry):
+		return
+	var r := Rect2(Vector2(2, 2), size - Vector2(4, 4))
+	var c := Color(0.45, 0.3, 0.22)
+	for side: Array in [[r.position, Vector2(r.end.x, r.position.y)], [Vector2(r.end.x, r.position.y), r.end],
+			[r.end, Vector2(r.position.x, r.end.y)], [Vector2(r.position.x, r.end.y), r.position]]:
+		draw_dashed_line(side[0], side[1], c, 2.0, 6.0)
 
 
 func _gui_input(event: InputEvent) -> void:

@@ -26,6 +26,7 @@ var editor: EntryEditor  ## while editing (TASK-21)
 ## The book (set before setup): packages need it for their contents, PDFs and switch.
 var book: Compendium
 var contents: PackageContents
+var drafts_page: DraftsPage
 var documents_box: VBoxContainer
 
 
@@ -57,6 +58,17 @@ func setup(e: Dictionary) -> void:
 	box.add_child(cols)
 	if e.get("_kind") == "packages":
 		_setup_package(e, box)
+		return
+	if e.get("_kind") == Compendium.DRAFTS:
+		edit_button.visible = false
+		if book:
+			drafts_page = DraftsPage.new()
+			drafts_page.name = "DraftsPage"
+			drafts_page.setup(book.db)
+			drafts_page.open_requested.connect(func(x: Dictionary) -> void: book.open_tab(x))
+			drafts_page.background_requested.connect(func(x: Dictionary) -> void: book.open_tab(x, true))
+			drafts_page.publish_all_requested.connect(book.publish_all)
+			box.add_child(drafts_page)
 		return
 	var monster: bool = e.get("_kind") == "monsters"
 	var left := VBoxContainer.new()
@@ -241,6 +253,10 @@ func _header(e: Dictionary) -> Control:
 	col.add_child(title)
 	var sub := Label.new()
 	sub.text = "%s  ·  %s" % [CardData.subtitle(e), e.get("_package_name", "")]
+	if EntryStore.is_draft(e):
+		sub.text = "Draft  ·  " + sub.text
+	if e.get("_kind") == Compendium.DRAFTS:
+		sub.text = "Unfinished entries of every package and the campaign"
 	sub.add_theme_color_override("font_color", UISkin.TAN)
 	sub.add_theme_font_size_override("font_size", 14)
 	col.add_child(sub)

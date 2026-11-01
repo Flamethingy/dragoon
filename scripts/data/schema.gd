@@ -13,7 +13,11 @@ extends RefCounted
 const SIZES := ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"]
 const ABILITIES := ["str", "dex", "con", "int", "wis", "cha"]
 const SPEEDS := ["walk", "swim", "fly", "burrow", "climb"]
-const HIDDEN := ["id", "origin", "used_by", "counts"]  ## kept, not shown
+const HIDDEN := ["id", "origin", "used_by", "counts", "draft", "edited", "source_page", "crop"]  ## kept, not shown
+## Fields a finished entry should have filled (the Drafts page hints at empty ones).
+const REQUIRED := {"monsters": ["type", "cr", "ac", "hp", "description"], "spells": ["school", "description"],
+	"items": ["rarity", "description"], "features": ["text"], "tables": ["dice", "rows"], "notes": ["text"],
+	"maps": ["image"]}
 const SIZE_TOKENS := ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"]
 const ABILITY_NAMES := ["Strength", "Dexterity", "Constitution", "Intelligence", "Wisdom", "Charisma"]
 const DAMAGE_TYPES := ["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing",
@@ -136,6 +140,16 @@ static func guess(v: Variant, key := "") -> String:
 	if v is Array and v.all(func(x: Variant) -> bool: return x is String):
 		return "list"
 	return "json"
+
+
+## The labels of required fields (REQUIRED, else description) that are empty in `e`.
+static func missing(kind: String, e: Dictionary) -> PackedStringArray:
+	var out := PackedStringArray()
+	for key: String in REQUIRED.get(kind, ["description"]):
+		var v: Variant = e.get(key)
+		if v == null or (v is String and v.strip_edges() == "") or (v is Array and v.is_empty()) 				or (v is Dictionary and v.is_empty()) or ((v is int or v is float) and v == 0 and key != "cr"):
+			out.append(key.replace("_", " "))
+	return out
 
 
 ## The empty value for a field type.

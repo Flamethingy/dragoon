@@ -1,9 +1,11 @@
 extends SceneTree
-## Headless check of the import UI (TASK-28) against tools/fake_import_agent.py: a job runs as
-## its own process with the API key only in its environment, its log and status are followed,
-## drafts are cropped, accepted (origin kept, features along, read-only target unlocked),
-## duplicates replace / keep both / skip, discards; the window, review, drag & drop and the
-## "Import from link" button; a new world package as target.
+## Headless check of the import UI (TASK-28, drafts flow TASK-30) against
+## tools/fake_import_agent.py: a job runs as its own process with the API key only in its
+## environment, its log and status are followed; a finished job lands in the target package as
+## drafts (features, pictures and source pages along, ids that are taken renamed, read-only
+## target unlocked, a new world package created); crop from the source page; publishing asks
+## about same names (replace / keep both / skip); the window, drag & drop, "Import from link",
+## "Show drafts" and "Publish all" per import job in the book.
 ## godot --headless --path . -s tools/test_import_ui.gd
 
 const DIR := "user://test_import"
@@ -35,49 +37,52 @@ func _init() -> void:
 
 	# --- A job --------------------------------------------------------------------------------------
 	var job := jobs.start(input, "mini-source")
+	var job_id := str(job.get("id", ""))
 	_check(job.has("id") and str(job.status) == "starting", "the job starts (%s)" % job)
-	var s := await _wait_done(jobs, str(job.id))
+	var s := await _wait_done(jobs, job_id)
 	_check(str(s.status) == "done" and not s.running, "...and finishes (%s)" % s.get("status"))
 	_check(str(s.log).contains("Reading Stat Block.png (image)") and str(s.log).contains("4 drafts ready"), "its progress log (%s)" % s.get("log"))
 	_check(str(s.log).contains("API key: yes") and str(s.log).contains("Key in arguments: no"), "the key goes in by environment only")
 	_check(OS.get_environment("ANTHROPIC_API_KEY") != KEY, "...and is not left in the VTT's environment")
-	_check(not _tree_contains(base.path_join("data"), KEY), "the key is nowhere in data/ (job, drafts, packages)")
-	_check(jobs.jobs().size() == 1 and jobs.jobs()[0].id == job.id, "the job is listed")
+	_check(jobs.jobs().size() == 1 and jobs.jobs()[0].id == job_id, "the job is listed")
 
-	# --- Drafts ---------------------------------------------------------------------------------------
-	var drafts := jobs.draft_entries(str(job.id))
-	_check(drafts.size() == 4 and drafts.all(func(d: Dictionary) -> bool: return d.kind == "monsters"), "4 drafts, features come with their monsters")
-	var cropped := jobs.crop(str(job.id), "monsters", "bog-hag", Rect2i(50, 60, 100, 120))
-	var art := jobs.job_dir(str(job.id)).path_join("art/bog-hag.jpg")
-	_check(cropped.get("image") == "art/bog-hag.jpg" and FileAccess.file_exists(art), "crop writes art/<id>.jpg")
-	var art_img := Image.load_from_file(art)
-	_check(art_img != null and art_img.get_size() == Vector2i(100, 120), "with the dragged size")
-	_check(cropped.get("crop") == [50, 60, 100, 120], "the crop is kept on the draft")
-	_check(jobs.crop(str(job.id), "monsters", "bog-hag", Rect2i(500, 500, 10, 10)).is_empty(), "a crop off the page does nothing")
-
+	# --- Merged as drafts -------------------------------------------------------------------------------
 	var target := EntryStore.open(root.path_join("mini-source"))
 	_check(target.is_read_only(), "the target starts read-only")
-	var r := jobs.accept(str(job.id), "monsters", "bog-hag", target)
-	var hag := target.find("monsters", "bog-hag")
-	_check(r.has("merged") and not hag.is_empty(), "accept merges into the package")
+	var m := jobs.merge(job_id)
+	target = EntryStore.open(root.path_join("mini-source"))
+	_check(m.get("package") == "mini-source" and int(m.get("count", 0)) == 5, "a finished job lands in the package (%s)" % m)
 	_check(not target.is_read_only(), "...unlocking the chosen source package")
-	var origin: Dictionary = hag.get("origin", {})
-	_check(origin.get("import") == "image" and int(origin.get("page", 0)) == 1, "the import origin is kept (%s)" % origin)
-	_check(not hag.has("crop") and not hag.has("source_page"), "review-only keys are dropped")
-	_check(FileAccess.file_exists(root.path_join("mini-source").path_join(str(hag.get("image", "-")))), "the picture comes along (%s)" % hag.get("image"))
-	_check(not target.find("features", "bog-hag-claws").is_empty(), "and its features")
-	_check(jobs.drafts(str(job.id)).find("monsters", "bog-hag").is_empty(), "the draft is gone after accepting")
+	var hag := target.find("monsters", "bog-hag")
+	_check(EntryStore.is_draft(hag) and hag.origin.get("job") == job_id and hag.origin.get("import") == "image", "as drafts with origin and job (%s)" % hag.get("origin"))
+	_check(EntryStore.is_draft(target.find("features", "bog-hag-claws")), "features come along as drafts")
+	var page_rel := str(hag.get("source_page", ""))
+	_check(page_rel == "imports/%s/pages/1.png" % job_id and FileAccess.file_exists(root.path_join("mini-source").path_join(page_rel)), "the source page is copied (%s)" % page_rel)
+	var cooks := target.list("monsters").filter(func(e: Dictionary) -> bool: return e.name == "Ogre Cook")
+	_check(cooks.size() == 4 and not EntryStore.is_draft(target.find("monsters", "ogre-cook")) and int(target.find("monsters", "ogre-cook").hp) == 59, "a taken id gets a new one, the old entry stays")
+	_check(bool(jobs.status(job_id).merged) and int(jobs.merge(job_id).get("count", -1)) == 0, "merged once only")
+	_check(str(jobs.status(job_id).log).contains("5 draft(s) put into Mini Source"), "the log says so")
+	_check(not _tree_contains(base.path_join("data"), KEY), "the key is nowhere in data/ (job, drafts, packages)")
 
-	# Duplicates.
-	r = jobs.accept(str(job.id), "monsters", "ogre-cook", target)
+	# Crop from the page.
+	var cropped := target.crop_picture("monsters", "bog-hag", Rect2i(50, 60, 100, 120))
+	var art_img := Image.load_from_file(root.path_join("mini-source/art/bog-hag.jpg"))
+	_check(cropped.get("image") == "art/bog-hag.jpg" and art_img != null and art_img.get_size() == Vector2i(100, 120), "crop writes art/<id>.jpg with the dragged size")
+	_check(target.crop_picture("monsters", "bog-hag", Rect2i(500, 500, 10, 10)).is_empty(), "a crop off the page does nothing")
+
+	# Publishing.
+	var r := target.publish("monsters", "bog-hag")
+	_check(r.has("published") and not EntryStore.is_draft(target.find("monsters", "bog-hag")), "publish")
+	_check(not EntryStore.is_draft(target.find("features", "bog-hag-claws")), "...with its features")
+	var draft_ids: Array = cooks.filter(func(e: Dictionary) -> bool: return EntryStore.is_draft(e)).map(func(e: Dictionary) -> String: return str(e.id))
+	r = target.publish("monsters", draft_ids[0])
 	_check(r.has("duplicate") and r.duplicate.id == "ogre-cook", "same name: asks first")
-	_check(int(target.find("monsters", "ogre-cook").hp) == 59, "...and changes nothing")
-	r = jobs.accept(str(job.id), "monsters", "ogre-cook", target, ImportJobs.REPLACE)
-	_check(r.has("merged") and int(target.find("monsters", "ogre-cook").hp) == 60 and _named(target, "Ogre Cook") == 1, "replace keeps the id, one Ogre Cook")
-	r = jobs.accept(str(job.id), "monsters", "ogre-cook-2", target, ImportJobs.KEEP_BOTH)
-	_check(r.has("merged") and _named(target, "Ogre Cook") == 2, "keep both")
-	r = jobs.accept(str(job.id), "monsters", "ogre-cook-3", target, ImportJobs.SKIP)
-	_check(r.has("skipped") and _named(target, "Ogre Cook") == 2 and jobs.draft_entries(str(job.id)).is_empty(), "skip drops the draft")
+	r = target.publish("monsters", draft_ids[0], EntryStore.REPLACE)
+	_check(r.has("published") and int(target.find("monsters", "ogre-cook").hp) == 60 and target.find("monsters", draft_ids[0]).is_empty(), "replace takes the old id")
+	r = target.publish("monsters", draft_ids[1], EntryStore.KEEP_BOTH)
+	_check(r.has("published") and _published(target, "Ogre Cook") == 2, "keep both")
+	r = target.publish("monsters", draft_ids[2], EntryStore.SKIP)
+	_check(r.has("skipped") and target.find("monsters", draft_ids[2]).is_empty() and _published(target, "Ogre Cook") == 2, "skip throws the draft away")
 
 	# --- The window --------------------------------------------------------------------------------
 	var screen := SubViewport.new()
@@ -85,50 +90,32 @@ func _init() -> void:
 	get_root().add_child(screen)
 	var job2 := jobs.start(input, "mini-source")
 	await _wait_done(jobs, str(job2.id))
-	jobs.discard(str(job2.id), "monsters", "ogre-cook-3")
 	var panel := ImportPanel.new(root)
 	screen.add_child(panel)
 	await process_frame
 	_check(panel.key_edit.secret and panel.key_edit.text == KEY, "the key field is hidden and filled from settings")
-	_check(panel.job_list.item_count == 2 and panel.job_list.get_item_text(0).contains("3 draft(s)"), "jobs with their draft counts (%s)" % panel.job_list.get_item_text(0))
+	_check(panel.job_list.item_count == 2 and panel.job_list.get_item_text(0).contains("5 draft(s) in mini-source"), "the window merges finished jobs (%s)" % panel.job_list.get_item_text(0))
 	panel._select_job(str(job2.id))
-	_check(panel.log_view.text.contains("4 drafts ready"), "the log of the selected job")
-	var review := panel.open_review(str(job2.id))
-	await process_frame
-	_check(review != null and review.list.item_count == 3 and review.list.get_item_text(0).contains("Bog Hag  (in package)"), "review lists the drafts, marks names already there (%s)" % review.list.get_item_text(0))
-	_check(review.crop.texture != null and review.page_label.text.contains("page 1"), "the source page beside the editor (%s)" % review.page_label.text)
-	review.discard_current()
-	_check(review.list.item_count == 2, "discard")
-	review.accept_all()
-	await process_frame
-	var q := panel.find_child("Question", false, false)
-	_check(q != null, "accept all asks about the duplicate")
-	if q:
-		(q.find_child("Choice_Skip", true, false) as Button).pressed.emit()
-	await process_frame
-	q = _open_question(panel)
-	_check(q != null, "...for each one")
-	if q:
-		(q.find_child("Choice_Keep both".validate_node_name(), true, false) as Button).pressed.emit()
-	await process_frame
-	_check(review.list.item_count == 0 and review.status.text.contains("Everything is reviewed"), "all reviewed (%s)" % review.status.text)
-	_check(_named(EntryStore.open(root.path_join("mini-source")), "Ogre Cook") == 3, "keep both added one more")
-	panel.close_review()
-	_check(panel._main.visible, "back to the jobs")
+	_check(panel.log_view.text.contains("put into Mini Source"), "the log of the selected job")
+	var asked := [false]
+	panel.drafts_requested.connect(func() -> void: asked[0] = true)
+	(panel.find_child("ShowDrafts", true, false) as Button).pressed.emit()
+	_check(asked[0], "Show drafts asks for the Drafts page")
 
 	# New world package as target.
+	panel = ImportPanel.new(root)
+	screen.add_child(panel)
+	await process_frame
 	panel.set_input(input)
 	panel.select_target(ImportPanel.NEW_PACKAGE)
 	panel.new_name.text = "Swamp Finds"
 	var job3 := panel.start()
-	await _wait_done(jobs, str(job3.id))
 	_check(str(job3.get("target")) == "new:Swamp Finds", "new package target")
-	review = panel.open_review(str(job3.id))
-	_check(review != null and review.target.layer == EntryStore.WORLD and review.target.name == "Swamp Finds", "the world package is created for the review")
-	if review:
-		review.accept_current()
-	_check(not EntryStore.open(root.path_join("swamp-finds")).find("monsters", "bog-hag").is_empty(), "accepted into it")
-	_check(str(panel.jobs.status(str(job3.id)).target) == "swamp-finds", "the job now points at it")
+	await _wait_done(jobs, str(job3.id))
+	panel.refresh_jobs()
+	var swamp := EntryStore.open(root.path_join("swamp-finds"))
+	_check(swamp != null and swamp.layer == EntryStore.WORLD and EntryStore.is_draft(swamp.find("monsters", "bog-hag")), "a new world package gets the drafts")
+	_check(str(jobs.status(str(job3.id)).target) == "swamp-finds", "the job now points at it")
 	var changed := [false]
 	panel.changed.connect(func() -> void: changed[0] = true)
 	panel.close()
@@ -140,12 +127,16 @@ func _init() -> void:
 	_check(str(bad.get("status")) == "failed" and str(bad.get("error")).contains("missing"), "a missing tool fails clearly")
 	ImportJobs.set_setting("agent", ProjectSettings.globalize_path("res://tools/fake_import_agent.py"))
 
-	# --- Hooks in the book -------------------------------------------------------------------------
+	# --- In the book -------------------------------------------------------------------------------
+	var job4 := jobs.start(input, "swamp-finds")
+	await _wait_done(jobs, str(job4.id))  # finished while the book was closed
 	var book := Compendium.new()
 	book.tabs_file = ""
 	book.packages_root = root
 	screen.add_child(book)
 	await book.db.loaded
+	await process_frame
+	_check(bool(jobs.status(str(job4.id)).get("merged", false)), "the book merges jobs that finished while it was closed")
 	var pdf := base.path_join("Book.pdf")
 	var f := FileAccess.open(pdf, FileAccess.WRITE)
 	f.store_string("%PDF-1.4")
@@ -156,8 +147,10 @@ func _init() -> void:
 	var opened := book.find_child("ImportPanel", false, false) as ImportPanel
 	_check(opened != null and opened.input_edit.text == pdf, "dropping a PDF opens the import window with it")
 	if opened:
-		opened.close()
+		opened.show_drafts()
 	await process_frame
+	await process_frame
+	_check(book.current_tab_key() == "/drafts/drafts", "Show drafts opens the Drafts page (%s)" % book.current_tab_key())
 	book._open_packages()
 	await process_frame
 	var link := book.find_child("ImportLink", true, false) as Button
@@ -166,16 +159,40 @@ func _init() -> void:
 		link.pressed.emit()
 	await process_frame
 	_check(book.find_child("ImportPanel", false, false) != null, "...opens the import window")
+	(book.find_child("ImportPanel", false, false) as ImportPanel).close()
+
+	# The editor shows the source page of an imported draft.
+	var draft_hag: Dictionary = book.db.get_entry("swamp-finds", "monsters", "bog-hag")
+	var view := book.open_tab(draft_hag)
+	var form := book.start_edit(view)
+	_check(form != null and form.find_child("SourcePage", true, false) is CropView and form.crop.texture != null, "the editor shows the source page")
+	form.crop.selection = Rect2i(10, 10, 60, 80)
+	form.apply_crop()
+	_check(str(EntryStore.open(root.path_join("swamp-finds")).find("monsters", "bog-hag").get("image")) == "art/bog-hag.jpg", "and crops the picture")
+	form.cancelled.emit()
+
+	# Publish all from one import job (no clashes in the new package for job3's own copies).
+	var drafts_page := book.open_drafts().drafts_page
+	var job_button := drafts_page.find_child("PublishJob_" + str(job3.id).validate_node_name(), true, false) as Button
+	_check(job_button != null, "Publish all per import job on the Drafts page")
+	if job_button:
+		job_button.pressed.emit()
+	await process_frame
+	var q := book.find_child("DuplicateQuestion", false, false) as ConfirmationDialog
+	_check(q != null, "publishing the second Ogre Cook asks")
+	var guard := 0
+	while q != null and guard < 5:
+		q.custom_action.emit(&"keep")
+		await process_frame
+		q = book.find_child("DuplicateQuestion", false, false) as ConfirmationDialog
+		guard += 1
+	var swamp_after := EntryStore.open(root.path_join("swamp-finds"))
+	var left := swamp_after.list("monsters").filter(func(e: Dictionary) -> bool: return EntryStore.is_draft(e) and e.origin.get("job") == str(job3.id))
+	_check(left.is_empty() and _published(swamp_after, "Ogre Cook") == 3, "every draft of that job is published (%s left)" % [left.map(func(e: Dictionary) -> String: return str(e.id))])
+	_check(swamp_after.list("monsters").any(func(e: Dictionary) -> bool: return EntryStore.is_draft(e) and e.origin.get("job") == str(job4.id)), "the other job's drafts stay drafts")
 
 	print("import ui: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))
 	quit(1 if _failed > 0 else 0)
-
-
-func _open_question(panel: Node) -> Node:
-	for c in panel.get_children():
-		if c.name.begins_with("Question") and not c.is_queued_for_deletion():
-			return c
-	return null
 
 
 func _wait_done(jobs: ImportJobs, id: String) -> Dictionary:
@@ -188,8 +205,8 @@ func _wait_done(jobs: ImportJobs, id: String) -> Dictionary:
 	return s
 
 
-func _named(store: EntryStore, entry_name: String) -> int:
-	return store.list("monsters").filter(func(e: Dictionary) -> bool: return e.get("name") == entry_name).size()
+func _published(store: EntryStore, entry_name: String) -> int:
+	return store.list("monsters").filter(func(e: Dictionary) -> bool: return e.get("name") == entry_name and not EntryStore.is_draft(e)).size()
 
 
 func _tree_contains(folder: String, text: String) -> bool:

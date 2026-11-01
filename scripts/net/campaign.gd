@@ -223,8 +223,8 @@ func token_view(ref: String, owner := "", for_owner := false) -> Dictionary:
 ## in `events` (e.g. EventLog.effective(ref, day, time)) applied. {} if there is none.
 func entry_view(ref: String, viewer: String, events: Array = []) -> Dictionary:
 	var e := entry(ref)
-	if e.is_empty():
-		return {}
+	if e.is_empty() or (EntryStore.is_draft(e) and viewer != Reveal.DM):
+		return {}  # players never get drafts (TASK-30)
 	var view := Reveal.filter_entry(e, viewer, Reveal.grants_from(events, ref))
 	view["ref"] = ref
 	return view
@@ -246,6 +246,8 @@ func pc_choices(owner_map: Dictionary) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for ref in pcs():
 		var e := entry(ref)
+		if EntryStore.is_draft(e):
+			continue  # not finished: not offered to players
 		var token := str(e.get("token", ""))
 		var owner: String = owner_map.get(ref, "")
 		out.append({"id": ref, "name": str(e.get("name", ref)), "class": class_text(e),

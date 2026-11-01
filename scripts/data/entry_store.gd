@@ -11,13 +11,21 @@ extends RefCounted
 ## - commit() is the editor's save: in a campaign during a running session, changes to
 ##   creatures' sheet fields become `sheet.changed` events (doc-1: play state never goes back
 ##   into the files); everything else is saved to JSON.
+## - Drafts (TASK-30, package-format.md "Drafts"): every saved entry has `draft` (bool, missing =
+##   published). New entries start as drafts; publish() takes a draft live (with the features
+##   and tables made with it) and asks about a published entry of the same name first.
 
 const SOURCE := "source"
 const WORLD := "world"
 const CAMPAIGN := "campaign"
 const CREATURES := ["pcs", "npcs", "monsters"]
 ## Creature fields that stay entity edits even during a session (what something *is*).
-const TEXT_FIELDS := ["id", "name", "description", "image", "token", "tags", "origin", "source"]
+const TEXT_FIELDS := ["id", "name", "description", "image", "token", "tags", "origin", "source", "draft", "edited"]
+## What to do when a published entry of the same name exists (publish, import).
+const ASK := "ask"
+const REPLACE := "replace"
+const KEEP_BOTH := "keep"
+const SKIP := "skip"
 
 var folder := ""
 var layer := ""  ## source, world or campaign
@@ -118,6 +126,7 @@ func create(kind: String, entry_name: String) -> Dictionary:
 	var e := Schema.blank(kind)
 	e["id"] = free_id(kind, entry_name)
 	e["name"] = entry_name
+	e["draft"] = true  # unfinished until saved as published (TASK-30)
 	if layer != CAMPAIGN and e.has("source"):
 		e["source"] = name
 	save(kind, e)
@@ -130,6 +139,9 @@ func save(kind: String, entry: Dictionary, old_id := "") -> Error:
 	if is_read_only():
 		return ERR_FILE_NO_PERMISSION
 	var clean := strip(entry)
+	clean["draft"] = is_draft(clean)  # always written (TASK-30)
+	if clean.draft:
+		clean["edited"] = Time.get_datetime_string_from_system()
 	var items := list(kind)
 	var look := old_id if old_id != "" else str(clean.get("id", ""))
 	var at := -1
@@ -165,6 +177,116 @@ func duplicate_entry(kind: String, entry_id: String) -> Dictionary:
 	copy["id"] = free_id(kind, str(copy.name))
 	save(kind, copy)
 	return copy
+
+
+# --- Drafts (TASK-30) ---------------------------------------------------------------------
+
+static func is_draft(e: Dictionary) -> bool:
+	return bool(e.get("draft", false))
+
+
+## A published entry of the kind with the same name as `entry` (not itself), or {}.
+func name_clash(kind: String, entry: Dictionary) -> Dictionary:
+	var n := str(entry.get("name", "")).strip_edges().to_lower()
+	for e: Variant in list(kind):
+		if e is Dictionary and str(e.get("id", "")) != str(entry.get("id", "")) and not is_draft(e) 				and str(e.get("name", "")).strip_edges().to_lower() == n:
+			return e
+	return {}
+
+
+## The draft features and tables that belong to an entry (made with it): [[kind, id]].
+func draft_parts(kind: String, entry_id: String) -> Array:
+	var out := []
+	var e := find(kind, entry_id)
+	if kind == "monsters":
+		for list_key in PackageDB.FEATURE_LISTS:
+			for fid: Variant in (e.get(list_key, []) if e.get(list_key) is Array else []):
+				var f := find("features", str(fid))
+				if not f.is_empty() and is_draft(f):
+					out.append(["features", str(fid)])
+	for t: Variant in list("tables"):
+		if t is Dictionary and is_draft(t) and str(t.get("parent", "")) == "%s/%s" % [kind, entry_id]:
+			out.append(["tables", str(t.id)])
+	return out
+
+
+## Publishes a draft with its parts. A published entry of the same name: ASK returns
+## {duplicate: entry} and changes nothing; REPLACE takes its place (and id), KEEP_BOTH
+## publishes beside it, SKIP throws the draft (and its parts) away.
+## Returns {published: entry, removed: [[kind, id]]} / {duplicate} / {skipped, removed} / {error}.
+func publish(kind: String, entry_id: String, on_duplicate := ASK) -> Dictionary:
+	var e := find(kind, entry_id)
+	if e.is_empty():
+		return {"error": "No such entry"}
+	if is_read_only():
+		return {"error": "%s is read-only" % name}
+	var parts := draft_parts(kind, entry_id)
+	var removed := []
+	var dup := name_clash(kind, e)
+	if not dup.is_empty():
+		match on_duplicate:
+			ASK:
+				return {"duplicate": dup}
+			SKIP:
+				for p: Array in parts:
+					delete(p[0], p[1])
+					removed.append(p)
+				delete(kind, entry_id)
+				removed.append([kind, entry_id])
+				return {"skipped": true, "removed": removed}
+	var copy := e.duplicate(true)
+	copy["draft"] = false
+	copy.erase("edited")
+	var new_id := entry_id
+	if not dup.is_empty() and on_duplicate == REPLACE:
+		new_id = str(dup.id)
+		delete(kind, new_id)
+		removed.append([kind, new_id])
+		copy["id"] = new_id
+	save(kind, copy, entry_id)
+	if new_id != entry_id:
+		removed.append([kind, entry_id])
+	for p: Array in parts:
+		var part := find(p[0], p[1]).duplicate(true)
+		part["draft"] = false
+		part.erase("edited")
+		if p[0] == "tables" and new_id != entry_id:
+			part["parent"] = "%s/%s" % [kind, new_id]
+		save(p[0], part)
+	return {"published": find(kind, new_id), "removed": removed, "parts": parts}
+
+
+## Crops an entry's picture from its source page (`source_page`, page pixels) into
+## art/<id>.jpg (imports, TASK-28/30). Returns the saved entry ({} if nothing to crop).
+func crop_picture(kind: String, entry_id: String, rect: Rect2i) -> Dictionary:
+	var e := find(kind, entry_id)
+	if e.is_empty() or str(e.get("source_page", "")) == "" or is_read_only():
+		return {}
+	var page := ImageCache.decode(FileAccess.get_file_as_bytes(folder.path_join(str(e.source_page))))
+	if page == null:
+		return {}
+	var r := rect.intersection(Rect2i(Vector2i.ZERO, page.get_size()))
+	if r.size.x < 2 or r.size.y < 2:
+		return {}
+	DirAccess.make_dir_recursive_absolute(folder.path_join("art"))
+	var rel := "art/%s.jpg" % entry_id
+	page.get_region(r).save_jpg(folder.path_join(rel), 0.9)
+	var copy := e.duplicate(true)
+	copy["image"] = rel
+	copy["crop"] = [r.position.x, r.position.y, r.size.x, r.size.y]
+	save(kind, copy)
+	return find(kind, entry_id)
+
+
+## Sets a published entry back to draft (its features and tables stay as they are).
+func unpublish(kind: String, entry_id: String) -> Dictionary:
+	var e := find(kind, entry_id)
+	if e.is_empty() or is_read_only():
+		return {}
+	var copy := e.duplicate(true)
+	copy["draft"] = true
+	save(kind, copy)
+	return find(kind, entry_id)
 
 
 ## Copies an entry from another store into this one ("edit a copy"). Monsters bring their
@@ -214,8 +336,8 @@ func send_world(world: EntryStore, events_log: EventLog = null) -> Dictionary:
 		if not file.ends_with(".json") or kind == "package":
 			continue
 		for e: Variant in world.list(kind):
-			if not e is Dictionary or not e.has("id"):
-				continue
+			if not e is Dictionary or not e.has("id") or is_draft(e):
+				continue  # drafts stay home (TASK-30)
 			var ref := "%s/%s" % [kind, e.id]
 			if has(kind, str(e.id)):
 				out.skipped.append(ref)

@@ -2,17 +2,13 @@ class_name ImportJobs
 extends RefCounted
 ## The VTT side of the import agent (TASK-28, import-agent.md "VTT <-> tool"): starts
 ## tools/import_agent.py as its own process for a PDF, image or link, follows its job folder
-## (data/imports/<job>/: job.json, progress.log, a draft package) and merges reviewed drafts
-## into a package. Nothing reaches a package unless accepted here.
+## (data/imports/<job>/: job.json, progress.log, the tool's raw draft package). A finished job
+## is merged into its target package as drafts (TASK-30): hidden from the book and players
+## until published, where same names are asked about.
 ## Settings (API key, python, agent script) live in user:// only, never in data/ or git.
 
 static var settings_file := "user://import_settings.cfg"  ## tests point this elsewhere
 const FILE_KINDS := {"pdf": "pdf", "png": "image", "jpg": "image", "jpeg": "image", "webp": "image"}
-## Duplicate handling when a draft's name is already in the target kind.
-const ASK := "ask"
-const REPLACE := "replace"
-const KEEP_BOTH := "keep"
-const SKIP := "skip"
 
 var packages_root := ""
 var imports_root := ""  ## data/imports next to the packages
@@ -152,102 +148,11 @@ func cancel(job_id: String) -> void:
 		EntryStore._write(job_dir(job_id).path_join("job.json"), s)
 
 
-# --- Drafts ----------------------------------------------------------------------------------------
+# --- Merging into the package as drafts (TASK-30) -----------------------------------------------------
 
-## The job's draft package (null until the tool wrote package.json).
+## The tool's draft package of a job (null until it wrote package.json).
 func drafts(job_id: String) -> EntryStore:
 	return EntryStore.open(job_dir(job_id))
-
-
-## [{kind, entry}] of the drafts still waiting for review (features come with their monsters).
-func draft_entries(job_id: String) -> Array:
-	var store := drafts(job_id)
-	var out := []
-	if store == null:
-		return out
-	for file in DirAccess.get_files_at(store.folder):
-		var kind := file.get_basename()
-		if not file.ends_with(".json") or kind in ["package", "job", "features"]:
-			continue
-		for e: Variant in store.list(kind):
-			if e is Dictionary and e.has("id"):
-				out.append({"kind": kind, "entry": e})
-	return out
-
-
-## Crops the draft's picture from its source page (`source_page`, page pixels) into
-## art/<id>.jpg and points `image` at it.
-func crop(job_id: String, kind: String, entry_id: String, rect: Rect2i) -> Dictionary:
-	var store := drafts(job_id)
-	var e := store.find(kind, entry_id) if store else {}
-	if e.is_empty() or str(e.get("source_page", "")) == "":
-		return {}
-	var page := ImageCache.decode(FileAccess.get_file_as_bytes(store.folder.path_join(str(e.source_page))))
-	if page == null:
-		return {}
-	var r := rect.intersection(Rect2i(Vector2i.ZERO, page.get_size()))
-	if r.size.x < 2 or r.size.y < 2:
-		return {}
-	DirAccess.make_dir_recursive_absolute(store.folder.path_join("art"))
-	var rel := "art/%s.jpg" % entry_id
-	page.get_region(r).save_jpg(store.folder.path_join(rel), 0.9)
-	var copy := e.duplicate(true)
-	copy["image"] = rel
-	copy["crop"] = [r.position.x, r.position.y, r.size.x, r.size.y]
-	store.save(kind, copy)
-	return copy
-
-
-## The target entry with the same name as a draft ({} if none).
-static func duplicate_of(target: EntryStore, kind: String, draft: Dictionary) -> Dictionary:
-	var name := str(draft.get("name", "")).strip_edges().to_lower()
-	for e: Variant in target.list(kind):
-		if e is Dictionary and str(e.get("name", "")).strip_edges().to_lower() == name:
-			return e
-	return {}
-
-
-## Merges one draft into the target package (with its features and picture, keeping its
-## import `origin`) and removes it from the drafts. A name already in the target: `on_duplicate`
-## decides (ASK returns {duplicate: entry} and does nothing). A read-only source package is
-## unlocked: picking it as the import target is the explicit choice.
-## Returns {merged: entry} / {skipped: true} / {duplicate: entry} / {error}.
-func accept(job_id: String, kind: String, entry_id: String, target: EntryStore, on_duplicate := ASK) -> Dictionary:
-	var store := drafts(job_id)
-	var draft := store.find(kind, entry_id) if store else {}
-	if draft.is_empty() or target == null:
-		return {"error": "Nothing to merge"}
-	var dup := duplicate_of(target, kind, draft)
-	if not dup.is_empty():
-		match on_duplicate:
-			ASK:
-				return {"duplicate": dup}
-			SKIP:
-				store.delete(kind, entry_id)
-				return {"skipped": true}
-	if target.is_read_only():
-		target.unlock()
-	if not dup.is_empty() and on_duplicate == REPLACE:
-		target.delete(kind, str(dup.id))
-	var copy := target.copy_entry(store, kind, entry_id)
-	if copy.is_empty():
-		return {"error": "Can't write into %s" % target.name}
-	if draft.has("origin"):
-		copy["origin"] = draft.origin  # where it was imported from, not the draft folder
-	for key in ["crop", "source_page"]:
-		copy.erase(key)
-	var old_id := str(copy.id)
-	if not dup.is_empty() and on_duplicate == REPLACE:
-		copy["id"] = str(dup.id)
-	target.save(kind, copy, old_id)
-	store.delete(kind, entry_id)
-	return {"merged": copy}
-
-
-func discard(job_id: String, kind: String, entry_id: String) -> void:
-	var store := drafts(job_id)
-	if store:
-		store.delete(kind, entry_id)
 
 
 ## The target package for a job: an existing package or a new world package ("new:<name>").
@@ -255,3 +160,103 @@ func target_store(target: String) -> EntryStore:
 	if target.begins_with("new:"):
 		return EntryStore.create_world(packages_root, target.substr(4).strip_edges())
 	return EntryStore.open(packages_root.path_join(target))
+
+
+## Merges every finished job that is not merged yet; returns the ids of the packages that got drafts.
+func merge_finished() -> PackedStringArray:
+	var out := PackedStringArray()
+	for j: Dictionary in jobs():
+		if str(j.status) == "done" and not bool(j.get("merged", false)):
+			var r := merge(str(j.id))
+			if r.has("package") and str(r.package) not in out:
+				out.append(str(r.package))
+	return out
+
+
+## Puts a finished job's entries into its target package as drafts: features, tables and
+## pictures along (ids that are taken get new ones, references follow), the source pages
+## under imports/<job>/, every entry with `draft: true` and `origin {import, file|url, page, job}`.
+## Same names are not asked about here but when publishing. A read-only source package as
+## target is unlocked (picking it was the choice). Returns {package, count} or {error}.
+func merge(job_id: String) -> Dictionary:
+	var s := status(job_id)
+	if s.is_empty() or str(s.status) != "done":
+		return {"error": "The job is not finished"}
+	if bool(s.get("merged", false)):
+		return {"package": str(s.get("merged_into", "")), "count": 0}
+	var src := drafts(job_id)
+	if src == null:
+		return {"error": "The job left no entries"}
+	var target := target_store(str(s.target))
+	if target == null:
+		return {"error": "No package %s" % s.target}
+	if target.is_read_only():
+		target.unlock()
+	var ids := {}  ## "kind/old id" -> new id
+	var kinds := []
+	for file in DirAccess.get_files_at(src.folder):
+		var kind := file.get_basename()
+		if file.ends_with(".json") and kind not in ["package", "job"]:
+			kinds.append(kind)
+	# features first (monsters point at them), tables last (they point at their entry)
+	kinds.sort_custom(func(a: String, b: String) -> bool: return _order(a) < _order(b))
+	var count := 0
+	for kind: String in kinds:
+		for e: Variant in src.list(kind):
+			if not e is Dictionary or not e.has("id"):
+				continue
+			var copy: Dictionary = EntryStore.strip(e).duplicate(true)
+			var old_id := str(copy.id)
+			copy["id"] = target.free_id(kind, str(copy.get("name", old_id))) if target.has(kind, old_id) else old_id
+			ids["%s/%s" % [kind, old_id]] = str(copy.id)
+			if kind == "monsters":
+				for list_key in PackageDB.FEATURE_LISTS:
+					if copy.get(list_key) is Array:
+						copy[list_key] = copy[list_key].map(func(f: Variant) -> String: return str(ids.get("features/" + str(f), f)))
+			if kind == "tables" and str(copy.get("parent", "")) != "":
+				var parent := str(copy.parent)
+				if ids.has(parent):
+					copy["parent"] = "%s/%s" % [parent.get_slice("/", 0), ids[parent]]
+			for key in ["image", "token", "source_page"]:
+				if str(copy.get(key, "")) != "":
+					copy[key] = _copy_file(src, target, str(copy[key]), "imports/%s/%s" % [job_id, copy[key]])
+			var origin: Dictionary = copy.get("origin", {}) if copy.get("origin") is Dictionary else {}
+			origin["import"] = str(origin.get("import", s.kind))
+			if not origin.has("file") and not origin.has("url"):
+				origin["url" if str(s.kind) == "url" else "file"] = str(s.input)
+			origin["job"] = job_id
+			copy["origin"] = origin
+			copy["draft"] = true
+			target.save(kind, copy)
+			count += 1
+	s.erase("log")
+	s.erase("running")
+	s["merged"] = true
+	s["merged_into"] = target.id
+	s["count"] = count
+	s["target"] = target.id  # a new package exists now
+	EntryStore._write(job_dir(job_id).path_join("job.json"), s)
+	_append_log(job_id, "%d draft(s) put into %s" % [count, target.name])
+	return {"package": target.id, "count": count}
+
+
+static func _order(kind: String) -> int:
+	return 0 if kind == "features" else 2 if kind == "tables" else 1
+
+
+func _copy_file(src: EntryStore, target: EntryStore, rel: String, to_rel: String) -> String:
+	var from := src.folder.path_join(rel)
+	if not FileAccess.file_exists(from):
+		return rel
+	DirAccess.make_dir_recursive_absolute(target.folder.path_join(to_rel).get_base_dir())
+	DirAccess.copy_absolute(from, target.folder.path_join(to_rel))
+	return to_rel
+
+
+func _append_log(job_id: String, line: String) -> void:
+	var path := job_dir(job_id).path_join("progress.log")
+	var f := FileAccess.open(path, FileAccess.READ_WRITE if FileAccess.file_exists(path) else FileAccess.WRITE)
+	if f:
+		f.seek_end()
+		f.store_string(line + "\n")
+		f.close()

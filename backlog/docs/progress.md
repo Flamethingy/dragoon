@@ -248,3 +248,21 @@ See the "Open questions" section of the concept (secrets marking, event log form
   picks an existing one in another spelling. Ref tokens (pc race, factions, location: stored as `kind/id`;
   npc race, subclass class, subrace parent: stored as names, as the data has them) offer the entries of their
   kind; Ctrl+click opens the entry in a tab. Also in the import draft review. Test: `tools/test_tokens.gd`.
+
+- 2026-11-01: TASK-30 (Mochi): drafts for the whole compendium (package-format.md "Drafts"). `EntryStore`:
+  `draft` is always written on save (missing = published), drafts get `edited`; new entries start as drafts;
+  `publish(kind, id, ask|replace|keep|skip)` takes the draft's own draft features and tables along and asks
+  about a published entry of the same name first (replace takes its id, skip throws the draft away);
+  `unpublish`; `crop_picture` (source page -> `art/<id>.jpg`). `PackageDB` keeps drafts in `drafts` (by id
+  only): out of lists, search, wikilinks, refs and suggestions; `list(kind, with_drafts)`, `kinds_with`,
+  `all_drafts`, `draft_count`. Players never get drafts (`Campaign.entry_view`, PC choices), Send world skips
+  them, Send is hidden on drafts. Book: a **Show drafts** tickbox in the binder and in a package's contents
+  (Draft tag, dashed frame), a **Drafts** bookmark with the count opening the **Drafts page** (cards grouped by
+  package and kind, kind + last edit + missing required fields, `Schema.REQUIRED`; "Publish all" per package
+  and per import job, asking about same names one by one, loose features/tables never ask). Editor: new
+  entries **Save as draft** / **Save** (publish), drafts **Publish**, published **Back to draft**; entries
+  with `source_page` show the page with the crop box. Import rework: finished jobs are merged straight into
+  the target package as drafts (`ImportJobs.merge`, by the import window or at book start; ids that are taken
+  renamed with references, files under `imports/<job>/`, `origin.job`); the review screen (DraftReview) is
+  gone, "Show drafts" opens the Drafts page. Tests: `tools/test_drafts.gd`, `tools/test_import_ui.gd`
+  (reworked); screenshots via `tools/screenshot_import.gd`.

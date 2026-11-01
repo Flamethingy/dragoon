@@ -16,6 +16,8 @@ var package_id := ""
 var groups := {}  ## kind -> [entries] (all of the package)
 var shown := {}  ## kind -> how many cards are shown
 var open := {}  ## kind -> expanded?
+var show_drafts := false  ## the "Show drafts" tickbox (TASK-30)
+var _db: PackageDB
 
 var _search: LineEdit
 var _body: VBoxContainer
@@ -23,15 +25,8 @@ var _body: VBoxContainer
 
 func setup(db: PackageDB, id: String) -> void:
 	package_id = id
-	groups = {}
-	for kind: String in db.kinds():
-		var list: Array = db.entries[kind].filter(func(e: Dictionary) -> bool: return e["_package"] == id)
-		if not list.is_empty():
-			list.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["_key"] < b["_key"])
-			groups[kind] = list
-	for kind: String in groups:
-		open[kind] = kind not in COLLAPSED
-		shown[kind] = PAGE
+	_db = db
+	_group()
 	add_theme_constant_override("separation", 8)
 	var head := HBoxContainer.new()
 	add_child(head)
@@ -50,10 +45,35 @@ func setup(db: PackageDB, id: String) -> void:
 			shown[k] = PAGE
 		_render())
 	head.add_child(_search)
+	var drafts_box := CheckBox.new()
+	drafts_box.name = "ShowDrafts"
+	drafts_box.text = "Show drafts"
+	drafts_box.tooltip_text = "Also show this package's unfinished entries"
+	drafts_box.toggled.connect(set_show_drafts)
+	head.add_child(drafts_box)
 	_body = VBoxContainer.new()
 	_body.add_theme_constant_override("separation", 6)
 	add_child(_body)
 	_render()
+
+
+func _group() -> void:
+	groups = {}
+	for kind: String in _db.kinds_with(show_drafts):
+		var list: Array = _db.list(kind, show_drafts).filter(func(e: Dictionary) -> bool: return e["_package"] == package_id)
+		if not list.is_empty():
+			groups[kind] = list
+	for kind: String in groups:
+		if not open.has(kind):
+			open[kind] = kind not in COLLAPSED
+		shown[kind] = PAGE
+
+
+func set_show_drafts(on: bool) -> void:
+	show_drafts = on
+	_group()
+	if _body:
+		_render()
 
 
 func set_query(text: String) -> void:

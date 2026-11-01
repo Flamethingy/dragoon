@@ -2,15 +2,16 @@ class_name ImportPanel
 extends Control
 ## The Import window over the compendium (TASK-28): pick a PDF, image or link (or it comes from
 ## drag & drop), the target package (or a new world package) and start the import agent; the
-## jobs with their progress log; Review opens the drafts (DraftReview). The API key and Python
-## path are set here and kept in user:// only. Emits `changed` when entries were merged.
+## jobs with their progress log. A finished job lands in its package as drafts (TASK-30);
+## "Show drafts" opens the Drafts page, where they are edited and published. The API key and
+## Python path are set here and kept in user:// only. Emits `changed` when drafts arrived.
 
 signal changed
+signal drafts_requested  ## "Show drafts": close and open the Drafts page
 
 const NEW_PACKAGE := "__new__"
 
 var jobs: ImportJobs
-var db: PackageDB  ## the book, for the editor's value tokens (optional)
 var manager: PackageManager
 var input_edit: LineEdit
 var target_pick: OptionButton
@@ -20,7 +21,6 @@ var python_edit: LineEdit
 var job_list: ItemList
 var log_view: TextEdit
 var note: Label
-var review: DraftReview
 
 var _page: VBoxContainer
 var _main: VBoxContainer
@@ -144,7 +144,7 @@ func _build_main() -> void:
 	left.add_child(job_list)
 	var jrow := HBoxContainer.new()
 	left.add_child(jrow)
-	_button(jrow, "Review drafts", "Check the results and merge them", func() -> void: open_review(selected_job())).name = "Review"
+	_button(jrow, "Show drafts", "Edit and publish the imported entries on the Drafts page", show_drafts).name = "ShowDrafts"
 	_button(jrow, "Cancel job", "Stop the import agent", func() -> void:
 		jobs.cancel(selected_job())
 		refresh_jobs())
@@ -213,16 +213,21 @@ func start() -> Dictionary:
 
 
 func refresh_jobs() -> void:
-	if job_list == null or not _main.visible:
+	if job_list == null:
 		return
 	var keep := selected_job()
 	var all := jobs.jobs()
 	_job_ids = []
 	job_list.clear()
 	for j: Dictionary in all:
-		var drafts := jobs.draft_entries(str(j.id)).size()
-		job_list.add_item("%s  ·  %s%s" % [str(j.input).get_file() if str(j.kind) != "url" else str(j.input),
-			j.status, "  ·  %d draft(s)" % drafts if drafts > 0 else ""])
+		if str(j.status) == "done" and not bool(j.get("merged", false)):
+			var r := jobs.merge(str(j.id))
+			if r.has("package"):
+				manager.set_enabled(str(r.package), true)
+				_dirty = true
+				j = jobs.status(str(j.id))
+		var merged := "  ·  %d draft(s) in %s" % [int(j.get("count", 0)), j.get("merged_into", "")] if bool(j.get("merged", false)) else ""
+		job_list.add_item("%s  ·  %s%s" % [str(j.input).get_file() if str(j.kind) != "url" else str(j.input), j.status, merged])
 		_job_ids.append(str(j.id))
 	if keep != "":
 		_select_job(keep)
@@ -257,40 +262,10 @@ func _show_log() -> void:
 		log_view.scroll_vertical = log_view.get_line_count()
 
 
-## The drafts of a job side by side with their source pages.
-func open_review(job_id: String) -> DraftReview:
-	var s := jobs.status(job_id)
-	if s.is_empty():
-		return null
-	var target := jobs.target_store(str(s.target))
-	if str(s.target).begins_with("new:") and target != null:
-		# the new package exists now: later merges of this job go into it
-		s.target = target.id
-		s.erase("log")
-		s.erase("running")
-		EntryStore._write(jobs.job_dir(job_id).path_join("job.json"), s)
-		manager.set_enabled(target.id, true)
-		_dirty = true
-	if jobs.drafts(job_id) == null:
-		note.text = "This job has no drafts yet."
-		return null
-	_main.visible = false
-	review = DraftReview.new()
-	review.ask = ask
-	review.db = db
-	review.merged.connect(func(_e: Dictionary) -> void: _dirty = true)
-	review.back_requested.connect(close_review)
-	_page.add_child(review)
-	review.setup(jobs, job_id, target)
-	return review
-
-
-func close_review() -> void:
-	if review:
-		review.queue_free()
-		review = null
-	_main.visible = true
-	refresh_jobs()
+## Closes the window and shows the Drafts page.
+func show_drafts() -> void:
+	drafts_requested.emit()
+	close()
 
 
 func close() -> void:
@@ -314,45 +289,6 @@ func _browse() -> void:
 	d.popup_centered_ratio(0.6)
 
 
-## A small question in the window: buttons [[label, value]] plus Cancel (on_choice(null)).
-func ask(title: String, text: String, buttons: Array, on_choice: Callable) -> void:
-	var cover := Control.new()
-	cover.name = "Question"
-	cover.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	cover.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(cover)
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	cover.add_child(center)
-	var page := PanelContainer.new()
-	page.theme_type_variation = UISkin.V_PAGE
-	page.custom_minimum_size = Vector2(440, 0)
-	center.add_child(page)
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 12)
-	page.add_child(col)
-	var t := Label.new()
-	t.text = title
-	t.theme_type_variation = UISkin.V_HEADING
-	col.add_child(t)
-	var body := Label.new()
-	body.text = text
-	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	body.custom_minimum_size = Vector2(400, 0)
-	col.add_child(body)
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_END
-	row.add_theme_constant_override("separation", 8)
-	col.add_child(row)
-	var answer := func(value: Variant) -> void:
-		remove_child(cover)  # gone at once, so the next question can take its place
-		cover.queue_free()
-		on_choice.call(value)
-	for b: Array in buttons:
-		_button(row, str(b[0]), "", answer.bind(b[1])).name = "Choice_" + str(b[0]).validate_node_name()
-	_button(row, "Cancel", "", answer.bind(null))
-
-
 func _label(text: String) -> Label:
 	var l := Label.new()
 	l.text = text
@@ -370,8 +306,5 @@ func _button(parent: Control, text: String, tip: String, action: Callable) -> Bu
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event.pressed and event.keycode == KEY_ESCAPE:
-		if review:
-			close_review()
-		else:
-			close()
+		close()
 		get_viewport().set_input_as_handled()

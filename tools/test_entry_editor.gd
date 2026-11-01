@@ -121,11 +121,14 @@ func _init() -> void:
 	dform.delete_entry()
 	_check(not world.has("monsters", dkey.get_file()) and book._tab_index(dkey) < 0 and book.db.get_entry("sunken-coast", "monsters", dkey.get_file()).is_empty(), "delete removes file entry, tab and card")
 
-	# New entry of a new kind: a bookmark appears.
+	# New entry of a new kind: a draft first (TASK-30); published, a bookmark appears.
 	var nform := book.create_entry(world, "npcs", "Mira")
-	_check(nform != null and world.has("npcs", "mira") and "npcs" in book.db.kinds(), "new NPC in the world")
-	_check(book._tabs.get_children().any(func(b: Button) -> bool: return b.text.begins_with("Npcs")), "Npcs bookmark added")
+	_check(nform != null and world.has("npcs", "mira") and "npcs" in book.db.kinds_with(true) and "npcs" not in book.db.kinds(), "new NPC in the world, as a draft")
+	_check(nform.find_child("SaveDraft", true, false) != null, "a new entry offers Save as draft")
 	_check(nform.find_child("Field_attitude", true, false) is TokenField, "NPC form has its own fields (attitude as tokens)")
+	nform.publish()
+	_check("npcs" in book.db.kinds() and not EntryStore.is_draft(world.find("npcs", "mira")), "Save publishes it")
+	_check(book._tabs.get_children().any(func(b: Button) -> bool: return b.text.begins_with("Npcs")), "Npcs bookmark added")
 
 	# Unlocking the source package.
 	book._tab_bar.current_tab = book._tab_index("mini-core/monsters/goblin")

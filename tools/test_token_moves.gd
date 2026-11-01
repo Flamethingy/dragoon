@@ -167,9 +167,29 @@ func _init() -> void:
 	var release := press.duplicate() as InputEventMouseButton
 	release.pressed = false
 	release.position = motion.position
+	var starts := {}
+	for id: String in group:
+		starts[id] = grid.token_cell(id)
 	grid._unhandled_input(release)
 	await process_frame
+	# planned, not moved yet (TASK-45): ghosts at the ends, a dotted trail with the distance
+	_check(group.all(func(id: String) -> bool: return grid.token_cell(id) == starts[id]), "nothing moved yet")
+	_check(grid.plans.has_plans() and grid.plans.plans.size() == group.size(), "a planned move per token (%s)" % [grid.plans.plans.keys()])
+	var lead_path: Array = grid.plans.plans[lead].path
+	_check(lead_path[0] == starts[lead] and lead_path.back() == spot and MovePlans.squares(lead_path) == maxi(absi(spot.x - starts[lead].x), absi(spot.y - starts[lead].y)),
+		"the trail runs from the token to the drop, square by square (%s)" % [lead_path])
+	var lead_ghost: Sprite2D = grid.plans.plans[lead].ghost
+	_check(lead_ghost.visible and lead_ghost.modulate.a < 1.0 and lead_ghost.position == grid.cell_center(spot, cells), "a transparent ghost at the end")
+	_check(grid.tokens[lead].position == grid.cell_center(starts[lead], cells), "the real token stays")
+	# Space: they go, along the trail
+	var space := InputEventKey.new()
+	space.pressed = true
+	space.physical_keycode = KEY_SPACE
+	grid._input(space)
+	await _until(func() -> bool: return not grid.plans.plans.has(lead), 600)
 	_check(grid.token_cell(lead) == spot, "the dragged token lands under the mouse (%s, wanted %s)" % [grid.token_cell(lead), spot])
+	await _until(func() -> bool: return grid.plans.plans.is_empty(), 600)
+	_check(grid.plans.plans.is_empty() and grid.tokens[lead].position.distance_to(grid.cell_center(spot, cells)) < 0.5, "arrived: trails and ghosts gone")
 	var rects: Array[Rect2i] = []
 	var near := true
 	for id: String in group:
@@ -182,11 +202,40 @@ func _init() -> void:
 	_check(near, "the others gather on the closest free cells, none overlapping (%s)" % [group.map(func(id: String) -> Vector2i: return grid.token_cell(id))])
 	_check(grid.selection().size() == group.size(), "still all selected")
 
+	# Trails: one square at a time, going back shortens them; Esc drops plans
+	_check(MovePlans.extend([Vector2i(0, 0)], Vector2i(3, 1)) == [Vector2i(0, 0), Vector2i(1, 1), Vector2i(2, 1), Vector2i(3, 1)], "diagonals first, one square each")
+	_check(MovePlans.extend([Vector2i(0, 0), Vector2i(1, 0), Vector2i(2, 0)], Vector2i(1, 0)) == [Vector2i(0, 0), Vector2i(1, 0)], "going back shortens the trail")
+	_check(MovePlans._metres(3) == "4.5" and MovePlans._metres(4) == "6", "1.5 m per square")
+	grid.select([a])
+	var a_from := grid.token_cell(a)
+	grid.plans.begin_drag([a])
+	grid.plans.drag_by(a, Vector2(grid.cell * 2, 0))
+	grid.plans.end_drag(a, grid.plans.cell_under_ghost(a), {})
+	_check(grid.plans.has_plans(), "a plan")
+	var esc := InputEventKey.new()
+	esc.pressed = true
+	esc.physical_keycode = KEY_ESCAPE
+	grid._input(esc)
+	_check(not grid.plans.has_plans() and grid.token_cell(a) == a_from, "Esc drops it")
+	# the ghost of a token dropped in from the Book
+	grid.plans.show_spawn(TokenArt.compose(null, {}, "creatures"), 1.0, Vector2i(2, 2))
+	_check(grid.plans.spawn_visible() and grid.plans._spawn.position == grid.cell_center(Vector2i(2, 2), 1.0), "spawn ghost on its cell")
+	grid.plans.hide_spawn()
+	_check(not grid.plans.spawn_visible(), "and gone after the drop")
+
 	# Keys without a selection do nothing.
 	grid.select([])
 	_check(not grid.key_step(KEY_W, false, true), "no selection: keys are left alone")
 	print("token moves: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))
 	quit(1 if _failed > 0 else 0)
+
+
+func _until(done: Callable, frames := 400) -> bool:
+	for i in frames:
+		if done.call():
+			return true
+		await process_frame
+	return false
 
 
 func _check(ok: bool, what: String) -> void:

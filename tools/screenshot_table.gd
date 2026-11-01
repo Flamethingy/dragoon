@@ -35,6 +35,16 @@ func _init() -> void:
 	await _until(func() -> bool: return me.notes.entries.size() == 3)
 	await _shot("table_player.png")
 
+	# a planned move: ghost, dotted trail with the distance (TASK-45)
+	var g := me.grid
+	var from := g.token_cell("characters/borin")
+	g.plans.begin_drag(["characters/borin"])
+	for step: Vector2 in [Vector2(1, 0), Vector2(1, 0), Vector2(1, -1), Vector2(1, -1), Vector2(1, 0)]:
+		g.plans.drag_by("characters/borin", step * g.cell)
+	g.plans.end_drag("characters/borin", g.plans.cell_under_ghost("characters/borin"), {})
+	await _shot("table_plan.png")
+	g.plans.cancel()
+
 	me.change_hp("characters/borin", -7)
 	me.roll("Insight")
 	me.roll("2d6+3")

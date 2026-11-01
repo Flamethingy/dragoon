@@ -25,12 +25,8 @@ func set_facing(f: String) -> void:
 
 
 func _draw() -> void:
-	if active:
-		draw_arc(Vector2.ZERO, radius + 5.0, 0, TAU, 48, ACTIVE, 5.0, true)
-		if selected:  # active and selected: a thin white ring inside the orange one
-			draw_arc(Vector2.ZERO, radius + 1.5, 0, TAU, 48, SELECTED, 2.0, true)
-	elif selected:
-		draw_arc(Vector2.ZERO, radius + 4.0, 0, TAU, 48, SELECTED, 4.0, true)
+	if active or selected:  # one ring: orange when active, white when only selected
+		draw_arc(Vector2.ZERO, radius + 4.0, 0, TAU, 48, ACTIVE if active else SELECTED, 4.0, true)
 	if facing == "" or not TokenGrid.FACINGS.has(facing):
 		return
 	var dir := Vector2(TokenGrid.FACINGS[facing]).normalized()

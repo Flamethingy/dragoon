@@ -26,6 +26,7 @@ const COMBINE_SECONDS := 0.07
 ## Tokens per side for each creature size (tiny shares a square, drawn half size).
 const SIZE_CELLS := {"tiny": 0.5, "small": 1.0, "medium": 1.0, "large": 2.0, "huge": 3.0, "gargantuan": 4.0}
 const MOVE_SECONDS_PER_CELL := 0.12
+const METRES_PER_CELL := 1.5  ## one square (5e: 5 ft); the trail of a planned move counts them
 
 @export var grid_color := Color(0, 0, 0, 0.35)
 
@@ -49,7 +50,10 @@ var _pressed: Sprite2D  ## the token under the mouse when the left button went d
 var _press_at := Vector2.ZERO  ## screen position of that press
 var selected := {}  ## entity id -> true (TASK-42)
 var active := ""  ## the active token (TASK-44, orange ring); "" = none
-var _drag_group := {}  ## the other selected tokens dragged along: id -> start position
+var _drag_group := {}  ## the other selected tokens dragged along: id -> true
+var _drag_started := false  ## the mouse moved since the press: the ghosts are out
+var plans: MovePlans  ## planned moves: ghosts, dotted trails, Space to go (TASK-45)
+var _glide := {}  ## id -> trail (cells) the next confirmed move of it glides along
 var _box_from := Vector2.ZERO  ## map position where a selection box started
 var _boxing := false
 var _box: Node2D
@@ -69,6 +73,10 @@ func _ready() -> void:
 	_info.add_theme_color_override("font_outline_color", Color.BLACK)
 	_info.add_theme_constant_override("outline_size", 6)
 	ui.add_child(_info)
+	plans = MovePlans.new()
+	plans.name = "Plans"
+	plans.grid = self
+	add_child(plans)
 	_box = Node2D.new()
 	_box.name = "SelectBox"
 	_box.z_index = 20
@@ -225,6 +233,7 @@ func step_selection(dir: Vector2i, turn_only := false) -> void:
 	ids.sort_custom(func(a: String, b: String) -> bool:
 		return Vector2(token_cell(a)).dot(Vector2(dir)) > Vector2(token_cell(b)).dot(Vector2(dir)))
 	for id: String in ids:
+		plans.cancel(id)  # a step replaces a planned move
 		step_requested.emit(id, dir, turn_only)
 
 
@@ -290,12 +299,37 @@ func set_token_cell(id: String, at: Vector2i, animate := true) -> void:
 	var from: Vector2i = token.get_meta("cell", at)
 	token.set_meta("cell", at)
 	var target := cell_center(at, token.get_meta("cells"))
+	var running: Tween = token.get_meta("tween") if token.has_meta("tween") else null
+	if running != null and running.is_valid() and running.is_running():
+		if from == at:
+			return  # already on its way there (a planned move's glide)
+		running.kill()
 	if not animate or not is_inside_tree():
 		token.position = target
 		return
-	var steps := maxf(1.0, Vector2(at - from).length())
+	var trail: Array = _glide.get(id, [])
+	_glide.erase(id)
 	var tween := token.create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	token.set_meta("tween", tween)
+	if trail.size() >= 2 and trail[0] == from and trail[trail.size() - 1] == at:
+		# a planned move: along its trail, square by square; the dots vanish behind it
+		var cells: float = token.get_meta("cells")
+		tween.set_trans(Tween.TRANS_LINEAR)
+		for i in range(1, trail.size()):
+			tween.tween_property(token, "position", cell_center(trail[i], cells), MOVE_SECONDS_PER_CELL)
+			tween.tween_callback(plans.advance.bind(id, i))
+		return
+	var steps := maxf(1.0, Vector2(at - from).length())
 	tween.tween_property(token, "position", target, MOVE_SECONDS_PER_CELL * steps)
+
+
+## Space: every planned move goes (the moves are asked for; confirmed ones glide).
+func go_planned() -> bool:
+	var moves := plans.go()
+	for id: String in moves:
+		_glide[id] = moves[id].path
+		move_requested.emit(id, moves[id].to)
+	return not moves.is_empty()
 
 
 func token_cell(id: String) -> Vector2i:
@@ -447,7 +481,14 @@ func _input(event: InputEvent) -> void:
 	var k := event as InputEventKey
 	if k.ctrl_pressed or k.alt_pressed or _typing():
 		return
-	if key_step(k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode, k.shift_pressed, k.echo):
+	var code := k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode
+	if code == KEY_SPACE and not k.echo and plans.has_plans():
+		go_planned()
+		get_viewport().set_input_as_handled()
+	elif code == KEY_ESCAPE and plans.has_plans():
+		plans.cancel()
+		get_viewport().set_input_as_handled()
+	elif key_step(code, k.shift_pressed, k.echo):
 		get_viewport().set_input_as_handled()
 
 
@@ -479,38 +520,24 @@ func _unhandled_input(event: InputEvent) -> void:
 				if _dragging and can_drag.is_valid() and not can_drag.call(str(_dragging.get_meta("entity"))):
 					_dragging = null
 				if _dragging:
-					_drag_from = _dragging.position
-					_dragging.z_index = 10
+					_drag_started = false
 					_drag_group.clear()
 					var lead := str(_dragging.get_meta("entity"))
 					if lead in selection():  # the whole selection comes along, the active one too
 						for other: String in selection():
 							if other != lead:
-								_drag_group[other] = tokens[other].position
-								tokens[other].z_index = 9
+								_drag_group[other] = true
 			elif _dragging:
+				# The real tokens stay; the ghosts stay at the ends as planned moves (Space: go).
 				var id: String = _dragging.get_meta("entity")
-				var cells: float = _dragging.get_meta("cells")
-				# The top-left cell under the dragged token's top-left corner.
-				var corner := _dragging.position - Vector2.ONE * cell * maxf(cells, 1.0) * 0.5 + Vector2.ONE * cell * 0.5
-				var target := cell_at(corner)
-				_dragging.z_index = 0
-				_dragging.position = _drag_from  # snaps back until the move is confirmed
-				_dragging = null
 				var group: Array = _drag_group.keys()
-				for other: String in group:
-					if tokens.has(other):
-						tokens[other].position = _drag_group[other]
-						tokens[other].z_index = 0
+				_dragging = null
 				_drag_group.clear()
-				if group.is_empty():
-					if target != token_cell(id):
-						move_requested.emit(id, target)
-				else:
-					var plan := plan_group_move(id, group, target)
-					for mover: String in plan:
-						if plan[mover] != token_cell(mover):
-							move_requested.emit(mover, plan[mover])
+				if _drag_started:
+					_drag_started = false
+					var target := plans.cell_under_ghost(id)
+					var ends := plan_group_move(id, group, target) if not group.is_empty() else {id: target}
+					plans.end_drag(id, ends.get(id, target), ends)
 			if not event.pressed:
 				var clicked := _pressed
 				_pressed = null
@@ -537,10 +564,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _panning:
 			_camera.position -= event.relative / _camera.zoom
 		if _dragging:
-			_dragging.position += event.relative / _camera.zoom
-			for other: String in _drag_group:
-				if tokens.has(other):
-					tokens[other].position += event.relative / _camera.zoom
+			var lead := str(_dragging.get_meta("entity"))
+			if not _drag_started:
+				_drag_started = true
+				plans.begin_drag([lead] + _drag_group.keys())
+			plans.drag_by(lead, event.relative / _camera.zoom)
 		elif _boxing:
 			_box.queue_redraw()
 		else:

@@ -1,0 +1,221 @@
+class_name MovePlans
+extends Node2D
+## Planned moves on the map (TASK-45, Nico 2026-11-01). Dragging a token leaves the real one
+## where it is: a transparent ghost follows the mouse and a dotted trail marks the way it
+## took, with the distance. On release the ghost stays at the end; nothing has moved yet.
+## Space sends every planned move: the tokens glide along their trails, which disappear
+## behind them. Esc drops the plans. Also the ghost of a token being spawned from the Book.
+## A child of the TokenGrid, drawn above the tokens.
+
+const GHOST_ALPHA := 0.45
+const DOT := 7.0  ## length of a dash, pixels on the map
+const GAP := 6.0
+
+var grid: TokenGrid
+## id -> {path: Array[Vector2i] (cells, start first), ghost: Sprite2D, done: int (cells passed)}
+var plans := {}
+var _dragging := {}  ## ids being dragged now -> true (their plan follows the mouse)
+var _spawn: Sprite2D  ## the ghost of a token being dropped in from the Book
+var _font: Font
+
+
+func _ready() -> void:
+	z_index = 20
+	_font = ThemeDB.fallback_font
+
+
+## A drag of these tokens starts (the first one leads): ghosts at the tokens, trails at their cells.
+func begin_drag(ids: Array) -> void:
+	_dragging.clear()
+	for id: String in ids:
+		if not grid.tokens.has(id):
+			continue
+		cancel(id)
+		var token: Sprite2D = grid.tokens[id]
+		plans[id] = {"path": [grid.token_cell(id)], "ghost": _ghost_of(token), "done": 0}
+		(plans[id].ghost as Sprite2D).position = token.position
+		_dragging[id] = true
+	queue_redraw()
+
+
+## The mouse moved by `delta` (map pixels): every dragged ghost moves; the lead's trail grows
+## by the cells its ghost passes (going back over the trail shortens it).
+func drag_by(lead: String, delta: Vector2) -> void:
+	for id: String in _dragging:
+		if plans.has(id):
+			(plans[id].ghost as Sprite2D).position += delta
+	if plans.has(lead):
+		var cell := cell_under_ghost(lead)
+		plans[lead].path = extend(plans[lead].path, cell)
+	queue_redraw()
+
+
+## The drag ended: the lead's trail ends at `target`, the others go straight to their cells
+## (`ends`: id -> cell; ids missing there have no place and lose their plan).
+func end_drag(lead: String, target: Vector2i, ends: Dictionary) -> void:
+	for id: String in _dragging.keys():
+		if not plans.has(id):
+			continue
+		var end: Variant = target if id == lead else ends.get(id)
+		if end == null:
+			cancel(id)
+			continue
+		var path: Array = plans[id].path if id == lead else [grid.token_cell(id)]
+		path = extend(path, end)
+		if path.size() < 2:
+			cancel(id)
+			continue
+		plans[id].path = path
+		var ghost: Sprite2D = plans[id].ghost
+		ghost.position = grid.cell_center(end, float(grid.tokens[id].get_meta("cells")))
+	_dragging.clear()
+	queue_redraw()
+
+
+## Space: every planned token goes. Returns the moves (id -> {to, path}) the grid sends.
+func go() -> Dictionary:
+	var out := {}
+	for id: String in plans.keys():
+		if _dragging.has(id) or not grid.tokens.has(id):
+			continue
+		var path: Array = plans[id].path
+		out[id] = {"to": path[path.size() - 1], "path": path.duplicate()}
+		(plans[id].ghost as Sprite2D).visible = false
+		plans[id]["going"] = true
+	queue_redraw()
+	return out
+
+
+## The token of a plan reached the n-th cell of its trail: the trail behind it disappears;
+## at the end the plan is gone.
+func advance(id: String, n: int) -> void:
+	if not plans.has(id):
+		return
+	plans[id].done = n
+	if n >= (plans[id].path as Array).size() - 1:
+		cancel(id)
+	queue_redraw()
+
+
+func has_plans() -> bool:
+	return plans.keys().any(func(id: String) -> bool: return not _dragging.has(id) and not plans[id].has("going"))
+
+
+## Drops a plan ("" = all of them).
+func cancel(id := "") -> void:
+	for key: String in (plans.keys() if id == "" else [id]):
+		if plans.has(key):
+			var ghost: Sprite2D = plans[key].ghost
+			if is_instance_valid(ghost):
+				ghost.queue_free()
+			plans.erase(key)
+			_dragging.erase(key)
+	queue_redraw()
+
+
+## Squares along a trail (5e: a diagonal step is one square too).
+static func squares(path: Array) -> int:
+	return maxi(0, path.size() - 1)
+
+
+## The trail extended to `cell`: one square at a time (diagonals first); if the cell is
+## already on it, the trail goes back to there.
+static func extend(path: Array, cell: Vector2i) -> Array:
+	var out := path.duplicate()
+	var at := out.find(cell)
+	if at >= 0:
+		return out.slice(0, at + 1)
+	var last: Vector2i = out[out.size() - 1]
+	while last != cell:
+		last += Vector2i(signi(cell.x - last.x), signi(cell.y - last.y))
+		var back := out.find(last)
+		if back >= 0:
+			out = out.slice(0, back + 1)
+		else:
+			out.append(last)
+	return out
+
+
+## The cell under a dragged ghost (its top-left cell for big creatures).
+func cell_under_ghost(id: String) -> Vector2i:
+	var ghost: Sprite2D = plans[id].ghost
+	var cells: float = grid.tokens[id].get_meta("cells")
+	var corner := ghost.position - Vector2.ONE * grid.cell * maxf(cells, 1.0) * 0.5 + Vector2.ONE * grid.cell * 0.5
+	return grid.cell_at(corner)
+
+
+## The ghost of a token being spawned (null texture or cell < 0: hide it).
+func show_spawn(texture: Texture2D, cells: float, at: Vector2i) -> void:
+	if texture == null or at.x < 0:
+		hide_spawn()
+		return
+	if _spawn == null:
+		_spawn = Sprite2D.new()
+		_spawn.name = "SpawnGhost"
+		_spawn.modulate.a = GHOST_ALPHA
+		add_child(_spawn)
+	_spawn.texture = texture
+	_spawn.scale = Vector2.ONE * grid.cell * cells / maxf(texture.get_width(), texture.get_height())
+	_spawn.position = grid.cell_center(at, cells)
+	_spawn.visible = true
+
+
+func hide_spawn() -> void:
+	if _spawn != null:
+		_spawn.visible = false
+
+
+func spawn_visible() -> bool:
+	return _spawn != null and _spawn.visible
+
+
+func _ghost_of(token: Sprite2D) -> Sprite2D:
+	var g := Sprite2D.new()
+	g.texture = token.texture
+	g.scale = token.scale
+	g.flip_h = token.flip_h
+	g.modulate.a = GHOST_ALPHA
+	add_child(g)
+	return g
+
+
+func _draw() -> void:
+	for id: String in plans:
+		if not grid.tokens.has(id):
+			continue
+		var plan: Dictionary = plans[id]
+		var path: Array = plan.path
+		var cells: float = grid.tokens[id].get_meta("cells")
+		var pts := PackedVector2Array()
+		for i in range(int(plan.done), path.size()):
+			pts.append(grid.cell_center(path[i], cells))
+		if _dragging.has(id):  # the trail runs on to the ghost under the mouse
+			pts.append((plan.ghost as Sprite2D).position)
+		_dotted(pts, Color(1, 1, 1, 0.75), 4.0)
+		if plan.has("going") or path.size() < 2 and not _dragging.has(id):
+			continue
+		var n := squares(path)
+		var label := "%s m" % _metres(n)
+		var at: Vector2 = (plan.ghost as Sprite2D).position + Vector2(grid.cell * maxf(cells, 1.0) * 0.5 + 6, -8)
+		var size := _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
+		draw_rect(Rect2(at + Vector2(-5, -size.y + 2), size + Vector2(10, 6)), Color(0, 0, 0, 0.55))
+		draw_string(_font, at + Vector2(0, 0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 1, 1, 0.95))
+
+
+static func _metres(squares_moved: int) -> String:
+	var m := squares_moved * TokenGrid.METRES_PER_CELL
+	return str(int(m)) if is_equal_approx(m, roundf(m)) else "%.1f" % m
+
+
+func _dotted(pts: PackedVector2Array, color: Color, width: float) -> void:
+	for i in range(pts.size() - 1):
+		var a := pts[i]
+		var b := pts[i + 1]
+		var length := a.distance_to(b)
+		if length <= 0.0:
+			continue
+		var dir := (b - a) / length
+		var t := 0.0
+		while t < length:
+			draw_line(a + dir * t, a + dir * minf(t + DOT, length), color, width, true)
+			t += DOT + GAP

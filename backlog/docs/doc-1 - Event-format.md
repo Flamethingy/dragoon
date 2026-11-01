@@ -69,7 +69,8 @@ Revisit when the log passes about 50 MB or startup replay gets slow. The fix the
 | Type | `entity` | `data` |
 | --- | --- | --- |
 | `token.placed` | the entity | `map`, `at: [x, y]` |
-| `token.moved` | the entity | `map`, `from`, `to`; `group` (party token id) when moved as a party, one event per member |
+| `token.moved` | the entity | `map`, `from`, `to`; `group` (party token id) when moved as a party, one event per member; `facing` (n, ne, e, se, s, sw, w, nw) where it looks after the step (TASK-42) |
+| `token.turned` | the entity | `map`, `facing` (n, ne, e, se, s, sw, w, nw): turned on the spot (Shift + direction, TASK-42) |
 | `token.removed` | the entity | `map` |
 | `hp.changed` | creature | `delta`, `hp` (after), `temp` (optional), `reason` |
 | `item.gained` / `item.lost` | holder | `item` (entity id, `core:` prefix for core data), `qty`, `from` / `to` (optional) |

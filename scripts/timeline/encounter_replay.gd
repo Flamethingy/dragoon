@@ -55,7 +55,7 @@ func state_at(step: int) -> Dictionary:
 		creatures[ref] = {"name": str(e.get("name", ref)), "hp": now.get("hp"), "max_hp": e.get("hp", 0),
 			"conditions": now.get("conditions", [])}
 	var w := Replay.world_state(applied)
-	return {"tokens": tokens, "creatures": creatures, "round": int(w.combat.round), "turn": int(w.combat.turn),
+	return {"tokens": tokens, "facings": Replay.facings_on(map, applied), "creatures": creatures, "round": int(w.combat.round), "turn": int(w.combat.turn),
 		"active": bool(w.combat.active), "event": steps[step - 1] if step > 0 else {}}
 
 

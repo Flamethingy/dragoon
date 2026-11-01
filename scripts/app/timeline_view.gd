@@ -99,6 +99,8 @@ static func _what(e: Dictionary) -> String:
 			return "moved to %s on %s" % [d.get("to", []), d.get("map", "")]
 		"token.placed":
 			return "placed at %s on %s" % [d.get("at", []), d.get("map", "")]
+		"token.turned":
+			return "turned %s on %s" % [str(d.get("facing", "")).to_upper(), d.get("map", "")]
 		"sheet.changed":
 			return "%s: %s → %s" % [d.get("path", ""), d.get("from"), d.get("to")]
 		"dice.rolled":

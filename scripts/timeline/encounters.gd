@@ -7,7 +7,7 @@ extends RefCounted
 
 const FILE := "encounters.json"
 ## Event types that make an entity a participant.
-const PARTICIPATING := ["token.moved", "token.placed", "hp.changed", "condition.applied", "condition.removed",
+const PARTICIPATING := ["token.moved", "token.turned", "token.placed", "hp.changed", "condition.applied", "condition.removed",
 	"initiative.rolled", "dice.rolled", "sheet.changed"]
 
 var path := ""

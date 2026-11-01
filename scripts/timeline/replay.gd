@@ -183,12 +183,23 @@ static func _change_list_item(list: Array, item: String, qty: int) -> void:
 		list.append({"item": item, "qty": qty})
 
 
+## Where every token on a map looks at the end of the given events (TASK-42): entity ->
+## n, ne, e ... nw (token.turned, and token.moved with a facing).
+static func facings_on(map: String, events: Array) -> Dictionary:
+	var out := {}
+	for e: Dictionary in events:
+		var d: Dictionary = e.get("data", {})
+		if str(e.type) in ["token.turned", "token.moved"] and str(d.get("map", "")) == map and str(d.get("facing", "")) != "":
+			out[e.entity] = str(d.facing)
+	return out
+
+
 ## Every token's position on a map at the end of the given events: entity -> Vector2i.
 static func tokens_on(map: String, events: Array) -> Dictionary:
 	var out := {}
 	for e: Dictionary in events:
 		var d: Dictionary = e.get("data", {})
-		if not str(e.type).begins_with("token.") or str(d.get("map", "")) != map:
+		if not str(e.type).begins_with("token.") or str(d.get("map", "")) != map or e.type == "token.turned":
 			continue
 		if e.type == "token.removed":
 			out.erase(e.entity)

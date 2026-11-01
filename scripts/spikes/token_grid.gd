@@ -10,6 +10,16 @@ extends Node2D
 signal move_requested(entity: String, cell: Vector2i)
 ## A token was clicked (pressed and released without dragging), e.g. to open its sheet.
 signal token_clicked(entity: String)
+## WASD / arrow keys with tokens selected (TASK-42): step one cell in `dir` (8 directions),
+## or with Shift only turn that way. Whoever owns the state decides.
+signal step_requested(entity: String, dir: Vector2i, turn_only: bool)
+signal selection_changed
+
+## The 8 directions a token can look (TASK-42).
+const FACINGS := {"n": Vector2i(0, -1), "ne": Vector2i(1, -1), "e": Vector2i(1, 0), "se": Vector2i(1, 1),
+	"s": Vector2i(0, 1), "sw": Vector2i(-1, 1), "w": Vector2i(-1, 0), "nw": Vector2i(-1, -1)}
+## Keys pressed within this time count as one diagonal step (W and D together).
+const COMBINE_SECONDS := 0.07
 
 ## Tokens per side for each creature size (tiny shares a square, drawn half size).
 const SIZE_CELLS := {"tiny": 0.5, "small": 1.0, "medium": 1.0, "large": 2.0, "huge": 3.0, "gargantuan": 4.0}
@@ -35,6 +45,13 @@ var _dragging: Sprite2D
 var _drag_from := Vector2.ZERO
 var _pressed: Sprite2D  ## the token under the mouse when the left button went down
 var _press_at := Vector2.ZERO  ## screen position of that press
+var selected := {}  ## entity id -> true (TASK-42)
+var _box_from := Vector2.ZERO  ## map position where a selection box started
+var _boxing := false
+var _box: Node2D
+var _pending := Vector2i.ZERO  ## keys pressed together, collected for COMBINE_SECONDS
+var _pending_turn := false
+var _combine: Timer
 
 
 func _ready() -> void:
@@ -48,6 +65,16 @@ func _ready() -> void:
 	_info.add_theme_color_override("font_outline_color", Color.BLACK)
 	_info.add_theme_constant_override("outline_size", 6)
 	ui.add_child(_info)
+	_box = Node2D.new()
+	_box.name = "SelectBox"
+	_box.z_index = 20
+	_box.draw.connect(_draw_box)
+	add_child(_box)
+	_combine = Timer.new()
+	_combine.one_shot = true
+	_combine.wait_time = COMBINE_SECONDS
+	_combine.timeout.connect(_send_pending)
+	add_child(_combine)
 
 
 ## Shows a map from data: {id, name, grid: {size, offset: Vector2}} and its image.
@@ -75,6 +102,7 @@ func clear() -> void:
 	for token: Sprite2D in tokens.values():
 		token.queue_free()
 	tokens.clear()
+	selected.clear()
 	if _image:
 		_image.queue_free()
 		_image = null
@@ -93,7 +121,10 @@ func start_cells() -> Dictionary:
 ## A token from data: {id, name, size, ...} (the info is shown on hover).
 func add_token_view(info: Dictionary, texture: Texture2D, at: Vector2i) -> void:
 	var id := str(info.get("id", ""))
+	var facing := str(info.get("facing", ""))
 	if tokens.has(id):
+		if facing == "":
+			facing = str(tokens[id].get_meta("facing", ""))
 		tokens[id].queue_free()
 	var cells: float = SIZE_CELLS.get(str(info.get("size", "medium")).to_lower(), 1.0)
 	var token := Sprite2D.new()
@@ -104,8 +135,128 @@ func add_token_view(info: Dictionary, texture: Texture2D, at: Vector2i) -> void:
 	token.set_meta("start", at)
 	token.set_meta("info", info)
 	tokens[id] = token
+	var marks := TokenMarks.new()
+	marks.name = "Marks"
+	marks.scale = Vector2.ONE / token.scale
+	marks.radius = cell * cells * 0.5
+	marks.selected = selected.has(id)
+	token.add_child(marks)
 	add_child(token)
 	set_token_cell(id, at, false)
+	set_token_facing(id, facing)
+
+
+## Turns a token (n, ne, e ... nw): the triangle at its edge, and the picture mirrored when
+## it looks to the other side than the picture faces (token_style.faces).
+func set_token_facing(id: String, facing: String) -> void:
+	var token: Sprite2D = tokens.get(id)
+	if token == null:
+		return
+	token.set_meta("facing", facing)
+	(token.get_node("Marks") as TokenMarks).set_facing(facing)
+	var dx: int = FACINGS[facing].x if FACINGS.has(facing) else 0
+	if dx != 0:
+		var style: Variant = (token.get_meta("info", {}) as Dictionary).get("token_style")
+		var faces := str(style.get("faces", "right")) if style is Dictionary else "right"
+		token.flip_h = (dx < 0) == (faces == "right")
+
+
+func token_facing(id: String) -> String:
+	return str(tokens[id].get_meta("facing", "")) if tokens.has(id) else ""
+
+
+## The facing for a step (or "" for none).
+static func facing_of(dir: Vector2i) -> String:
+	var d := dir.clamp(Vector2i(-1, -1), Vector2i(1, 1))
+	for f: String in FACINGS:
+		if FACINGS[f] == d:
+			return f
+	return ""
+
+
+# --- Selection (TASK-42) --------------------------------------------------------------------
+
+## Selects these tokens (only those this user may move); `add` keeps the others.
+func select(ids: Array, add := false) -> void:
+	if not add:
+		for id: String in selected:
+			if tokens.has(id):
+				(tokens[id].get_node("Marks") as TokenMarks).selected = false
+		selected.clear()
+	for id: Variant in ids:
+		if tokens.has(str(id)) and (not can_drag.is_valid() or can_drag.call(str(id))):
+			selected[str(id)] = true
+			(tokens[str(id)].get_node("Marks") as TokenMarks).selected = true
+	selection_changed.emit()
+
+
+## The selected tokens that are still on the map.
+func selection() -> Array:
+	return selected.keys().filter(func(id: String) -> bool: return tokens.has(id))
+
+
+## Steps every selected token one cell (or turns them): front ones first, so a group
+## moving together doesn't block itself.
+func step_selection(dir: Vector2i, turn_only := false) -> void:
+	var ids := selection()
+	ids.sort_custom(func(a: String, b: String) -> bool:
+		return Vector2(token_cell(a)).dot(Vector2(dir)) > Vector2(token_cell(b)).dot(Vector2(dir)))
+	for id: String in ids:
+		step_requested.emit(id, dir, turn_only)
+
+
+func _key_dir(key: Key) -> Vector2i:
+	match key:
+		KEY_W, KEY_UP:
+			return Vector2i(0, -1)
+		KEY_S, KEY_DOWN:
+			return Vector2i(0, 1)
+		KEY_A, KEY_LEFT:
+			return Vector2i(-1, 0)
+		KEY_D, KEY_RIGHT:
+			return Vector2i(1, 0)
+	return Vector2i.ZERO
+
+
+## The direction of every movement key held right now (for held-down repeats).
+func _held_dir() -> Vector2i:
+	var d := Vector2i.ZERO
+	for key: Key in [KEY_W, KEY_UP, KEY_S, KEY_DOWN, KEY_A, KEY_LEFT, KEY_D, KEY_RIGHT]:
+		if Input.is_physical_key_pressed(key) or Input.is_key_pressed(key):
+			d += _key_dir(key)
+	return d.clamp(Vector2i(-1, -1), Vector2i(1, 1))
+
+
+## A movement key: collected for a moment so two keys together make a diagonal.
+func key_step(key: Key, turn_only: bool, echo := false) -> bool:
+	var d := _key_dir(key)
+	if d == Vector2i.ZERO or selection().is_empty():
+		return false
+	if echo:
+		var held := _held_dir()
+		step_selection(held if held != Vector2i.ZERO else d, turn_only)
+		return true
+	_pending = (_pending + d).clamp(Vector2i(-1, -1), Vector2i(1, 1))
+	_pending_turn = turn_only
+	if _combine == null or not _combine.is_inside_tree():
+		_send_pending()
+	elif _combine.is_stopped():
+		_combine.start()
+	return true
+
+
+func _send_pending() -> void:
+	var d := _pending
+	_pending = Vector2i.ZERO
+	if d != Vector2i.ZERO:
+		step_selection(d, _pending_turn)
+
+
+func _draw_box() -> void:
+	if _boxing:
+		var r := Rect2(_box_from, get_global_mouse_position() - _box_from).abs()
+		_box.draw_rect(r, Color(1.0, 0.86, 0.35, 0.15))
+		_box.draw_rect(r, Color(1.0, 0.86, 0.35, 0.9), false, 2.0)
 
 
 ## Puts a token on a cell (its top-left cell for big creatures), gliding if `animate`.
@@ -208,6 +359,11 @@ func _token_under(at: Vector2) -> Sprite2D:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed:
+		var k := event as InputEventKey
+		if not k.ctrl_pressed and not k.alt_pressed and key_step(k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode, k.shift_pressed, k.echo):
+			get_viewport().set_input_as_handled()
+		return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			_camera.zoom = (_camera.zoom * 1.1).clampf(0.2, 4.0)
@@ -220,6 +376,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			if event.pressed:
 				_pressed = _token_under(at)
 				_press_at = event.position
+				if _pressed == null:
+					_boxing = true
+					_box_from = at
 				_dragging = _pressed
 				if _dragging and can_drag.is_valid() and not can_drag.call(str(_dragging.get_meta("entity"))):
 					_dragging = null
@@ -240,13 +399,30 @@ func _unhandled_input(event: InputEvent) -> void:
 			if not event.pressed:
 				var clicked := _pressed
 				_pressed = null
-				if clicked != null and is_instance_valid(clicked) and event.position.distance_to(_press_at) < 6.0:
-					token_clicked.emit(str(clicked.get_meta("entity")))
+				var add: bool = (event as InputEventMouseButton).shift_pressed or (event as InputEventMouseButton).ctrl_pressed
+				if _boxing:
+					_boxing = false
+					_box.queue_redraw()
+					var r := Rect2(_box_from, at - _box_from).abs()
+					if event.position.distance_to(_press_at) < 6.0:
+						if not add:
+							select([])  # a click on the empty map
+					else:
+						select(tokens.keys().filter(func(id: String) -> bool: return r.has_point(tokens[id].position)), add)
+				elif clicked != null and is_instance_valid(clicked):
+					var cid := str(clicked.get_meta("entity"))
+					if event.position.distance_to(_press_at) < 6.0:
+						select([cid], add)
+						token_clicked.emit(cid)
+					elif not selected.has(cid):
+						select([cid], add)
 	elif event is InputEventMouseMotion:
 		if _panning:
 			_camera.position -= event.relative / _camera.zoom
 		if _dragging:
 			_dragging.position += event.relative / _camera.zoom
+		elif _boxing:
+			_box.queue_redraw()
 		else:
 			_hover(get_global_mouse_position())
 

@@ -144,11 +144,18 @@ func own_events() -> Array[Dictionary]:
 
 # --- Convenience writers for the MVP event types -------------------------------------
 
-func move_token(entity: String, map: String, from: Vector2i, to: Vector2i, by := "dm", group := "") -> Dictionary:
+func move_token(entity: String, map: String, from: Vector2i, to: Vector2i, by := "dm", group := "", facing := "") -> Dictionary:
 	var data := {"map": map, "from": [from.x, from.y], "to": [to.x, to.y]}
 	if group != "":
 		data["group"] = group
+	if facing != "":
+		data["facing"] = facing
 	return append("token.moved", entity, data, by)
+
+
+## A token turns on the spot (TASK-42): facing n, ne, e ... nw.
+func turn_token(entity: String, map: String, facing: String, by := "dm") -> Dictionary:
+	return append("token.turned", entity, {"map": map, "facing": facing}, by)
 
 
 func place_token(entity: String, map: String, at: Vector2i, by := "dm") -> Dictionary:

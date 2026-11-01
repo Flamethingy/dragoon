@@ -87,6 +87,7 @@ func _ready() -> void:
 	grid.can_drag = _may_drag
 	add_child(grid)
 	grid.move_requested.connect(_on_move_requested)
+	grid.step_requested.connect(_on_step_requested)
 	grid.token_clicked.connect(_on_token_clicked)
 	assets = AssetCache.new(cache_dir)
 	notes = SessionNotes.new()
@@ -185,6 +186,7 @@ func view_for(player: String) -> Dictionary:
 	var on_map: Dictionary = map.tokens
 	map.erase("tokens")
 	var placed := Replay.tokens_on(map_id, event_log.effective())
+	var facings := Replay.facings_on(map_id, event_log.effective())
 	var ids: Array = on_map.keys()
 	for id: String in placed:  # tokens placed in this timeline (token.placed events)
 		if id not in ids:
@@ -208,6 +210,8 @@ func view_for(player: String) -> Dictionary:
 		if t.is_empty():
 			continue
 		_current_values(t)
+		if facings.has(id):
+			t["facing"] = facings[id]
 		if placed.has(id):
 			t["cell"] = placed[id]
 		elif on_map.has(id):
@@ -734,10 +738,15 @@ func _handle_move(sender: int, entity: String, cell: Vector2i) -> void:
 		return
 	var from := grid.token_cell(entity)
 	var by := "dm" if sender == 1 else str(peers[sender])
-	var e := event_log.move_token(entity, grid.map_id, from, cell, by)
+	var facing := TokenGrid.facing_of(cell - from)  # moving turns the token that way (TASK-42)
+	var e := event_log.move_token(entity, grid.map_id, from, cell, by, "", facing)
 	grid.set_token_cell(entity, cell)
+	if facing != "":
+		grid.set_token_facing(entity, facing)
 	for peer_id: int in peers:
 		token_moved.rpc_id(peer_id, entity, cell, int(e.get("id", 0)))
+		if facing != "":
+			token_turned.rpc_id(peer_id, entity, facing)
 	_set_status("%s moved to %s (event %d)" % [_name_of(entity), cell, int(e.get("id", 0))])
 
 
@@ -760,6 +769,48 @@ func _handle_party_move(sender: int, cell: Vector2i) -> void:
 	for peer_id: int in peers:
 		token_moved.rpc_id(peer_id, PARTY, cell, int(last.get("id", 0)))
 	_set_status("The party travels to %s (%d events)" % [cell, info.members.size()])
+
+
+## WASD / arrows (TASK-42): a step or a turn; the DM decides, players ask the DM.
+func _on_step_requested(entity: String, dir: Vector2i, turn_only: bool) -> void:
+	if not is_online():
+		return
+	if is_dm():
+		_handle_step(1, entity, dir, turn_only)
+	else:
+		request_step.rpc_id(1, entity, dir, turn_only)
+
+
+## Player -> DM.
+@rpc("any_peer", "call_remote", "reliable")
+func request_step(entity: String, dir: Vector2i, turn_only: bool) -> void:
+	if is_dm():
+		_handle_step(multiplayer.get_remote_sender_id(), entity, dir, turn_only)
+
+
+func _handle_step(sender: int, entity: String, dir: Vector2i, turn_only: bool) -> void:
+	var facing := TokenGrid.facing_of(dir)
+	if facing == "" or not grid.tokens.has(entity):
+		return
+	if not turn_only:
+		_handle_move(sender, entity, grid.token_cell(entity) + TokenGrid.FACINGS[facing])
+		if grid.token_facing(entity) == facing or entity == PARTY:
+			return
+	if sender != 1 and entity != PARTY and owners.get(entity, "") != peers.get(sender, ""):
+		_deny(sender, entity, "that's not your token")
+		return
+	if entity != PARTY:  # the party token's members turn with it on the map only
+		var by := "dm" if sender == 1 else str(peers[sender])
+		event_log.turn_token(entity, grid.map_id, facing, by)
+	grid.set_token_facing(entity, facing)
+	for peer_id: int in peers:
+		token_turned.rpc_id(peer_id, entity, facing)
+
+
+## DM -> players: a token turned.
+@rpc("authority", "call_remote", "reliable")
+func token_turned(entity: String, facing: String) -> void:
+	grid.set_token_facing(entity, facing)
 
 
 ## DM -> players: a move happened.

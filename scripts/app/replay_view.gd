@@ -151,6 +151,7 @@ func go(to: int) -> void:
 			var img := str(t.get("image", ""))
 			var tex := assets.texture(img) if assets != null and img != "" else null
 			grid.add_token_view(t, TokenArt.compose(tex, t.get("token_style"), str(t.get("kind", ""))), cell)
+		grid.set_token_facing(ref, str((s.get("facings", {}) as Dictionary).get(ref, grid.token_facing(ref))))
 	for ref: String in grid.tokens.keys():
 		if not keep.has(ref):
 			grid.tokens[ref].queue_free()
@@ -211,6 +212,8 @@ static func describe(tl: Timeline, e: Dictionary) -> String:
 			return "%s moves to %s" % [who, d.get("to", [])]
 		"token.placed":
 			return "%s appears at %s" % [who, d.get("at", [])]
+		"token.turned":
+			return "%s turns %s" % [who, str(d.get("facing", "")).to_upper()]
 		"hp.changed":
 			var delta := int(d.get("delta", 0))
 			return "%s %s %d HP (now %s)%s" % [who, "takes" if delta < 0 else "heals", absi(delta), d.get("hp", "?"),

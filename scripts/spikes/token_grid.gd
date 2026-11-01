@@ -8,6 +8,8 @@ extends Node2D
 
 ## A token was dropped on a cell (left drag). Whoever owns the state decides.
 signal move_requested(entity: String, cell: Vector2i)
+## A token was clicked (pressed and released without dragging), e.g. to open its sheet.
+signal token_clicked(entity: String)
 
 ## Tokens per side for each creature size (tiny shares a square, drawn half size).
 const SIZE_CELLS := {"tiny": 0.5, "small": 1.0, "medium": 1.0, "large": 2.0, "huge": 3.0, "gargantuan": 4.0}
@@ -31,6 +33,8 @@ var _info: Label
 var _panning := false
 var _dragging: Sprite2D
 var _drag_from := Vector2.ZERO
+var _pressed: Sprite2D  ## the token under the mouse when the left button went down
+var _press_at := Vector2.ZERO  ## screen position of that press
 
 
 func _ready() -> void:
@@ -186,9 +190,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.button_index in [MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
 			_panning = event.pressed
 		elif event.button_index == MOUSE_BUTTON_LEFT:
-			var at := get_global_mouse_position()
+			var at := get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position
 			if event.pressed:
-				_dragging = _token_under(at)
+				_pressed = _token_under(at)
+				_press_at = event.position
+				_dragging = _pressed
 				if _dragging and can_drag.is_valid() and not can_drag.call(str(_dragging.get_meta("entity"))):
 					_dragging = null
 				if _dragging:
@@ -205,6 +211,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				_dragging = null
 				if target != token_cell(id):
 					move_requested.emit(id, target)
+			if not event.pressed:
+				var clicked := _pressed
+				_pressed = null
+				if clicked != null and is_instance_valid(clicked) and event.position.distance_to(_press_at) < 6.0:
+					token_clicked.emit(str(clicked.get_meta("entity")))
 	elif event is InputEventMouseMotion:
 		if _panning:
 			_camera.position -= event.relative / _camera.zoom

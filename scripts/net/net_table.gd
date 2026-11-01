@@ -22,10 +22,15 @@ signal table_changed  ## the map or tokens were (re)built
 signal pcs_changed  ## lobby: the PC list or my PC changed
 signal entry_received(ref: String)  ## player: an entry I asked for arrived or changed
 signal accounts_changed  ## names or colors of the accounts changed
+signal sheet_received(ref: String)  ## a sheet I opened arrived or changed (TASK-10)
 
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
 const PARTY := "party"  ## id of the group token on world maps
+## What a sheet shows to someone who doesn't own it: the info page, no stats.
+const INFO_FIELDS := ["name", "size", "type", "subtype", "race", "alignment", "description", "image", "tags"]
+## Sheet fields nobody changes from the table.
+const LOCKED_FIELDS := ["id", "player", "ref", "origin"]
 
 ## Host: the campaign folder; empty = data/campaigns/red-fang (the example is copied
 ## there on first use).
@@ -60,6 +65,8 @@ var my_player := ""  ## my player id, as the host knows me
 var assets_received := 0  ## images downloaded this run (tests check the cache with it)
 var entries := {}  ## ref -> the entry as the host let me see it (request_entry)
 var accounts := {}  ## id -> {name, color "#rrggbb"}; "dm" = the DM (both sides)
+var sheets := {}  ## ref -> the sheet as the host let me see it (open_sheet)
+var sheet_watchers := {}  ## host: ref -> {peer id: true} who has the sheet open
 var _state := {}  ## the last table view from the host
 var _requested := {}  ## sha -> true while downloading
 
@@ -72,6 +79,7 @@ func _ready() -> void:
 	grid.can_drag = _may_drag
 	add_child(grid)
 	grid.move_requested.connect(_on_move_requested)
+	grid.token_clicked.connect(_on_token_clicked)
 	assets = AssetCache.new(cache_dir)
 	notes = SessionNotes.new()
 	notes.calendar = WorldCalendar.load_file(calendar_path)
@@ -177,6 +185,7 @@ func view_for(player: String) -> Dictionary:
 		var t := campaign.token_view(id, owner, player == "" or (owner != "" and owner == player))
 		if t.is_empty():
 			continue
+		_current_values(t)
 		if placed.has(id):
 			t["cell"] = placed[id]
 		elif on_map.has(id):
@@ -186,6 +195,19 @@ func view_for(player: String) -> Dictionary:
 			newcomers += 1
 		tokens.append(t)
 	return {"map": map, "tokens": tokens}
+
+
+## HP and AC on a token as they are now (the events), not as in the file.
+func _current_values(t: Dictionary) -> void:
+	var base := {}
+	for key: String in Campaign.OWNER_FIELDS:
+		if t.has(key):
+			base[key] = t[key]
+	if base.is_empty():
+		return
+	var now := Replay.entity_state(base, event_log.effective(str(t.id)))
+	for key: String in base:
+		t[key] = now.get(key)
 
 
 ## The group token: where its members are (they always move together), named after them.
@@ -778,6 +800,212 @@ func change_reveal(ref: String, reveal: String, add: Array = [], remove: Array =
 	if entries.has(ref):
 		open_entry(ref)
 	return e
+
+
+# --- Sheets (TASK-10) ---------------------------------------------------------------------
+
+## A click on a token opens its sheet (the party token: my own PC's).
+func _on_token_clicked(entity: String) -> void:
+	if entity == PARTY:
+		if my_pc != "":
+			open_sheet(my_pc)
+		return
+	open_sheet(entity)
+
+
+## The DM sees every sheet, a player the sheet of their own PC; everyone else only gets
+## the info page (INFO_FIELDS, with reveals applied).
+func may_see_sheet(player: String, ref: String) -> bool:
+	return player == Reveal.DM or (player != "" and owners.get(ref, "") == player)
+
+
+## Host: a creature's sheet as `player` may see it now: its campaign copy plus its events
+## (Replay), never the file alone. Adds `_full`, `_editable`, `_hp_max` and `_class`.
+func sheet_for(player: String, ref: String) -> Dictionary:
+	if ref.get_slice("/", 0) not in Campaign.CREATURES:
+		return {}
+	var events := event_log.effective(ref, event_log.day, event_log.time)
+	var view := campaign.entry_view(ref, player, events)
+	if view.is_empty():
+		return {}
+	var full := may_see_sheet(player, ref)
+	var sheet := {}
+	if full:
+		sheet = Replay.entity_state(view, events)
+		sheet["_hp_max"] = int(campaign.entry(ref).get("hp", 0))
+		if sheet.has("classes"):
+			sheet["_class"] = campaign.class_text(sheet)
+	else:
+		for key: String in INFO_FIELDS:
+			if view.has(key):
+				sheet[key] = view[key]
+	sheet["ref"] = ref
+	sheet["_kind"] = ref.get_slice("/", 0)
+	sheet["_full"] = full
+	sheet["_editable"] = full
+	sheet["_owner"] = campaign.player_name(owners.get(ref, "")) if owners.get(ref, "") != "" else ""
+	return sheet
+
+
+## Opens a sheet: the DM builds it, players ask the host (and get updates while it is open).
+func open_sheet(ref: String) -> void:
+	if is_dm():
+		var sheet := sheet_for(Reveal.DM, ref)
+		if not sheet.is_empty():
+			sheets[ref] = sheet
+			sheet_received.emit(ref)
+	elif is_online():
+		request_sheet.rpc_id(1, ref)
+
+
+func close_sheet(ref: String) -> void:
+	sheets.erase(ref)
+	if is_online() and not is_dm():
+		forget_sheet.rpc_id(1, ref)
+
+
+## Player -> DM.
+@rpc("any_peer", "call_remote", "reliable")
+func request_sheet(ref: String) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if not is_dm() or not peers.has(sender):
+		return
+	var sheet := sheet_for(peers[sender], ref)
+	if sheet.is_empty():
+		return
+	sheet_watchers.get_or_add(ref, {})[sender] = true
+	receive_sheet.rpc_id(sender, ref, sheet)
+
+
+## Player -> DM: closed it, no more updates.
+@rpc("any_peer", "call_remote", "reliable")
+func forget_sheet(ref: String) -> void:
+	if is_dm():
+		sheet_watchers.get(ref, {}).erase(multiplayer.get_remote_sender_id())
+
+
+## DM -> player.
+@rpc("authority", "call_remote", "reliable")
+func receive_sheet(ref: String, sheet: Dictionary) -> void:
+	sheets[ref] = sheet
+	sheet_received.emit(ref)
+
+
+## Damage (negative) or healing (positive): an hp.changed event, the file stays as it is.
+## Damage takes temporary HP first; HP stays between 0 and the maximum.
+func change_hp(ref: String, delta: int, reason := "") -> void:
+	if is_dm():
+		_handle_hp(1, ref, delta, reason)
+	elif is_online():
+		request_hp.rpc_id(1, ref, delta, reason)
+
+
+## Any other sheet field by dotted path (ac, temp_hp, stats.str, ...): a sheet.changed event.
+func change_field(ref: String, path: String, value: Variant) -> void:
+	if is_dm():
+		_handle_field(1, ref, path, value)
+	elif is_online():
+		request_field.rpc_id(1, ref, path, value)
+
+
+## Player -> DM.
+@rpc("any_peer", "call_remote", "reliable")
+func request_hp(ref: String, delta: int, reason: String) -> void:
+	if is_dm():
+		_handle_hp(multiplayer.get_remote_sender_id(), ref, delta, reason)
+
+
+## Player -> DM.
+@rpc("any_peer", "call_remote", "reliable")
+func request_field(ref: String, path: String, value: Variant) -> void:
+	if is_dm():
+		_handle_field(multiplayer.get_remote_sender_id(), ref, path, value)
+
+
+func _sender_player(sender: int) -> String:
+	return Reveal.DM if sender == 1 else str(peers.get(sender, ""))
+
+
+func _handle_hp(sender: int, ref: String, delta: int, reason: String) -> Dictionary:
+	var player := _sender_player(sender)
+	if not may_see_sheet(player, ref):
+		_deny_sheet(sender, "that's not your sheet")
+		return {}
+	var sheet := sheet_for(Reveal.DM, ref)
+	if sheet.is_empty() or delta == 0:
+		return {}
+	var hp := int(sheet.get("hp", 0))
+	var temp := int(sheet.get("temp_hp", 0))
+	var hp_max: int = sheet._hp_max if int(sheet._hp_max) > 0 else 1 << 30
+	var data := {"reason": reason}
+	if delta < 0 and temp > 0:
+		var absorbed := mini(temp, -delta)
+		temp -= absorbed
+		data["temp"] = temp
+		delta += absorbed
+	var after := clampi(hp + delta, 0, maxi(hp_max, hp))
+	data["delta"] = after - hp
+	data["hp"] = after
+	var e := event_log.append("hp.changed", ref, data, player)
+	_sheet_changed(ref)
+	_set_status("%s: HP %d -> %d (event %d)" % [campaign.name_of(ref), hp, after, int(e.get("id", 0))])
+	return e
+
+
+func _handle_field(sender: int, ref: String, path: String, value: Variant) -> Dictionary:
+	var player := _sender_player(sender)
+	if not may_see_sheet(player, ref):
+		_deny_sheet(sender, "that's not your sheet")
+		return {}
+	if path == "" or path.get_slice(".", 0) in LOCKED_FIELDS or path.begins_with("_"):
+		_deny_sheet(sender, "%s can't be changed here" % path)
+		return {}
+	var sheet := sheet_for(Reveal.DM, ref)
+	if sheet.is_empty():
+		return {}
+	var from: Variant = value_at(sheet, path)
+	if from == value or (from is float or from is int) and (value is float or value is int) and float(from) == float(value):
+		return {}
+	var e := event_log.change_sheet(ref, path, from, value, "", player)
+	_sheet_changed(ref)
+	_set_status("%s: %s -> %s (event %d)" % [campaign.name_of(ref), path, value, int(e.get("id", 0))])
+	return e
+
+
+## A dotted path's value in a dictionary (null if it isn't there).
+static func value_at(d: Dictionary, path: String) -> Variant:
+	var at: Variant = d
+	for part in path.split("."):
+		if not at is Dictionary or not at.has(part):
+			return null
+		at = at[part]
+	return at
+
+
+## Everyone who has the sheet open gets it again; tokens show the new HP/AC.
+func _sheet_changed(ref: String) -> void:
+	for peer_id: int in sheet_watchers.get(ref, {}).keys():
+		if peers.has(peer_id):
+			receive_sheet.rpc_id(peer_id, ref, sheet_for(peers[peer_id], ref))
+		else:
+			sheet_watchers[ref].erase(peer_id)
+	if sheets.has(ref):
+		open_sheet(ref)
+	_apply_state(view_for(""))
+	_send_tables()
+
+
+func _deny_sheet(sender: int, reason: String) -> void:
+	if sender == 1:
+		_set_status("Can't change that: " + reason)
+	else:
+		sheet_denied.rpc_id(sender, reason)
+
+
+## DM -> player.
+@rpc("authority", "call_remote", "reliable")
+func sheet_denied(reason: String) -> void:
+	_set_status("Can't change that: " + reason)
 
 
 func _set_status(text: String) -> void:

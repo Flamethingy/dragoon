@@ -25,6 +25,7 @@ var _who: Label
 var _color: ColorPickerButton
 var _book_button: Button
 var _book: Compendium
+var sheet: SheetPanel
 
 var _notes_panel: PanelContainer
 var _notes_title: Label
@@ -42,6 +43,10 @@ func _ready() -> void:
 	add_child(root)
 	_build_bar(root)
 	_build_notes(root)
+	sheet = SheetPanel.new()
+	sheet.table = table
+	root.add_child(sheet)
+	table.sheet_received.connect(func(ref: String) -> void: sheet.show_sheet(table.sheets[ref]))
 	_build_picker(root)
 	_build_lobby(root)
 	table.status_changed.connect(_on_status)
@@ -59,6 +64,8 @@ func _refresh() -> void:
 	_lobby.visible = not online
 	_bar.visible = online
 	_notes_panel.visible = online
+	if not online:
+		sheet.hide()
 	_next_session.visible = dm
 	_maps.visible = dm
 	_book_button.visible = dm

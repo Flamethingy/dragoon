@@ -35,6 +35,15 @@ func _init() -> void:
 	await _until(func() -> bool: return me.notes.entries.size() == 3)
 	await _shot("table_player.png")
 
+	me.change_hp("pcs/borin", -7)
+	me.open_sheet("pcs/borin")
+	await _until(func() -> bool: return int(me.sheets.get("pcs/borin", {}).get("hp", -1)) >= 0 and me._ui.sheet.visible)
+	await _shot("table_sheet.png")
+	me.open_sheet("monsters/goblin-chief")
+	await _until(func() -> bool: return me._ui.sheet.ref == "monsters/goblin-chief")
+	await _shot("table_sheet_info.png")
+	me._ui.sheet.close_sheet()
+
 	dm.show_map_to_all("maps/westmarch")
 	await _until(func() -> bool: return me.grid.tokens.has("party"))
 	me.grid.move_requested.emit("party", Vector2i(8, 6))

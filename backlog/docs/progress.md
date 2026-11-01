@@ -157,3 +157,14 @@ See the "Open questions" section of the concept (secrets marking, event log form
   is independent: later changes to the original don't touch it, and two campaigns can hold different versions.
   In the compendium: "Send to campaign" next to Edit on core/world entries when a campaign is set (opens the
   copy, which then wins in the index), and "Send world..." on the cover. Test: `tools/test_send.gd`.
+
+- 2026-11-01: TASK-10 (Mochi): character sheets at the table. A click on a token (`TokenGrid.token_clicked`, press
+  and release without dragging; the party token opens my own PC) opens a `SheetPanel` on the left: our fixed
+  layout with HP (current / max, temp), AC, speed, proficiency, the six abilities, saves, skills, senses,
+  languages, inventory and the description. `NetTable.sheet_for(player, ref)` builds it on the host from the
+  campaign copy plus its events (Replay, reveals applied). The DM sees every sheet, a player the full sheet of
+  their own PC; for any other creature only the info page (name, size, type, race, description). Owners and the
+  DM get Damage / Heal (damage takes temp HP first, HP stays within 0..max), Temp HP and AC: `change_hp` ->
+  `hp.changed`, `change_field` -> `sheet.changed` (id/player/origin locked), checked by the host; pcs.json is
+  never written. Open sheets and token hovers update for everyone who has them open. Test:
+  `tools/test_sheets.gd`; screenshots `table_sheet.png`, `table_sheet_info.png`.

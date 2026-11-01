@@ -24,6 +24,7 @@ func _init() -> void:
 	table.name = "Table"
 	table.timeline_dir = red
 	table.cache_dir = DIR.path_join("cache")
+	table.auto_ui = false  # no HUD: its active token would count as selected (tested in test_character_hud)
 	holder.add_child(table)
 	await process_frame
 	_check(table.host(PORT) == OK, "DM hosts")

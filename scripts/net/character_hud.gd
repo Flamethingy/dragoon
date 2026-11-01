@@ -180,7 +180,7 @@ func cycle_list() -> PackedStringArray:
 	var list := controlled()
 	if table == null or table.grid == null:
 		return list
-	var picked := table.grid.selection()
+	var picked := table.grid.picked()
 	var out := PackedStringArray()
 	for ref in list:
 		if ref in picked:

@@ -79,6 +79,12 @@ func _init() -> void:
 	hud.cycle(1)
 	_check(hud.active == "characters/aria", "and stays there: it's the only one selected")
 	ann.grid.select([])
+	_check(ann.grid.selection() == ["characters/aria"] and ann.grid.picked().is_empty(), "the active one counts as selected")
+	var aria_cell := ann.grid.token_cell("characters/aria")
+	var dir := Vector2i(1, 0) if ann.grid.can_place("characters/aria", aria_cell + Vector2i(1, 0)) else Vector2i(0, 1)
+	ann.grid.step_selection(dir)
+	await _until(func() -> bool: return ann.grid.token_cell("characters/aria") == aria_cell + dir)
+	_check(ann.grid.token_cell("characters/aria") == aria_cell + dir, "WASD moves the active one without a selection")
 	hud.cycle(1)
 	_check(hud.active == "characters/borin", "nothing selected: all of them again")
 

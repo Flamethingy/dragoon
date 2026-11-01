@@ -202,8 +202,17 @@ func set_active(id: String) -> void:
 		(tokens[id].get_node("Marks") as TokenMarks).active = true
 
 
-## The selected tokens that are still on the map.
+## The selected tokens that are still on the map, the active one included (Nico,
+## 2026-11-01: the orange ring counts as selected, so WASD and drags move it too).
 func selection() -> Array:
+	var out := picked()
+	if tokens.has(active) and active not in out and (not can_drag.is_valid() or can_drag.call(active)):
+		out.append(active)
+	return out
+
+
+## Only the tokens selected by click or box (white ring), not the active one.
+func picked() -> Array:
 	return selected.keys().filter(func(id: String) -> bool: return tokens.has(id))
 
 
@@ -472,7 +481,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					_dragging.z_index = 10
 					_drag_group.clear()
 					var lead := str(_dragging.get_meta("entity"))
-					if selected.has(lead):  # the whole selection comes along
+					if lead in selection():  # the whole selection comes along, the active one too
 						for other: String in selection():
 							if other != lead:
 								_drag_group[other] = tokens[other].position

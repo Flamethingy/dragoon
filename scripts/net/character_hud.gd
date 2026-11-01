@@ -26,6 +26,7 @@ const HALF_UP := ["artificer"]
 
 var table: NetTable
 var active := ""  ## the active entity's ref ("" = none)
+var _dismissed := false  ## a click on the empty map hid it: stays hidden until Q / E or a selection
 
 var _box: HBoxContainer
 var _card: PanelContainer
@@ -144,6 +145,7 @@ func _ready() -> void:
 	table.pcs_changed.connect(_check_active)
 	if table.grid != null:
 		table.grid.selection_changed.connect(_on_selection)
+		table.grid.cleared.connect(dismiss)
 	table.sheet_received.connect(func(ref: String) -> void:
 		if ref == active:
 			_fill())
@@ -201,7 +203,15 @@ func cycle(step: int) -> void:
 		set_active(next, step)
 
 
+## Nothing active, the HUD hidden (a click on the empty map).
+func dismiss() -> void:
+	set_active("")
+	_dismissed = true
+
+
 func set_active(ref: String, direction := 0) -> void:
+	if ref != "":
+		_dismissed = false
 	if ref == active:
 		return
 	var before := active
@@ -241,6 +251,9 @@ func _on_selection() -> void:
 ## Keeps the active one valid: the own character when there is one, else the first token.
 func _check_active() -> void:
 	var list := controlled()
+	if active == "" and _dismissed:
+		_fill()
+		return
 	if active == "" or active not in list:
 		var pick := ""
 		if table != null and table.my_pc != "" and table.my_pc in list:
@@ -254,7 +267,7 @@ func _check_active() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if not (event is InputEventKey and event.pressed and not event.echo) or not visible:
+	if not (event is InputEventKey and event.pressed and not event.echo) or table == null or not table.is_online():
 		return
 	var k := event as InputEventKey
 	if k.ctrl_pressed or k.alt_pressed or _typing():

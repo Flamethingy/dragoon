@@ -104,6 +104,29 @@ func _init() -> void:
 	await _until(func() -> bool: return hud._hp_text.text.begins_with("19"))
 	_check(hud._hp_text.text.begins_with("19 / 24"), "damage shows on the portrait (%s)" % hud._hp_text.text)
 
+	# a click on the empty map: nothing selected or active, the HUD goes away
+	ann.grid.select(["characters/aria"])
+	var empty := Vector2i(-1, -1)
+	for y in ann.grid.grid_size.y:
+		for x in ann.grid.grid_size.x:
+			if empty.x < 0 and ann.grid.tokens.keys().all(func(id: String) -> bool: return ann.grid.token_cell(id).distance_to(Vector2i(x, y)) > 3):
+				empty = Vector2i(x, y)
+	var at := ann.grid.get_canvas_transform() * ann.grid.cell_center(empty, 1.0)
+	for pressed in [true, false]:
+		var click := InputEventMouseButton.new()
+		click.button_index = MOUSE_BUTTON_LEFT
+		click.pressed = pressed
+		click.position = at
+		ann.grid._unhandled_input(click)
+	await process_frame
+	_check(hud.active == "" and not hud.visible and ann.grid.selection().is_empty() and ann.grid.active == "", "a click into nothing deselects all and hides the HUD")
+	ann.change_hp("characters/aria", -1)
+	await _until(func() -> bool: return int(ann.sheets.get("characters/aria", {}).get("hp", 0)) == 26)
+	await process_frame
+	_check(not hud.visible, "and it stays hidden when the table changes")
+	hud._input(e_key)
+	_check(hud.active == "characters/aria" and hud.visible, "E brings it back (%s)" % hud.active)
+
 	# the DM controls everything on the map
 	var dm_hud: CharacterHud = dm._ui.hud
 	var all := dm_hud.controlled()

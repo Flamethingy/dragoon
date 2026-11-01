@@ -14,6 +14,8 @@ signal token_clicked(entity: String)
 ## or with Shift only turn that way. Whoever owns the state decides.
 signal step_requested(entity: String, dir: Vector2i, turn_only: bool)
 signal selection_changed
+## A click on the empty map: everything deselected, the active token too (Nico, 2026-11-01).
+signal cleared
 
 ## The 8 directions a token can look (TASK-42).
 const FACINGS := {"n": Vector2i(0, -1), "ne": Vector2i(1, -1), "e": Vector2i(1, 0), "se": Vector2i(1, 1),
@@ -519,7 +521,9 @@ func _unhandled_input(event: InputEvent) -> void:
 					var r := Rect2(_box_from, at - _box_from).abs()
 					if event.position.distance_to(_press_at) < 6.0:
 						if not add:
-							select([])  # a click on the empty map
+							set_active("")  # a click on the empty map: nothing selected or active
+							select([])
+							cleared.emit()
 					else:
 						select(tokens.keys().filter(func(id: String) -> bool: return r.has_point(tokens[id].position)), add)
 				elif clicked != null and is_instance_valid(clicked):

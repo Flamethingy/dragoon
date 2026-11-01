@@ -3,9 +3,10 @@ extends Control
 ## The active character (TASK-44, Nico 2026-11-01): a big portrait in the lower left corner
 ## with HP and spell slots, and a hotbar of 10 slots next to it (empty for now; the player
 ## fills them later, never automatically). Q / E go round robin through every token the
-## user controls: their own characters (owners), the DM everything on the map. Clicking or
-## selecting a token does not change the active one (you can move a fellow player's token
-## and stay in your character). The HUD reads the active one's sheet from the table
+## user controls: their own characters (owners), the DM everything on the map; with tokens
+## selected only through the selected ones (Nico, 2026-11-01). Three marks on the map:
+## none, selected (white ring), active (orange ring). Clicking or selecting a token does not
+## change the active one (you can move a fellow player's token and stay in your character). The HUD reads the active one's sheet from the table
 ## (NetTable.open_sheet without showing the sheet panel) and changes go through it as events.
 
 signal active_changed(ref: String)
@@ -174,13 +175,26 @@ func controlled() -> PackedStringArray:
 	return out
 
 
+## What Q / E go through: the selected tokens one controls, or all of them if none is.
+func cycle_list() -> PackedStringArray:
+	var list := controlled()
+	if table == null or table.grid == null:
+		return list
+	var picked := table.grid.selection()
+	var out := PackedStringArray()
+	for ref in list:
+		if ref in picked:
+			out.append(ref)
+	return out if not out.is_empty() else list
+
+
 ## Q (-1) / E (+1): the next one round robin, with the slide animation.
 func cycle(step: int) -> void:
-	var list := controlled()
+	var list := cycle_list()
 	if list.is_empty():
 		return
 	var at := list.find(active)
-	var next := list[posmod(at + step, list.size())] if at >= 0 else list[0]
+	var next := list[posmod(at + step, list.size())] if at >= 0 else (list[0] if step >= 0 else list[list.size() - 1])
 	if next != active or at < 0:
 		set_active(next, step)
 
@@ -191,6 +205,8 @@ func set_active(ref: String, direction := 0) -> void:
 	var before := active
 	active = ref
 	table.hud_ref = ref
+	if table.grid != null:
+		table.grid.set_active(ref)
 	if before != "" and not (table.sheets.has(before) and _panel_shows(before)):
 		table.close_sheet(before)
 	if ref != "":

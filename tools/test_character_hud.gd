@@ -69,6 +69,18 @@ func _init() -> void:
 	ann.grid.select(["characters/aria"])
 	await process_frame
 	_check(hud.active == "characters/borin", "selecting a token does not change the active one")
+	var aria_marks: TokenMarks = ann.grid.tokens["characters/aria"].get_node("Marks")
+	var borin_marks: TokenMarks = ann.grid.tokens["characters/borin"].get_node("Marks")
+	_check(borin_marks.active and not borin_marks.selected and aria_marks.selected and not aria_marks.active, "three marks: active orange, selected white")
+	# with a selection, Q / E only go through the selected ones
+	_check(Array(hud.cycle_list()) == ["characters/aria"], "only the selected one to cycle (%s)" % [hud.cycle_list()])
+	hud.cycle(1)
+	_check(hud.active == "characters/aria" and aria_marks.active and not borin_marks.active, "E goes to the selected token, the orange ring follows")
+	hud.cycle(1)
+	_check(hud.active == "characters/aria", "and stays there: it's the only one selected")
+	ann.grid.select([])
+	hud.cycle(1)
+	_check(hud.active == "characters/borin", "nothing selected: all of them again")
 
 	# spend a slot: an event, the HUD follows
 	hud.use_slots(1, 2)

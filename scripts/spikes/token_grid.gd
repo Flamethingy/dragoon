@@ -46,6 +46,7 @@ var _drag_from := Vector2.ZERO
 var _pressed: Sprite2D  ## the token under the mouse when the left button went down
 var _press_at := Vector2.ZERO  ## screen position of that press
 var selected := {}  ## entity id -> true (TASK-42)
+var active := ""  ## the active token (TASK-44, orange ring); "" = none
 var _box_from := Vector2.ZERO  ## map position where a selection box started
 var _boxing := false
 var _box: Node2D
@@ -140,6 +141,7 @@ func add_token_view(info: Dictionary, texture: Texture2D, at: Vector2i) -> void:
 	marks.scale = Vector2.ONE / token.scale
 	marks.radius = cell * cells * 0.5
 	marks.selected = selected.has(id)
+	marks.active = id == active
 	token.add_child(marks)
 	add_child(token)
 	set_token_cell(id, at, false)
@@ -188,6 +190,15 @@ func select(ids: Array, add := false) -> void:
 			selected[str(id)] = true
 			(tokens[str(id)].get_node("Marks") as TokenMarks).selected = true
 	selection_changed.emit()
+
+
+## Marks the active token (orange ring); the selection stays as it is.
+func set_active(id: String) -> void:
+	if tokens.has(active):
+		(tokens[active].get_node("Marks") as TokenMarks).active = false
+	active = id
+	if tokens.has(id):
+		(tokens[id].get_node("Marks") as TokenMarks).active = true
 
 
 ## The selected tokens that are still on the map.

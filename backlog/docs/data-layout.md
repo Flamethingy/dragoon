@@ -1,119 +1,94 @@
-# Data layout: core, world, campaign
+# Data layout: core, world, timeline
 
-Decided by Nico on 2026-11-01: **JSON everywhere, the VTT is the editor.** This replaces the
-concept's "markdown files from the vault program" for world and campaign data. Text fields stay
+Decided by Nico on 2026-11-01: **JSON everywhere, the VTT is the editor.** Text fields stay
 Markdown (including `<reveal>` tags, see reveal-visibility.md). Obsidian is only an import source
-now (`tools/import_obsidian.py`).
+(`tools/import_obsidian.py`, `tools/import_characters.py`).
 
 ## Layers
 
 | Layer | Stored as | Example |
 | --- | --- | --- |
-| Core | source packages, `kind: "source"` (package-format.md) | Goblin, Fireball |
-| World | packages too, `kind: "world"` | Thornwick, Red Fang Clan, Mira the smith |
-| Campaign | one campaign folder with its own entities and event log | Mira as she is in campaign A |
+| Core | source packages in `data/packages/<id>/` (package-format.md) | Goblin, Fireball |
+| World | world package in `data/worlds/<world-id>/` | Thornwick, Red Fang Clan, Mira the smith |
+| Timeline | `data/worlds/<world-id>/timelines/<id>/`: events, notes, encounters | Mira as she is in our Tuesday group |
 
-Worlds being packages means a whole world can be exported and imported like a book.
+Campaigns and "send into campaign" were replaced by timelines on 2026-11-01. The folder layout,
+forks, `entity.created` and promote are described in **timelines.md**. A whole world can be
+exported and imported like a book.
 
-## World package
+## World
 
 ```text
-data/packages/<world-id>/
+data/worlds/<world-id>/
   package.json       kind: "world", plus "calendar": "<calendar id>"
-  npcs.json  places.json  factions.json  items.json  maps.json  lore.json
+  characters.json  creatures.json  places.json  factions.json  items.json  maps.json  lore.json  features.json
   assets/            token art, map images, portraits
+  timelines/<id>/    timeline.json, events.jsonl, notes.json, encounters.json
 ```
 
-## Campaign folder
+- Kind files: `creatures.json` (stat blocks, formerly `monsters.json`) and `characters.json` (PCs
+  and NPCs together, formerly `pcs.json` and `npcs.json`). Old files are migrated on load
+  (`scripts/data/kind_migration.gd`).
+- Play state is never written into these files. It comes from the timeline's event log
+  (state at a moment = entries + events up to that moment).
+- Session notes are entries in the timeline's `notes.json`.
 
-```text
-data/campaigns/<campaign-id>/
-  campaign.json      name, world (package id), calendar, players (id, name, color), dm (name, color), next_session
-  pcs.json  npcs.json  monsters.json  items.json  places.json  maps.json  notes.json
-  events.jsonl       append-only event log (doc-1 Event format)
-  assets/
-```
+## Entry schema (TASK-1, updated TASK-43)
 
-- Every campaign entry that was **sent** from core or world keeps `origin`:
-  `{"layer": "core"|"world", "package": "5e-core-rules", "kind": "monsters", "id": "goblin", "version": "1.0.0"}`.
-  After that it drifts freely; pulling upstream changes is a deliberate action later.
-- Entries created directly in the campaign have no `origin`.
-- Field names are the same as in the packages (`hp`, `ac`, `stats`, `traits`/`actions` with
-  feature ids, `description` ...). Sending a monster copies its features into the campaign's own
-  `features.json` so the campaign is self-contained.
-- Play state is never written back into these files: it comes from the event log
-  (state at a moment = campaign entries + events up to that moment).
-- Session notes are entries in `notes.json` (Markdown `text`, real date, session number,
-  in-world day), not loose `.md` files.
-
-## Entry schema (TASK-1)
-
-Defined by Mochi on 2026-11-01. Same rules as the packages: one JSON array per kind, every key
-has one type (empty values are `""`, `[]`, `{}` or `0`, never `null`), all text fields are
-Markdown and may contain `<reveal>` tags. Example: `examples/campaigns/red-fang/` (campaign) and
-`examples/packages/westmarch/` (its world).
+Defined by Mochi. Same rules as the packages: one JSON array per kind, every key has one type
+(empty values are `""`, `[]`, `{}` or `0`, never `null`), all text fields are Markdown and may
+contain `<reveal>` tags. The editor's field list per kind is `scripts/data/schema.gd`.
+Example world: `data/worlds/westmarch/`.
 
 ### References
 
 A **ref** points at another entry as `"<kind>/<id>"`, e.g. `"places/thornwick"`. It resolves
-campaign → world → core (first match wins), so a campaign copy hides the world/core original.
-A qualified ref skips the search: `"world:<kind>/<id>"` or `"core:<package>/<kind>/<id>"`
-(same form as `entity.sent`). Event `entity` fields use the plain ref of the campaign entry
-(`"pcs/aria"`). Wikilinks `[[Name]]` in text resolve by name in the same order.
+timeline-created entries → world → core (first match wins). A qualified ref skips the search:
+`"world:<kind>/<id>"` or `"core:<package>/<kind>/<id>"`. Event `entity` fields use the plain ref
+(`"characters/aria"`). Wikilinks `[[Name]]` in text resolve by name in the same order.
 
 ### Fields every entry has
 
 | Field | Type | |
 | --- | --- | --- |
-| `id` | string | **required**, slug, unique within its kind in this campaign/package |
+| `id` | string | **required**, slug, unique within its kind in this package/world |
 | `name` | string | **required** |
 | `description` | Markdown | what the entry is; `<reveal>` for hidden parts |
-| `image` | string | picture/portrait, path relative to the folder's `assets/` parent (`"assets/mira.png"`) |
+| `image` | string | picture/portrait, path relative to the package/world folder (`"assets/mira.png"`) |
 | `tags` | string[] | free labels |
-| `origin` | object | only on entries **sent** into a campaign (see above); entries in packages keep their importer `origin` (`vault`, `path`) |
+| `draft` | bool | not finished, hidden from lists and players (package-format.md) |
+| `origin` | object | where it was imported from (`vault`, `path` or `import`, `file`/`url`, `page`) |
 
-### Creatures on the map: PC, NPC, monster
+### Characters and creatures (on the map)
 
-Shared token fields:
+Shared fields: `token` (token image, empty = `image`), `size` (`Tiny` … `Gargantuan`, sets the
+squares), `ac`, `hp` (maximum; current HP comes from `hp.changed` events),
+`speed{walk,swim,fly,burrow,climb}` (metres), `stats{str..cha}`, `saves{}` and `skills{}` (total
+bonus, only proficient ones), `passive_perception`, `senses`, `languages`.
+
+**Character** (`characters.json`): PCs and NPCs in one kind (TASK-43).
 
 | Field | Type | |
 | --- | --- | --- |
-| `token` | string | token image path (`"assets/tokens/aria.png"`); empty = use `image` |
-| `size` | string | `Tiny` … `Gargantuan` (package spelling); sets the squares on the grid (Large 2x2 …) |
-
-**PC** (`pcs.json`):
-
-| Field | Type | |
-| --- | --- | --- |
-| `player` | string | **required**, player id from `campaign.json` (the owner; may move the token) |
-| `race` | ref | e.g. `"races/half-elf"` (core) |
+| `owners` | string[] | player ids who control it (the DM always does); empty = NPC |
+| `race` | ref | e.g. `"races/half-elf"`; plain name if the race isn't in any package |
 | `classes` | object[] | `{class: ref, subclass: ref or "", level: int}`; total level = sum |
-| `background`, `alignment` | string | |
-| `hp` | int | maximum HP (current HP comes from `hp.changed` events) |
-| `ac`, `speed{walk,swim,fly,burrow,climb}` (metres), `stats{str..cha}` | | as monsters |
-| `saves`, `skills` | object | total bonus per ability/skill, as monsters (only proficient ones) |
-| `proficiency_bonus`, `passive_perception` | int | |
-| `senses`, `languages`, `proficiencies` | string[] | |
-| `features` | string[] | feature ids in the campaign's `features.json` (class features, feats, attacks) |
-| `spells` | ref[] | known/prepared spells, e.g. `"spells/hunters-mark"` |
-| `inventory` | object[] | starting kit: `{item: ref, qty: int, equipped: bool}`; changes are `item.*` events |
-| `factions` | ref[] | |
-| `location` | ref | place where the character is (starting value; travel is events) |
-
-**NPC** (`npcs.json`): a named person. All fields optional except `id`/`name`:
-
-| Field | Type | |
-| --- | --- | --- |
-| `role` | string | "Smith", "Innkeeper" |
-| `race`, `alignment` | string | free text |
-| `location` | ref | where they live/are |
-| `factions` | ref[] | |
-| `stat_block` | ref | monster to fight with, e.g. `"core:5e-core-rules/monsters/commoner"`; fields set on the NPC itself (`hp`, `ac`, `stats` …, all monster fields allowed) override it |
+| `background`, `alignment`, `role` | string | role: "Smith", "Innkeeper" |
 | `attitude` | string | towards the party: `friendly`, `neutral`, `hostile` |
+| `proficiency_bonus` | int | |
+| `proficiencies` | string[] | armor, weapons, tools |
+| `traits` | feature ids | manual traits (NPCs without a class) |
+| `features` | ref[] | class features, feats |
+| `spells` | ref[] | known/prepared spells, e.g. `"spells/hunters-mark"` |
+| `inventory` | object[] | starting kit `{item: ref, qty: int, equipped: bool}`; changes are `item.*` events |
+| `factions` | ref[] | |
+| `location` | ref | starting place; travel is events |
+| `stat_block` | ref | creature to fight with, e.g. `"core:5e-core-rules/creatures/commoner"`; fields set on the character override it |
 
-**Monster** (`monsters.json`): exactly the package monster schema (package-format.md) plus
-`token`. Its feature ids point into the campaign's `features.json`, which gets a copy of the
-features when a monster is sent.
+**Creature** (`creatures.json`): the package creature schema (package-format.md, formerly
+"monster") plus `token`. Its feature ids point into `features.json` of the same package/world.
+Dropping a creature on a map makes numbered timeline copies (`copy_of`, `copy_number`) with their
+own HP.
 
 ### Places, factions, lore
 
@@ -139,7 +114,7 @@ features when a monster is sent.
 | `place` | ref | the place this map shows |
 | `tokens` | object[] | starting placement `{entity: ref, at: [x, y]}`; moves are events |
 
-### Note (`notes.json`, campaign only)
+### Note (`notes.json`, per timeline)
 
 Session notes and the chronicle. Written by the VTT, one entry per note:
 
@@ -155,9 +130,7 @@ Session notes and the chronicle. Written by the VTT, one entry per note:
 
 Notes have no `name`; the VTT shows "real date · Session N · in-world date · writer".
 
-### Campaign (`campaign.json`)
+### Timeline (`timeline.json`)
 
-`format: "dragoon-campaign"`, `format_version: 1`, `id`, `name`, `description`, `world` (world
-package id or `""`), `calendar` (calendar id, e.g. `"default"` = `calendars/default.json`),
-`players: [{id, name, color}]` (color as `"#rrggbb"`, the account color used for reveal frames),
-`dm: {name, color}`, `next_session` (int), `created`.
+See timelines.md: `name`, `players: [{id, name, color}]` (color as `"#rrggbb"`, the account color
+used for reveal frames), `dm: {name, color}`, `parent`, `fork_at`, `next_session`, `created`.

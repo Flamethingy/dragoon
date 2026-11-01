@@ -230,6 +230,7 @@ def unquote(block: str) -> str:
 
 
 image_index: dict = {}
+OUT_KINDS = {"monsters": "creatures"}  # file names in the package (internal kind stays "monsters")
 
 
 def convert_embeds(md: str, images: set[str]) -> str:
@@ -630,7 +631,7 @@ def extract_tables(kinds: dict, source: str, report: Counter) -> list[dict]:
                     seen[base] += 1
                     tid = base if seen[base] == 1 else f"{base}-{seen[base]}"
                     tables.append({"id": tid, "name": name, "source": source, **t,
-                                   "parent": f"{kind}/{e['id']}", "field": field, "description": ""})
+                                   "parent": f"{OUT_KINDS.get(kind, kind)}/{e['id']}", "field": field, "description": ""})
                     lines[start:end] = [f"![[tables/{tid}]]"]
                     report["rollable tables"] += 1
                     if not t["complete"]:
@@ -775,9 +776,9 @@ def main() -> int:
     summary = []
     for pid, kinds in sorted(packages.items()):
         pdir = out / pid
-        if pdir.exists():  # rebuild everything except docs/ (PDFs are synced, not recopied)
+        if pdir.exists():  # rebuild everything except docs/ (PDFs, synced) and art/ (PDF art)
             for child in pdir.iterdir():
-                if child.name != "docs":
+                if child.name not in ("docs", "art"):
                     shutil.rmtree(child) if child.is_dir() else child.unlink()
         pdir.mkdir(parents=True, exist_ok=True)
         counts = {}
@@ -791,13 +792,24 @@ def main() -> int:
         for kind, entries in sorted(kinds.items()):
             seen = Counter()
             for e in sorted(entries, key=lambda e: e["name"].lower()):
+                e.setdefault("draft", False)  # imported book data is published
                 seen[e["id"]] += 1
                 if seen[e["id"]] > 1:
                     e["id"] = f"{e['id']}-{seen[e['id']]}"
             entries.sort(key=lambda e: e["name"].lower())
-            (pdir / f"{kind}.json").write_text(
+            out_kind = OUT_KINDS.get(kind, kind)  # the VTT calls monsters "creatures" (TASK-43)
+            (pdir / f"{out_kind}.json").write_text(
                 json.dumps(entries, ensure_ascii=False, indent=1), encoding="utf-8")
-            counts[kind] = len(entries)
+            counts[out_kind] = len(entries)
+        art_file = pdir / "art" / "index.json"  # PDF art from tools/extract_pdf_art.py
+        if art_file.exists() and kinds.get("monsters"):
+            art = json.loads(art_file.read_text(encoding="utf-8")).get("monsters", {})
+            for m in kinds["monsters"]:
+                a = art.get(m["name"])
+                if a and not m["image"] and (pdir / a["file"]).exists():
+                    m["image"] = a["file"]
+            (pdir / "creatures.json").write_text(
+                json.dumps(kinds["monsters"], ensure_ascii=False, indent=1), encoding="utf-8")
         for img in sorted(package_images[pid]):
             src = image_index.get(img.lower())
             if src:

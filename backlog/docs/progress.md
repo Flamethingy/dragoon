@@ -77,12 +77,19 @@
   players' names). `TokenGrid` only shows data now; the markdown example and spike scenes are gone
   (`Frontmatter` stays for importers, test fixtures in `tools/fixtures/`). `secrets.gd` is unused until TASK-18.
 
+- 2026-11-02: Rules automation overview written (rules-automation.md, Tamago): code, docs and data scan
+  (12,127 creature features, 1,402 spells, classes, races, feats), automation levels, Nico's decisions
+  (auto-apply, 3D dice, initiative per creature with groups, crit = max dice + roll, 2014 + 2024), phases
+  as tickets. Docs brought up to date (TASK-52): timelines instead of campaigns, characters/creatures.
+- 2026-11-01: Characters package from the Obsidian notes (`tools/import_characters.py`, 18 characters).
+
 ## Open questions
 See the "Open questions" section of the concept (secrets marking, event log format, YAML parsing, hosting ...).
 
 ## Next steps
-- TASK-1 frontmatter schema, TASK-2 event format, TASK-3 Godot spike (markdown to token on grid).
+- Rules automation, phases 0-5 (rules-automation.md, TASK-49 and TASK-51 to TASK-74), Mochi works through them.
 - TASK-4: ask the group what they use most in Foundry.
+- TASK-31 (later): import agent inside the VTT without Python. TASK-40: Live Lab for UI experiments.
 
 - 2026-11-01: TASK-18 (Mochi): `Reveal` (`scripts/text/reveal.gd`) parses `<reveal id for>` tags (inline, block,
   nested = intersection, unclosed = hidden, `for` missing = DM) and `%% %%` (DM-only). Visibility at a moment =

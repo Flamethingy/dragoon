@@ -6,7 +6,9 @@ Nov 1, 2026 · @Nico
 > Markdown text fields, so there is no vault program and no markdown entity files. Core data is in
 > source packages (package-format.md), worlds are packages too, and campaigns are folders
 > (data-layout.md). DM secrets are per-passage `<reveal>` tags (reveal-visibility.md). The
-> sections below still describe the original idea where they mention markdown files.
+> sections below still describe the original idea where they mention markdown files. Campaigns were
+> later replaced by timelines inside a world (timelines.md), and rules automation is planned in
+> rules-automation.md.
 
 ## Vision
 
@@ -139,15 +141,15 @@ Markdown is the storage format, never the wire format, so loading and sending st
 
 The first playable version covers one session on one map.
 
-- [ ] Shared map with a grid, loaded from an image
-- [ ] Tokens players can move (smooth tween movement), DM can move anything
-- [ ] DM host, players join over the network
-- [ ] Character sheets read from campaign entities
-- [ ] Send an NPC or a whole world into the active campaign
-- [ ] Event log for moves and sheet changes (rewind comes later, but log from day one)
-- [ ] Party token group on the world map
-- [ ] Dice roller that knows the stats ("roll Perception" instead of formulas)
-- [ ] Session notes with real and in-world date
+- [x] Shared map with a grid, loaded from an image
+- [x] Tokens players can move (smooth tween movement), DM can move anything
+- [x] DM host, players join over the network
+- [x] Character sheets read from campaign entities
+- [x] ~~Send an NPC or a whole world into the active campaign~~ (replaced by worlds with timelines)
+- [x] Event log for moves and sheet changes (rewind comes later, but log from day one)
+- [x] Party token group on the world map
+- [x] Dice roller that knows the stats ("roll Perception" instead of formulas)
+- [x] Session notes with real and in-world date
 
 ## Later, or never
 
@@ -167,13 +169,13 @@ The first playable version covers one session on one map.
 ## Open questions
 
 - What does the group actually use most in Foundry during a session? That is the real MVP list.
-- How are DM-only secrets marked in markdown (a section marker, a separate file)?
-- Does the vault program become the VTT's editor, or do they stay separate apps sharing a folder?
+- ~~How are DM-only secrets marked?~~ `<reveal>` tags per passage (reveal-visibility.md).
+- ~~Vault program or VTT as editor?~~ The VTT is the editor, all data is JSON.
 - Hosting: DM machine with port forwarding, a relay, or a small dedicated server later?
-- Event log format: JSONL file or SQLite? One log per campaign?
-- Event types: which changes become events, and which are just part of an entity?
+- ~~Event log format?~~ JSONL, one log per timeline.
+- ~~Event types?~~ doc-1; extended in TASK-17.
 - When pulling core changes into a campaign copy, how are conflicts shown?
-- YAML parsing: addon, own subset parser, or C#?
+- ~~YAML parsing?~~ Not needed anymore (JSON).
 
 ## Next steps
 

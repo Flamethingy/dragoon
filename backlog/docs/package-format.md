@@ -75,6 +75,20 @@ Every entry has `id` (slug, unique per kind in the package), `name`, `source`, `
 (relative path or empty), `description` (Markdown) and `origin` (where it was imported from).
 **All text fields are Markdown.** Wikilinks `[[Name]]` are kept for the VTT to resolve.
 
+### Drafts
+
+Every entry of every kind (packages and campaigns) has `draft` (bool). Decided by Nico on 2026-11-01.
+
+- `draft: true` = not finished. A draft is hidden from compendium lists, search, wikilink
+  resolution, "send into campaign" and everything players get, unless an overview has
+  **Show drafts** ticked. Players never see drafts (the host filters them).
+- New entries are saved with **Save as draft** or **Save** (published). A draft has a **Publish**
+  button; a published entry can be set back to draft.
+- Imports from the import agent always arrive as drafts in the target package (import-agent.md).
+- Features and rollable tables created together with a draft entry are drafts too and are
+  published together with it.
+- The Obsidian importer writes `draft: false` (book data is finished).
+
 ### Monster
 
 `size, type, subtype, group, alignment, cr, ac, armor, hp, speed{walk,swim,fly,burrow,climb}

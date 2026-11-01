@@ -16,9 +16,9 @@ How the VTT records changes on the world timeline (concept: *Timeline and calend
 
 ## The rule: event or entity?
 
-- **Entity (markdown, written by the vault program):** what something *is* when it enters the campaign: base stat block, lore, token art, size. Includes the campaign copy made by "send into campaign".
+- **Entity (JSON entry, edited in the VTT):** what something *is*: base stat block, lore, token art, size. Lives in a package (core or world) or, if created during play, as an `entity.created` event in the timeline (timelines.md).
 - **Event (log, written by the VTT):** anything that *happens* during play or prep in the VTT: moving, gaining or losing things, damage, levels, time passing, notes.
-- The state at a moment = campaign copy + all events up to that moment. The VTT never writes play state back into the markdown.
+- The state at a moment = the entry + all events up to that moment. The VTT never writes play state back into the entry files.
 
 ## Event record
 
@@ -28,7 +28,7 @@ One JSON object per event.
 | --- | --- | --- |
 | `id` | int | Sequence number in this campaign's log, starting at 1, never reused. |
 | `type` | string | `area.verb`, e.g. `token.moved`. See the types below. |
-| `entity` | string | Id of the campaign entity it is about (its path in the campaign folder without `.md`, e.g. `npc/mira`). Empty string for world-wide events such as `time.advanced`. |
+| `entity` | string | Plain ref of the entity it is about, `<kind>/<id>` (e.g. `characters/mira`, `creatures/goblin-1`). Empty string for world-wide events such as `time.advanced`. |
 | `day` | int | In-world day number on the world timeline (day 0 = first day of the calendar's `first_year`). |
 | `time` | int | Minutes since in-world midnight, or `-1` if unknown. |
 | `real` | string | Real-world time, ISO 8601 UTC (`2026-11-07T19:42:10Z`). |
@@ -42,9 +42,9 @@ One JSON object per event.
 ## Examples
 
 ```json
-{"id": 41, "type": "token.moved", "entity": "pc/thalia", "day": 152, "time": 870, "real": "2026-11-07T19:42:10Z", "session": 3, "by": "player:anna", "data": {"map": "maps/thornwick", "from": [4, 7], "to": [9, 7]}}
-{"id": 42, "type": "item.gained", "entity": "pc/thalia", "day": 152, "time": 885, "real": "2026-11-07T19:55:02Z", "session": 3, "by": "dm", "data": {"item": "core:items/flame-tongue", "qty": 1, "from": "npc/mira"}}
-{"id": 43, "type": "hp.changed", "entity": "monster/goblin-chief-1", "day": 152, "time": 890, "real": "2026-11-07T20:01:33Z", "session": 3, "by": "dm", "data": {"delta": -9, "hp": 12, "reason": "longsword"}}
+{"id": 41, "type": "token.moved", "entity": "characters/thalia", "day": 152, "time": 870, "real": "2026-11-07T19:42:10Z", "session": 3, "by": "anna", "data": {"map": "maps/thornwick", "from": [4, 7], "to": [9, 7]}}
+{"id": 42, "type": "item.gained", "entity": "characters/thalia", "day": 152, "time": 885, "real": "2026-11-07T19:55:02Z", "session": 3, "by": "dm", "data": {"item": "core:5e-core-rules/items/flame-tongue", "qty": 1, "from": "characters/mira"}}
+{"id": 43, "type": "hp.changed", "entity": "creatures/goblin-chief-1", "day": 152, "time": 890, "real": "2026-11-07T20:01:33Z", "session": 3, "by": "dm", "data": {"delta": -9, "hp": 12, "reason": "longsword"}}
 {"id": 44, "type": "time.advanced", "entity": "", "day": 153, "time": 480, "real": "2026-11-07T21:30:00Z", "session": 3, "by": "dm", "data": {"from_day": 152, "from_time": 900, "reason": "long rest"}}
 ```
 

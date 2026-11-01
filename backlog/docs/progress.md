@@ -17,6 +17,13 @@
   `examples/campaign/maps/forest-road.md` (image + grid from frontmatter) with tokens at their creature
   size (medium 1x1, large 2x2). Example campaign files in `examples/campaign` (`.gdignore`, loaded at runtime)
   use provisional fields until TASK-1's schema exists. `tools/screenshot_scene.gd` renders a scene to PNG.
+- 2026-11-01: TASK-15 (Mochi): compendium scene `scenes/compendium/compendium.tscn`. `PackageDB`
+  (`scripts/compendium/package_db.gd`) loads all packages on a worker thread (4309 entries in ~0.25 s);
+  kinds list, name search (optionally full text), filters for package, CR/level and type/school, sortable
+  columns; detail via `StatBlock` (monster stat block, spell header, field table for other kinds) and
+  `Markdown` (ported from Tamago, with `[[wikilinks]]`: click opens the entry, Back / Alt+Left returns).
+  Test: `tools/test_compendium.gd` (formats every entry; 2434 of 2888 wikilinks resolve, the rest point to
+  PDFs or missing pages). Not yet: jumping to a `#Section` inside the opened page.
 
 ## Open questions
 See the "Open questions" section of the concept (secrets marking, event log format, YAML parsing, hosting ...).

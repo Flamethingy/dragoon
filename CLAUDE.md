@@ -7,6 +7,7 @@ hosts players over ENet.
 
 ## Read first
 - `backlog/docs/Dragoon Concept.md`: vision, data model, campaign layers, event timeline, MVP.
+- `backlog/docs/package-format.md`: core data as JSON source packages (`data/packages`, git-ignored), importer `tools/import_obsidian.py`.
 - `backlog/docs/progress.md`: current status, open questions, next steps. **Update it at the end
   of every work session.**
 

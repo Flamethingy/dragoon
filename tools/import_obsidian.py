@@ -1,0 +1,467 @@
+"""Convert the Obsidian DnD5e vault into Dragoon source packages.
+
+One package per source (book / PDF / homebrew), each a folder:
+
+    <out>/<package-id>/package.json      manifest (id, name, counts, ...)
+    <out>/<package-id>/monsters.json     list of entries, one file per kind
+    <out>/<package-id>/spells.json
+    <out>/<package-id>/assets/           images referenced by entries
+
+All text fields (description, action text, ...) are Markdown. The vault is only read.
+
+Usage: python tools/import_obsidian.py <vault> <out> [--limit N]
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import re
+import shutil
+import sys
+from collections import Counter, defaultdict
+from pathlib import Path
+
+import yaml
+
+FORMAT_VERSION = 1
+
+# vault folder -> package kind
+KINDS = {
+    "NPCs": "monsters",
+    "Spells": "spells",
+    "Items": "items",
+    "Feats": "feats",
+    "Races": "races",
+    "Subraces": "subraces",
+    "Classes": "classes",
+    "Subclasses": "subclasses",
+    "Backgrounds": "backgrounds",
+    "Eldritch Invocations": "invocations",
+    "Infusions": "infusions",
+    "Rules": "rules",
+    "Conditions": "conditions",
+    "Diseases": "diseases",
+}
+
+ABILITIES = ["str", "dex", "con", "int", "wis", "cha"]
+ABILITY_NAMES = {"str": "STR", "dex": "DEX", "con": "CON", "int": "INT", "wis": "WIS", "cha": "CHA"}
+SKILLS = {
+    "acrobatics": "Acrobatics", "animal_handling": "AnimalHandling", "arcana": "Arcana",
+    "athletics": "Athletics", "deception": "Deception", "history": "History",
+    "insight": "Insight", "intimidation": "Intimidation", "investigation": "Investigation",
+    "medicine": "Medicine", "nature": "Nature", "perception": "Perception",
+    "performance": "Performance", "persuasion": "Persuation", "religion": "Religion",
+    "sleight_of_hand": "SleightOfHand", "stealth": "Stealth", "survival": "Survival",
+}
+# monster body sections -> entry field
+MONSTER_SECTIONS = {
+    "Actions": "actions",
+    "Special Abilities": "traits",
+    "Bonus Actions": "bonus_actions",
+    "Reactions": "reactions",
+    "Legendary Abilities": "legendary_actions",
+    "Legendary Actions": "legendary_actions",
+}
+
+
+# ---------------------------------------------------------------- helpers
+
+def slug(text: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", text.lower().replace("'", "").replace("’", ""))
+    return s.strip("-") or "unnamed"
+
+
+def snake(key: str) -> str:
+    s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key.strip())
+    return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")
+
+
+def read_text(path: Path) -> str:
+    raw = path.read_bytes()
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", errors="replace")
+
+
+def split_frontmatter(text: str) -> tuple[dict, str]:
+    text = text.replace("\r\n", "\n").lstrip("﻿")
+    m = re.match(r"---\n(.*?)\n---\n?", text, re.S)
+    if not m:
+        return {}, text
+    raw = re.sub(r"&amp;", "&", m.group(1), flags=re.I)
+    raw = re.sub(r"^(\s*-\s+)&", r"and", raw, flags=re.M)  # "- &Slashing" is a YAML anchor
+    try:
+        fm = yaml.safe_load(raw) or {}
+    except yaml.YAMLError:
+        fm = {}
+    return fm, text[m.end():]
+
+
+def clean_str(v) -> str:
+    return "" if v is None else str(v).strip()
+
+
+def clean_list(v) -> list[str]:
+    """Vault lists were split on ',' blindly ("Poison; Nonmagic Bludgeoning", " Piercing").
+    Rejoin, then split on ';' first and on ',' only where no clause follows."""
+    if v is None:
+        return []
+    if not isinstance(v, list):
+        v = [v]
+    joined = ", ".join(clean_str(x) for x in v if clean_str(x))
+    out: list[str] = []
+    for part in joined.split(";"):
+        part = part.strip(" ,")
+        if not part:
+            continue
+        # clauses like "Bludgeoning, Piercing, And Slashing From Nonmagical Attacks" stay whole
+        if re.search(r"\b(and|from|nonmagic|that|except)\b", part, re.I):
+            out.append(part)
+        else:
+            out.extend(p.strip() for p in part.split(",") if p.strip())
+    return out
+
+
+def num(v, default=0):
+    if v is None or v == "":
+        return default
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, (int, float)):
+        return v
+    s = str(v).strip()
+    m = re.match(r"^(\d+)\s*/\s*(\d+)$", s)  # CR "1/4"
+    if m:
+        return int(m.group(1)) / int(m.group(2))
+    try:
+        f = float(s)
+        return int(f) if f.is_integer() else f
+    except ValueError:
+        return default
+
+
+def to_bool(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("true", "yes", "1")
+
+
+def strip_dataview(body: str) -> str:
+    """Remove Obsidian-only render parts: %% comments %%, dataview code blocks and
+    blockquote/callout blocks that contain inline dataview (`=this...`)."""
+    body = re.sub(r"%%.*?%%", "", body, flags=re.S)
+    body = re.sub(r"^>?\s*`{3,}dataview.*?`{3,}\s*$", "", body, flags=re.S | re.M)
+    lines = body.split("\n")
+    out, block = [], []
+
+    def flush():
+        if block and not any("`=" in l for l in block):
+            out.extend(block)
+        block.clear()
+
+    for line in lines:
+        if line.startswith(">"):
+            block.append(line)
+        else:
+            flush()
+            out.append(line)
+    flush()
+    md = "\n".join(out)
+    md = re.sub(r"\n{3,}", "\n\n", md)
+    return md.strip()
+
+
+def unquote(block: str) -> str:
+    return "\n".join(re.sub(r"^> ?", "", l) for l in block.split("\n")).strip()
+
+
+image_index: dict = {}
+
+
+def convert_embeds(md: str, images: set[str]) -> str:
+    """![[img.png]] -> ![](assets/img.png); remembers the image for copying."""
+    def repl(m):
+        name = m.group(1).split("|")[0].strip()
+        if re.search(r"\.(png|jpe?g|webp|gif)$", name, re.I) and name.lower() in image_index:
+            images.add(name)
+            return f"![](assets/{name})"
+        return m.group(0)
+    return re.sub(r"!\[\[([^\]]+)\]\]", repl, md)
+
+
+def split_sections(body: str) -> dict[str, str]:
+    """'# Heading' sections of a body -> {heading: text}."""
+    parts = re.split(r"^# (.+)$", body, flags=re.M)
+    sections = {"": parts[0]}
+    for i in range(1, len(parts) - 1, 2):
+        sections[parts[i].strip()] = parts[i + 1]
+    return sections
+
+
+# ---------------------------------------------------------------- monsters
+
+DAMAGE_RE = re.compile(r"(\d+)\s*\((\d+d\d+(?:\s*[+-]\s*\d+)?)\)\s*([A-Za-z]+)")
+
+
+def parse_feature(name: str, text: str) -> dict:
+    feat: dict = {"name": name, "text": text}
+    m = re.search(r"\((Recharge [\d–\-]+|\d+/Day|\d+/Turn|Costs \d+ Actions?)\)", name, re.I)
+    if m:
+        feat["uses"] = m.group(1)
+    elif re.search(r"\((\d)\)\s*$", name):  # legendary cost "Fling (2)"
+        feat["cost"] = int(re.search(r"\((\d)\)\s*$", name).group(1))
+    a = re.search(r"(Melee|Ranged|Melee or Ranged) (Weapon|Spell) Attack:\s*([+-]\d+) to hit", text, re.I)
+    if a:
+        attack = {"kind": f"{a.group(1).lower()} {a.group(2).lower()}", "to_hit": int(a.group(3))}
+        r = re.search(r"to hit,\s*(?:reach\s*)?([\d.,/ ]+)\s*(m|ft|')", text, re.I)
+        if r:
+            attack["range"] = f"{r.group(1).strip()} {r.group(2)}"
+        attack["damage"] = [{"dice": d.replace(" ", ""), "average": int(avg), "type": t.lower()}
+                            for avg, d, t in DAMAGE_RE.findall(text)]
+        feat["attack"] = attack
+    s = re.search(r"DC (\d+) (Str|Dex|Con|Int|Wis|Cha)\w*", text)
+    if s:
+        feat["save"] = {"dc": int(s.group(1)), "ability": s.group(2).lower()}
+        if not a:
+            dmg = [{"dice": d.replace(" ", ""), "average": int(avg), "type": t.lower()}
+                   for avg, d, t in DAMAGE_RE.findall(text)]
+            if dmg:
+                feat["damage"] = dmg
+    return feat
+
+
+def parse_features(section: str, images: set[str]) -> list[dict]:
+    feats = []
+    # entries are blockquotes starting with >**Name**
+    for block in re.split(r"\n\s*\n", section.strip()):
+        block = block.strip()
+        if not block:
+            continue
+        text = unquote(block)
+        m = re.match(r"\*\*(.+?)\*\*\s*\n?(.*)", text, re.S)
+        if m:
+            feats.append(parse_feature(m.group(1).strip(), convert_embeds(m.group(2).strip(), images)))
+        elif feats:  # continuation paragraph
+            feats[-1]["text"] += "\n\n" + convert_embeds(text, images)
+    return feats
+
+
+def convert_monster(fm: dict, body: str, images: set[str]) -> dict:
+    stats = {a: num(fm.get(ABILITY_NAMES[a]), 10) for a in ABILITIES}
+    saves = {}
+    for a in ABILITIES:
+        extra = num(fm.get(ABILITY_NAMES[a] + "Save"))
+        if extra:
+            saves[a] = (stats[a] - 10) // 2 + extra  # total save bonus
+    skills = {}
+    for key, vk in SKILLS.items():
+        v = num(fm.get(vk + "Bonus"))
+        if v:
+            skills[key] = v
+    senses = clean_list(fm.get("Senses"))
+    passive = None
+    rest = []
+    for s in senses:
+        m = re.match(r"passive perception\s*(\d+)", s, re.I)
+        if m:
+            passive = int(m.group(1))
+        else:
+            rest.append(s)
+    if passive is None:
+        passive = 10 + skills.get("perception", (stats["wis"] - 10) // 2)
+    sections = split_sections(body)
+    entry = {
+        "size": clean_str(fm.get("Size")),
+        "type": clean_str(fm.get("Type")),
+        "subtype": clean_str(fm.get("Subtype")),
+        "group": clean_str(fm.get("Group")),
+        "alignment": clean_str(fm.get("Alignment")),
+        "cr": num(fm.get("CR")),
+        "ac": num(fm.get("AC")),
+        "armor": clean_str(fm.get("Armor")),
+        "hp": num(fm.get("HP")),
+        "speed": {k: num(fm.get(k.capitalize())) for k in ("walk", "swim", "fly", "burrow", "climb")},
+        "hover": to_bool(fm.get("Hover", False)),
+        "stats": stats,
+        "saves": saves,
+        "skills": skills,
+        "passive_perception": passive,
+        "senses": rest,
+        "languages": clean_list(fm.get("Languages")),
+        "vulnerabilities": clean_list(fm.get("Vulnerabilities")),
+        "resistances": clean_list(fm.get("Resistances")),
+        "immunities": clean_list(fm.get("Immunities")),
+        "condition_immunities": clean_list(fm.get("ConditionImmunities")),
+        "environments": clean_list(fm.get("Environments")),
+        "spells": clean_list(fm.get("Spells")),
+        "description": convert_embeds(strip_dataview(sections.get("Description", "")), images),
+    }
+    for heading, field in MONSTER_SECTIONS.items():
+        if heading in sections:
+            entry.setdefault(field, []).extend(parse_features(sections[heading], images))
+    for field in set(MONSTER_SECTIONS.values()):
+        entry.setdefault(field, [])
+    return entry
+
+
+# ---------------------------------------------------------------- spells
+
+def convert_spell(fm: dict, body: str, images: set[str]) -> dict:
+    level = num(fm.get("Level", fm.get("SpellLevel")))
+    return {
+        "level": level,
+        "school": clean_str(fm.get("School")),
+        "casting_time": clean_str(fm.get("CastingTime")),
+        "range_m": num(fm.get("Range")),  # 0 = touch / self
+        "duration": clean_str(fm.get("Duration")),
+        "concentration": to_bool(fm.get("Concentration", False)),
+        "ritual": to_bool(fm.get("Ritual", False)),
+        "components": {
+            "verbal": to_bool(fm.get("VerbalComponent", False)),
+            "somatic": to_bool(fm.get("SomaticComponent", False)),
+            "material": to_bool(fm.get("MaterialComponent", False)),
+            "material_text": clean_str(fm.get("Material")),
+        },
+        "classes": clean_list(fm.get("Classes")),
+        "description": convert_embeds(strip_dataview(body), images),
+    }
+
+
+# ---------------------------------------------------------------- generic
+
+SKIP_KEYS = {"tags", "name", "source", "image"}
+
+
+def convert_generic(fm: dict, body: str, images: set[str]) -> dict:
+    entry = {}
+    for k, v in fm.items():
+        sk = snake(str(k))
+        if sk in SKIP_KEYS:
+            continue
+        if isinstance(v, list):
+            entry[sk] = clean_list(v)
+        elif isinstance(v, (int, float, bool)) or v is None:
+            entry[sk] = v
+        else:
+            entry[sk] = num(v) if re.fullmatch(r"-?\d+(\.\d+)?", str(v).strip()) else clean_str(v)
+    entry["description"] = convert_embeds(strip_dataview(body), images)
+    return entry
+
+
+CONVERTERS = {"monsters": convert_monster, "spells": convert_spell}
+
+
+# ---------------------------------------------------------------- main
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("vault", type=Path)
+    ap.add_argument("out", type=Path)
+    ap.add_argument("--limit", type=int, default=0, help="max files per folder (test runs)")
+    args = ap.parse_args()
+
+    vault: Path = args.vault
+    image_index.update({p.name.lower(): p for p in vault.rglob("*")
+                        if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif")})
+    source_docs = {p.stem: p for p in (vault / "Sources").glob("*.md")}
+
+    packages: dict[str, dict] = defaultdict(lambda: defaultdict(list))
+    package_names: dict[str, str] = {}
+    package_images: dict[str, set] = defaultdict(set)
+    report = Counter()
+    missing_images = []
+
+    for folder, kind in KINDS.items():
+        files = sorted((vault / folder).rglob("*.md"))
+        if args.limit:
+            files = files[: args.limit]
+        for path in files:
+            fm, body = split_frontmatter(read_text(path))
+            if not fm:
+                guess = "Fools Gold" if path.stem.startswith("Chaos Surges") else (
+                    "5e Core Rules" if folder == "Rules" else "Unknown")
+                fm = {"Name": path.stem, "Source": guess}
+                report["no frontmatter (source guessed)"] += 1
+            name = clean_str(fm.get("Name")) or path.stem
+            source = clean_str(fm.get("Source")) or "Unknown"
+            pid = slug(source)
+            package_names.setdefault(pid, source)
+            images: set[str] = set()
+            entry = {
+                "id": slug(name),
+                "name": name,
+                "source": source,
+                "image": "",
+            }
+            img = clean_str(fm.get("Image"))
+            if img and img.lower() not in image_index:
+                report["image missing in vault"] += 1
+                img = ""
+            if img:
+                images.add(img)
+                entry["image"] = f"assets/{img}"
+            entry.update(CONVERTERS.get(kind, convert_generic)(fm, body, images))
+            entry["origin"] = {"vault": "DnD5e", "path": path.relative_to(vault).as_posix()}
+            packages[pid][kind].append(entry)
+            package_images[pid] |= images
+            report[kind] += 1
+
+    out: Path = args.out
+    out.mkdir(parents=True, exist_ok=True)
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    summary = []
+    for pid, kinds in sorted(packages.items()):
+        pdir = out / pid
+        if pdir.exists():
+            shutil.rmtree(pdir)
+        pdir.mkdir(parents=True)
+        counts = {}
+        for kind, entries in sorted(kinds.items()):
+            seen = Counter()
+            for e in sorted(entries, key=lambda e: e["name"].lower()):
+                seen[e["id"]] += 1
+                if seen[e["id"]] > 1:
+                    e["id"] = f"{e['id']}-{seen[e['id']]}"
+            entries.sort(key=lambda e: e["name"].lower())
+            (pdir / f"{kind}.json").write_text(
+                json.dumps(entries, ensure_ascii=False, indent=1), encoding="utf-8")
+            counts[kind] = len(entries)
+        for img in sorted(package_images[pid]):
+            src = image_index.get(img.lower())
+            if src:
+                (pdir / "assets").mkdir(exist_ok=True)
+                shutil.copy2(src, pdir / "assets" / img)
+            else:
+                missing_images.append(f"{pid}: {img}")
+        name = package_names[pid]
+        desc = ""
+        if name in source_docs:
+            desc = strip_dataview(split_frontmatter(read_text(source_docs[name]))[1])
+        manifest = {
+            "format": "dragoon-package",
+            "format_version": FORMAT_VERSION,
+            "id": pid,
+            "name": name,
+            "kind": "source",
+            "version": "1.0.0",
+            "description": desc,
+            "counts": counts,
+            "created": now,
+            "imported_from": "Obsidian vault DnD5e",
+        }
+        (pdir / "package.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
+        summary.append((pid, sum(counts.values()), counts))
+
+    print(f"{len(packages)} packages -> {out}")
+    for pid, total, counts in sorted(summary, key=lambda s: -s[1]):
+        print(f"  {total:5d}  {pid}  {dict(counts)}")
+    print("entries:", dict(report))
+    if missing_images:
+        print(f"missing images ({len(missing_images)}):", *missing_images[:20], sep="\n  ")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

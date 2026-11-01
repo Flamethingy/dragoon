@@ -3,3 +3,6 @@
 /android/
 *.tmp
 __pycache__/
+
+# Content packages (copyrighted book data, never commit)
+/data/

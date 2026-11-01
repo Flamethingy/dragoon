@@ -30,6 +30,9 @@ var timeline_world := ""  ## the timeline's world package id
 var worlds_root := ""
 ## Which world packages are read: "*" every one, "" none (the core book, TASK-39), or one id.
 var world_filter := "*"
+## Whether the core packages (sources, homebrew) are read. The world's and the timeline's
+## books leave them out: they show only what was imported into the world (Nico, 2026-11-01).
+var include_core := true
 const LAYERS := ["timeline", "world", "core"]
 var packages: Array[Dictionary] = []  ## manifests, sorted by name
 var entries := {}  ## kind -> Array[Dictionary], sorted by name (published entries only)
@@ -90,6 +93,8 @@ func _load_all() -> void:
 			continue
 		if str(manifest.get("kind", "")) == "world" and world_filter != "*" and str(manifest.get("id", id)) != world_filter:
 			continue  # another world (or the core book: none)
+		if str(manifest.get("kind", "")) != "world" and not include_core:
+			continue  # a world's / timeline's book: the core stays in the compendium
 		manifest["_dir"] = folder
 		found_packages.append(manifest)
 		for file in DirAccess.get_files_at(folder):

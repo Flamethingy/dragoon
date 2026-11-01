@@ -85,6 +85,10 @@ func _ready() -> void:
 	table.status_changed.connect(func(text: String) -> void: start.status.text = text)
 	table.table_changed.connect(_on_table_changed)
 	table.pcs_changed.connect(_on_table_changed)
+	table.entry_imported.connect(func(_e: Dictionary) -> void:
+		for v: String in ["world", "timeline"]:
+			if books.has(v):
+				(books[v] as Compendium).reload())
 	show_view("")
 
 

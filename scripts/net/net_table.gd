@@ -24,6 +24,7 @@ signal entry_received(ref: String)  ## player: an entry I asked for arrived or c
 signal accounts_changed  ## names or colors of the accounts changed
 signal sheet_received(ref: String)  ## a sheet I opened arrived or changed (TASK-10)
 signal rolls_changed  ## the roll log got a roll (TASK-12)
+signal entry_imported(entry: Dictionary)  ## DM: a core entry was copied into the world
 
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
@@ -265,6 +266,7 @@ func show_map_to_all(id: String) -> void:
 func drop_token(e: Dictionary, cell: Vector2i) -> String:
 	if not is_dm() or map_id == "":
 		return ""
+	e = import_to_world(e)
 	var ref := timeline.token_entity(e)
 	if ref == "":
 		_set_status("Only monsters, NPCs and PCs go on the map")
@@ -278,6 +280,37 @@ func drop_token(e: Dictionary, cell: Vector2i) -> String:
 	_send_tables()
 	_set_status("%s placed at %s" % [timeline.name_of(ref), cell])
 	return ref
+
+
+## A core compendium entry is copied into the world before it is used (the world's book
+## only shows what was imported); one already imported is reused. World and timeline
+## entries come back as they are. {} if the world can't take it.
+func import_to_world(e: Dictionary) -> Dictionary:
+	if str(e.get("_layer", "core")) != "core":
+		return e
+	var kind := str(e.get("_kind", ""))
+	var eid := str(e.get("id", ""))
+	var store := timeline.world_store()
+	var made := {}
+	for w: Dictionary in store.list(kind):
+		var origin: Variant = w.get("origin")
+		if origin is Dictionary and str(origin.get("package", "")) == str(e.get("_package", "")) and str(origin.get("id", "")) == eid:
+			made = w
+			break
+	if made.is_empty():
+		made = store.copy_entry(EntryStore.open(str(e.get("_dir", ""))), kind, eid)
+		if made.is_empty():
+			return {}
+		_set_status("%s imported into the world" % made.get("name", eid))
+	made = made.duplicate(true)
+	made["_kind"] = kind
+	made["_layer"] = "world"
+	made["_package"] = store.id
+	made["_package_name"] = str(store.manifest.get("name", store.id))
+	made["_dir"] = store.folder
+	timeline.reload_world()
+	entry_imported.emit(made)
+	return made
 
 
 # --- Combat (TASK-35) -----------------------------------------------------------------------

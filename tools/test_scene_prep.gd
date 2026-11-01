@@ -104,7 +104,10 @@ func _init() -> void:
 	card.setup(goblin)
 	_check(EntryDrag.is_entry(card._get_drag_data(Vector2.ZERO)) and EntryDrag.ref_of(card._get_drag_data(Vector2.ZERO)) == "monsters/goblin", "compendium cards can be dragged")
 	card.free()
-	_check(_snapshot(world) == world_files, "placing tokens leaves the world files alone")
+	var now := _snapshot(world)
+	_check(world_files.keys().all(func(f: String) -> bool: return f in ["monsters.json", "features.json", "package.json"] or now.get(f) == world_files[f]), "placing tokens leaves the other world files alone")
+	var in_world := EntryStore.open(world).list("monsters").filter(func(m: Dictionary) -> bool: return str(m.get("name", "")) == "Goblin")
+	_check(in_world.size() == 1, "the core goblin was imported into the world once (%d)" % in_world.size())
 
 	# --- Two timelines, one map -------------------------------------------------------------------
 	var a := table.timeline

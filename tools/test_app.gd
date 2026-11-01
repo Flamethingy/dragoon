@@ -100,6 +100,19 @@ func _init() -> void:
 	tl_book._drop_data(Vector2.ZERO, EntryDrag.data(lantern))
 	_check(dm.table.timeline.entry("items/storm-lantern").get("name") == "Storm Lantern", "dropped on the timeline: the entry is in the timeline")
 	_check(dm.table.event_log.events.size() == before + 1 and str(dm.table.event_log.events.back().get("type")) == "entity.created", "...as an entity.created event")
+	var world_book: Compendium = dm.books.world
+	_check(world_book.db.packages.all(func(m: Dictionary) -> bool: return str(m.get("kind", "")) == "world"), "the world's book shows only the world, not the core packages")
+	var core_dir := PackageDB.default_root().path_join("5e-core-rules")
+	var goblin := EntryStore.open(core_dir).find("monsters", "goblin")
+	goblin.merge({"_kind": "monsters", "_layer": "core", "_package": "5e-core-rules", "_dir": core_dir}, true)
+	var world_store := dm.table.timeline.world_store()
+	var had := world_store.list("monsters").size()
+	var t1 := dm.table.drop_token(goblin, Vector2i(2, 2))
+	_check(t1 != "" and dm.table.timeline.world_store().list("monsters").size() == had + 1, "a core monster dropped on the map is imported into the world first (%s)" % t1)
+	await process_frame
+	_check(world_book.db.list("monsters").any(func(m: Dictionary) -> bool: return str(m.get("name", "")) == "Goblin"), "...and shows up in the world's book")
+	var t2 := dm.table.drop_token(goblin, Vector2i(3, 2))
+	_check(t2 != "" and t2 != t1 and dm.table.timeline.world_store().list("monsters").size() == had + 1, "a second one reuses the imported monster")
 	dm.show_view("events")
 	await process_frame
 	_check(dm.dock.is_shown("events") and dm.dock.place_of("events") == "bottom" and dm.timeline_view.tree.get_root().get_child_count() == dm.table.event_log.events.size(), "events view lists the events")

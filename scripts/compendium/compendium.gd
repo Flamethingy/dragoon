@@ -119,6 +119,7 @@ func _ready() -> void:
 		tabs_file = ""  # only the compendium keeps its tabs between runs
 	db.timeline_dir = timeline_dir
 	db.world_filter = scope_world_id()
+	db.include_core = scope() == "core"
 	_scope_label.text = scope_title()
 	_open_timeline_log()
 	for pkg in ImportJobs.new(packages_root).merge_finished():  # imports finished while the book was closed
@@ -585,6 +586,12 @@ func _on_files_dropped(files: PackedStringArray) -> void:
 			else:
 				open_import(f)
 			return
+
+
+## Reads the packages again (an entry was imported from outside, e.g. dropped on the map).
+func reload() -> void:
+	_stores.clear()
+	_reload()
 
 
 func _reload() -> void:

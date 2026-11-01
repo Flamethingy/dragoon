@@ -28,6 +28,9 @@ func _init() -> void:
 	book.packages_root = root
 	screen.add_child(book)
 	await book.db.loaded
+	book.db.include_core = true  # world and source packages side by side for the cards
+	book.reload()
+	await book.db.loaded
 	await process_frame
 
 	# --- Cards ------------------------------------------------------------------------------------

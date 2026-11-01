@@ -1,17 +1,17 @@
 class_name CharacterHud
 extends Control
-## The active character (TASK-44, Nico 2026-11-01): a big portrait in the lower left corner
-## with HP and spell slots, and next to it panels with the ability, save and skill checks
-## (TASK-46, instead of the hotbar): a click rolls it for this character, into the chat. Q / E go round robin through every token the
-## user controls: their own characters (owners), the DM everything on the map; with tokens
-## selected only through the selected ones (Nico, 2026-11-01). Three marks on the map:
-## none, selected (white ring), active (orange ring). Clicking or selecting a token does not
-## change the active one (you can move a fellow player's token and stay in your character). The HUD reads the active one's sheet from the table
-## (NetTable.open_sheet without showing the sheet panel) and changes go through it as events.
+## The active character (TASK-44, Nico 2026-11-01). Q / E go round robin through every token
+## the user controls: their own characters (owners), the DM everything on the map; with
+## tokens selected only through the selected ones. Marks on the map: selected (white ring),
+## active (orange ring). The HUD reads the active one's sheet from the table (NetTable.open_sheet
+## without showing the sheet panel) and changes go through it as events.
+## What it shows is a layout (TASK-47): pieces (HudWidgets) on a grid over the screen, saved
+## in the character (`hud`), for creatures in their template in the Book; without one the
+## portrait, health and spell slots. F2 edits it (LayoutEditor). Keys 1-9 open the sheet
+## pages (SheetPages), F3 edits them.
 
 signal active_changed(ref: String)
 
-const PORTRAIT := 132.0
 const SLIDE := 0.18  ## seconds of the change animation
 ## Spell slots per character level of a full caster (5e), level 1 slots first.
 const FULL_CASTER := [[2], [3], [4, 2], [4, 3], [4, 3, 2], [4, 3, 3], [4, 3, 3, 1], [4, 3, 3, 2],
@@ -24,93 +24,22 @@ const HALF_UP := ["artificer"]
 
 var table: NetTable
 var active := ""  ## the active entity's ref ("" = none)
+var pages: SheetPages  ## the sheet pages (keys 1-9), set by TableUI
+var editor: LayoutEditor  ## the HUD / page editor while it is open
 var _dismissed := false  ## a click on the empty map hid it: stays hidden until Q / E or a selection
-
-var _box: HBoxContainer
-var _card: PanelContainer
-var _portrait: TextureRect
-var _name: Label
-var _hp_bar: ProgressBar
-var _hp_text: Label
-var _slots_row: VBoxContainer
-var _checks: HBoxContainer
+var _pieces: Control
 var _tween: Tween
 
 
 func _init() -> void:
 	name = "CharacterHud"
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	anchor_top = 1.0
-	anchor_bottom = 1.0
-	offset_left = 12
-	offset_top = -12
-	offset_bottom = -12
-	grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_box = HBoxContainer.new()
-	_box.alignment = BoxContainer.ALIGNMENT_END
-	_box.add_theme_constant_override("separation", 0)
-	_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_box.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	add_child(_box)
-
-	_card = PanelContainer.new()
-	_card.name = "Portrait"
-	_card.theme_type_variation = UISkin.V_PAGE
-	_box.add_child(_card)
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 4)
-	_card.add_child(col)
-	_portrait = TextureRect.new()
-	_portrait.custom_minimum_size = Vector2(PORTRAIT, PORTRAIT)
-	_portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_portrait.pivot_offset = Vector2(PORTRAIT, PORTRAIT) * 0.5
-	_portrait.tooltip_text = "Q / E: switch between the tokens you control"
-	_portrait.size = Vector2(PORTRAIT, PORTRAIT)
-	var holder := Control.new()  # not a container: the animation may scale and turn the picture
-	holder.custom_minimum_size = Vector2(PORTRAIT, PORTRAIT)
-	holder.add_child(_portrait)
-	col.add_child(holder)
-	_name = Label.new()
-	_name.theme_type_variation = UISkin.V_HEADING
-	_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_name.add_theme_font_size_override("font_size", 17)
-	_name.custom_minimum_size.x = PORTRAIT
-	col.add_child(_name)
-	var hp := Control.new()
-	hp.custom_minimum_size = Vector2(PORTRAIT, 20)
-	col.add_child(hp)
-	_hp_bar = ProgressBar.new()
-	_hp_bar.name = "HP"
-	_hp_bar.show_percentage = false
-	_hp_bar.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var fill := StyleBoxFlat.new()
-	fill.bg_color = UISkin.RED
-	fill.set_corner_radius_all(4)
-	var back := StyleBoxFlat.new()
-	back.bg_color = UISkin.TAN
-	back.set_corner_radius_all(4)
-	_hp_bar.add_theme_stylebox_override("fill", fill)
-	_hp_bar.add_theme_stylebox_override("background", back)
-	hp.add_child(_hp_bar)
-	_hp_text = Label.new()
-	_hp_text.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_hp_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_hp_text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_hp_text.add_theme_color_override("font_color", UISkin.CREAM)
-	_hp_text.add_theme_font_size_override("font_size", 13)
-	hp.add_child(_hp_text)
-	_slots_row = VBoxContainer.new()
-	_slots_row.name = "SpellSlots"
-	_slots_row.add_theme_constant_override("separation", 2)
-	col.add_child(_slots_row)
-
-	_checks = HBoxContainer.new()  # ability, save and skill checks (TASK-46); a click rolls
-	_checks.name = "Checks"
-	_checks.add_theme_constant_override("separation", 0)
-	_checks.size_flags_vertical = Control.SIZE_SHRINK_END
-	_box.add_child(_checks)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_pieces = Control.new()
+	_pieces.name = "Pieces"
+	_pieces.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pieces.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_pieces)
 	visible = false
 
 
@@ -125,6 +54,7 @@ func _ready() -> void:
 	table.sheet_received.connect(func(ref: String) -> void:
 		if ref == active:
 			_fill())
+	resized.connect(_fill)
 	_check_active()
 
 
@@ -148,7 +78,7 @@ func controlled() -> PackedStringArray:
 			var info: Dictionary = table.grid.tokens[ref].get_meta("info", {})
 			if dm or table.my_player in (info.get("owners", []) as Array):
 				rest.append(ref)
-	rest.sort_custom(func(a: String, b: String) -> bool: return _label(a).naturalnocasecmp_to(_label(b)) < 0)
+	rest.sort_custom(func(a: String, b: String) -> bool: return label(a).naturalnocasecmp_to(label(b)) < 0)
 	for ref in rest:
 		if ref not in out:
 			out.append(ref)
@@ -249,9 +179,24 @@ func _input(event: InputEvent) -> void:
 	if k.ctrl_pressed or k.alt_pressed or _typing():
 		return
 	var code := k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode
+	if editor != null:  # the editor is open: F2 / F3 / Esc close it (saved)
+		if code in [KEY_F2, KEY_F3, KEY_ESCAPE]:
+			editor.finish(true)
+			get_viewport().set_input_as_handled()
+		return
 	if code == KEY_Q or code == KEY_E:
 		cycle(-1 if code == KEY_Q else 1)
-		get_viewport().set_input_as_handled()
+	elif code == KEY_F2:
+		edit_hud()
+	elif code == KEY_F3:
+		edit_pages()
+	elif code >= KEY_1 and code <= KEY_9 and pages != null and active != "":
+		pages.toggle(code - KEY_1)
+	elif code == KEY_ESCAPE and pages != null and pages.visible:
+		pages.close()
+	else:
+		return
+	get_viewport().set_input_as_handled()
 
 
 func _typing() -> bool:
@@ -260,132 +205,99 @@ func _typing() -> bool:
 
 
 ## What the HUD shows now: the active one's sheet (or its token until the sheet comes).
+
+## What the HUD shows now: the active one's sheet (or its token until the sheet comes), laid
+## out as its layout says.
 func _fill() -> void:
-	visible = active != "" and table != null and table.is_online()
+	visible = active != "" and table != null and table.is_online() and editor == null
+	if pages != null:
+		pages.refresh()
 	if not visible:
 		return
+	for c in _pieces.get_children():
+		_pieces.remove_child(c)
+		c.queue_free()
 	var s: Dictionary = table.sheets.get(active, {})
-	var info := _token_info(active)
-	_name.text = _label(active)
-	_portrait.texture = _picture(active)
-	var hp := int(s.get("hp", info.get("hp", 0)))
-	var hp_max := int(s.get("_hp_max", info.get("hp", hp)))
-	var temp := int(s.get("temp_hp", 0))
-	var known := s.has("hp") or info.has("hp")
-	_hp_bar.max_value = maxi(hp_max, 1)
-	_hp_bar.value = hp if known else 0
-	_hp_text.text = ("%d / %d" % [hp, hp_max] + (" +%d" % temp if temp > 0 else "")) if known else "HP ?"
-	_fill_slots(s)
-	_fill_checks(s)
+	var cell := cell_size()
+	for it: Dictionary in layout():
+		var r: Array = it.r
+		var rect := Rect2(Vector2(float(r[0]), float(r[1])) * cell, Vector2(float(r[2]), float(r[3])) * cell).grow(-2)
+		var w := HudWidgets.build(str(it.w), s, self, rect.size)
+		w.position = rect.position
+		w.size = rect.size
+		_pieces.add_child(w)
 
 
-func _fill_slots(s: Dictionary) -> void:
-	for c in _slots_row.get_children():
-		c.queue_free()
-	var max_slots := spell_slots(s)
-	var used: Dictionary = s.get("spell_slots_used", {}) if s.get("spell_slots_used") is Dictionary else {}
-	var editable := bool(s.get("_editable", false))
-	for i in max_slots.size():
-		var count := int(max_slots[i])
-		if count <= 0:
-			continue
-		var level := i + 1
-		var spent := clampi(int(used.get(str(level), 0)), 0, count)
-		var row := HBoxContainer.new()
-		row.name = "Level%d" % level
-		row.add_theme_constant_override("separation", 3)
-		var label := Label.new()
-		label.text = _roman(level)
-		label.custom_minimum_size.x = 30
-		label.add_theme_font_size_override("font_size", 13)
-		label.add_theme_color_override("font_color", UISkin.INK)
-		row.add_child(label)
-		for p in count:
-			var pip := Button.new()
-			pip.name = "Pip%d" % (p + 1)
-			pip.focus_mode = Control.FOCUS_NONE
-			pip.custom_minimum_size = Vector2(14, 14)
-			pip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			pip.tooltip_text = "Level %d slot: %s" % [level, "used" if p < spent else "free"]
-			var sb := StyleBoxFlat.new()
-			sb.bg_color = UISkin.TAN if p < spent else UISkin.WINE
-			sb.border_color = UISkin.WINE
-			sb.set_border_width_all(2)
-			sb.set_corner_radius_all(7)
-			for st in ["normal", "hover", "pressed", "disabled", "focus"]:
-				pip.add_theme_stylebox_override(st, sb)
-			pip.disabled = not editable
-			var to := p if p < spent else p + 1  # a free pip spends up to it, a used one gives back
-			pip.pressed.connect(func() -> void: use_slots(level, to))
-			row.add_child(pip)
-		_slots_row.add_child(row)
+func cell_size() -> Vector2:
+	var area := size if size.x > 0 and size.y > 0 else get_viewport_rect().size
+	return area / Vector2(HudWidgets.HUD_GRID)
 
 
-## Abilities (score, modifier: an ability check), saves and skills of the sheet, each a
-## button that rolls it for the active one (NetTable.roll: into the chat). Only with the
-## full sheet (owners, the DM).
-func _fill_checks(s: Dictionary) -> void:
-	for c in _checks.get_children():
-		_checks.remove_child(c)
-		c.queue_free()
-	if not bool(s.get("_full", false)) or not s.get("stats") is Dictionary:
+## The active one's HUD layout: its own, its template's (sheet `_hud`), else the default.
+func layout() -> Array:
+	var s: Dictionary = table.sheets.get(active, {}) if table != null else {}
+	var own := HudWidgets.clean(s.get("_hud"), HudWidgets.HUD_GRID)
+	return own if not own.is_empty() else HudWidgets.DEFAULT_HUD.duplicate(true)
+
+
+## Its sheet pages (`_pages`), else the default ones.
+func page_list() -> Array:
+	var s: Dictionary = table.sheets.get(active, {}) if table != null else {}
+	var out := []
+	if s.get("_pages") is Array:
+		for p: Variant in s._pages:
+			if p is Dictionary:
+				out.append({"name": str(p.get("name", "Page")), "items": HudWidgets.clean(p.get("items"), HudWidgets.PAGE_GRID)})
+	return out if not out.is_empty() else HudWidgets.DEFAULT_PAGES.duplicate(true)
+
+
+## May this user change the active one's layouts (owners, the DM)?
+func may_edit() -> bool:
+	return active != "" and bool((table.sheets.get(active, {}) as Dictionary).get("_editable", false))
+
+
+## F2: the HUD editor over the whole screen.
+func edit_hud() -> void:
+	if not may_edit() or editor != null:
 		return
-	var abilities := _panel("Abilities", 1)
-	var saves := _panel("Saves", 1)
-	for ab: String in ABILITIES:
-		var score := int((s.stats as Dictionary).get(ab, 10))
-		var mod := Dice.modifier(s, ab)
-		_check_button(abilities, "%s  %d  %s" % [ab.to_upper(), score, _signed(mod)], "%s check" % ab, false)
-		var save := Dice._bonus(s, "saves", ab, ab)
-		_check_button(saves, "%s  %s" % [ab.to_upper(), _signed(save)], "%s save" % ab, _lists(s, "saves", ab))
-	var skills := _panel("Skills", 2)
-	var names: Array = Dice.SKILLS.keys()
-	names.sort()
-	for skill: String in names:
-		var bonus := Dice._bonus(s, "skills", skill, str(Dice.SKILLS[skill]))
-		_check_button(skills, "%s %s" % [skill.replace("_", " ").capitalize(), _signed(bonus)], skill.replace("_", " "), _lists(s, "skills", skill))
+	var ed := LayoutEditor.new()
+	ed.grid = HudWidgets.HUD_GRID
+	ed.sets = [{"name": "HUD", "items": layout()}]
+	ed.sheet = table.sheets.get(active, {})
+	ed.hud = self
+	_open_editor(ed, "hud")
 
 
-const ABILITIES := ["str", "dex", "con", "int", "wis", "cha"]
+## F3: the sheet page editor (the page shown, else the first).
+func edit_pages() -> void:
+	if not may_edit() or editor != null or pages == null:
+		return
+	var at := pages.current if pages.visible else 0
+	pages.open(at)
+	var ed := LayoutEditor.new()
+	ed.grid = HudWidgets.PAGE_GRID
+	ed.multi = true
+	ed.sets = page_list()
+	ed.current = clampi(at, 0, ed.sets.size() - 1)
+	ed.sheet = table.sheets.get(active, {})
+	ed.hud = self
+	ed.area = pages.grid_rect()
+	_open_editor(ed, "sheet_pages")
 
 
-func _panel(title: String, columns: int) -> GridContainer:
-	var panel := PanelContainer.new()
-	panel.name = title
-	panel.theme_type_variation = UISkin.V_PAGE
-	panel.size_flags_vertical = Control.SIZE_SHRINK_END
-	_checks.add_child(panel)
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 2)
-	panel.add_child(col)
-	var head := Label.new()
-	head.text = title
-	head.theme_type_variation = UISkin.V_HEADING
-	head.add_theme_font_size_override("font_size", 14)
-	col.add_child(head)
-	var grid := GridContainer.new()
-	grid.columns = columns
-	grid.add_theme_constant_override("h_separation", 2)
-	grid.add_theme_constant_override("v_separation", 1)
-	col.add_child(grid)
-	return grid
-
-
-func _check_button(parent: Control, text: String, query: String, proficient: bool) -> void:
-	var b := Button.new()
-	b.text = text
-	b.name = query.replace(" ", "_")
-	b.flat = true
-	b.focus_mode = Control.FOCUS_NONE
-	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	b.add_theme_font_size_override("font_size", 12)
-	b.add_theme_constant_override("h_separation", 0)
-	var ink := UISkin.WINE if proficient else UISkin.INK
-	for st in ["font_color", "font_hover_color", "font_pressed_color"]:
-		b.add_theme_color_override(st, ink)
-	b.tooltip_text = "Roll %s%s (Shift: advantage, Ctrl: disadvantage)" % [query, " · proficient" if proficient else ""]
-	b.pressed.connect(func() -> void: roll_check(query))
-	parent.add_child(b)
+func _open_editor(ed: LayoutEditor, field: String) -> void:
+	editor = ed
+	var ref := active
+	ed.finished.connect(func(sets: Array, saved: bool) -> void:
+		editor = null
+		if saved:
+			var value: Variant = sets[0].items if field == "hud" else sets
+			var s: Dictionary = table.sheets.get(ref, {})
+			s["_hud" if field == "hud" else "_pages"] = value  # right away; the table confirms
+			table.save_layout(ref, field, value)
+		_fill())
+	get_parent().add_child(ed)
+	_fill()
 
 
 ## Rolls a check for the active one (Shift held: advantage, Ctrl: disadvantage).
@@ -399,14 +311,6 @@ func roll_check(query: String) -> void:
 		q += " with disadvantage"
 	table.roll(q, active)
 
-
-static func _signed(n: int) -> String:
-	return "+%d" % n if n >= 0 else str(n)
-
-
-static func _lists(s: Dictionary, key: String, name: String) -> bool:
-	var list: Variant = s.get(key)
-	return (list is Dictionary and (list as Dictionary).has(name)) or (list is Array and name in list)
 
 
 ## Spent spell slots of a level, as a sheet.changed event (spell_slots_used.<level>).
@@ -456,17 +360,17 @@ static func _roman(n: int) -> String:
 	return ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"][clampi(n - 1, 0, 8)]
 
 
-func _token_info(ref: String) -> Dictionary:
+func token_info(ref: String) -> Dictionary:
 	if table.grid != null and table.grid.tokens.has(ref):
 		return table.grid.tokens[ref].get_meta("info", {})
 	return {}
 
 
-func _label(ref: String) -> String:
+func label(ref: String) -> String:
 	var s: Dictionary = table.sheets.get(ref, {})
 	if s.has("name"):
 		return str(s.name)
-	var info := _token_info(ref)
+	var info := token_info(ref)
 	if info.has("name"):
 		return str(info.name)
 	for c: Dictionary in table.pc_choices:
@@ -476,7 +380,7 @@ func _label(ref: String) -> String:
 
 
 ## The token's composed picture; on world maps the party token stands in for its members.
-func _picture(ref: String) -> Texture2D:
+func picture(ref: String) -> Texture2D:
 	var grid := table.grid
 	if grid != null:
 		for id: String in [ref, NetTable.PARTY]:
@@ -487,17 +391,21 @@ func _picture(ref: String) -> Texture2D:
 
 ## The new portrait pops in, turned a little the way it came from; the check panels fade in
 ## one after the other.
+
+
+## The pieces fade in; the portrait pops, turned a little the way it came from.
 func _animate(direction: int) -> void:
 	if not is_inside_tree():
 		return
 	if _tween != null and _tween.is_valid():
 		_tween.kill()
 	_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	_card.modulate.a = 0.0
-	_portrait.scale = Vector2(0.85, 0.85)
-	_portrait.rotation = 0.12 * float(signi(direction))
-	_tween.tween_property(_card, "modulate:a", 1.0, SLIDE)
-	_tween.tween_property(_portrait, "scale", Vector2.ONE, SLIDE).set_trans(Tween.TRANS_BACK)
-	_tween.tween_property(_portrait, "rotation", 0.0, SLIDE)
-	_checks.modulate.a = 0.0
-	_tween.tween_property(_checks, "modulate:a", 1.0, SLIDE * 1.5).set_delay(0.06)
+	_pieces.modulate.a = 0.0
+	_tween.tween_property(_pieces, "modulate:a", 1.0, SLIDE)
+	var pic := _pieces.find_child("Picture", true, false) as Control
+	if pic != null:
+		pic.pivot_offset = pic.size * 0.5
+		pic.scale = Vector2(0.85, 0.85)
+		pic.rotation = 0.12 * float(signi(direction))
+		_tween.tween_property(pic, "scale", Vector2.ONE, SLIDE).set_trans(Tween.TRANS_BACK)
+		_tween.tween_property(pic, "rotation", 0.0, SLIDE)

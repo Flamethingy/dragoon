@@ -33,6 +33,8 @@ const PARTY := "party"  ## id of the group token on world maps
 const INFO_FIELDS := ["name", "size", "type", "subtype", "race", "alignment", "description", "image", "tags"]
 ## Sheet fields nobody changes from the table.
 const LOCKED_FIELDS := ["id", "player", "owners", "ref", "origin"]
+## Layouts in an entity (TASK-47) -> the sheet key they are sent as.
+const LAYOUT_FIELDS := {"hud": "hud", "sheet_pages": "pages"}
 
 ## Host: the timeline folder; empty = the example timeline data/worlds/westmarch/timelines/red-fang
 ## (the example world is copied there on first use).
@@ -1073,6 +1075,11 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 				if f is Dictionary and f.get("attack") is Dictionary:
 					attacks.append(str(f.get("name", fid)))
 		sheet["_attacks"] = attacks
+		# the HUD and the sheet pages (TASK-47): its own, a creature copy its template's
+		var tpl := layout_template(ref)
+		var source: Dictionary = timeline.world_entries(tpl.get_slice("/", 0)).get(tpl.get_slice("/", 1), {}) if tpl != "" else sheet
+		for key: String in LAYOUT_FIELDS:
+			sheet["_" + LAYOUT_FIELDS[key]] = source.get(key, []) if source.get(key) is Array else []
 	else:
 		for key: String in INFO_FIELDS:
 			if view.has(key):
@@ -1420,6 +1427,70 @@ func roll_added(entry: Dictionary) -> void:
 func sync_rolls(list: Array) -> void:
 	rolls = list
 	rolls_changed.emit()
+
+
+# --- HUD and sheet page layouts (TASK-47) -------------------------------------------------
+
+## A creature copy's template in the Book ("kind/id" in the world), "" if it has none: its
+## layouts live there, so the DM sets them up once for every goblin.
+func layout_template(ref: String) -> String:
+	var e := timeline.entry(ref)
+	if ref.get_slice("/", 0) == "characters" or not e.has("copy_of"):
+		return ""
+	var src := str(e.copy_of).split("/")
+	if src.size() == 3 and src[0] == timeline.world_id() and timeline.world_entries(src[1]).has(src[2]):
+		return "%s/%s" % [src[1], src[2]]
+	return ""
+
+
+## Saves a layout (`hud` or `sheet_pages`) of `ref`: owners and the DM.
+func save_layout(ref: String, field: String, value: Variant) -> void:
+	if is_dm():
+		_handle_layout(1, ref, field, value)
+	elif is_online():
+		request_layout.rpc_id(1, ref, field, value)
+
+
+## Player -> DM.
+@rpc("any_peer", "call_remote", "reliable")
+func request_layout(ref: String, field: String, value: Variant) -> void:
+	if is_dm():
+		_handle_layout(multiplayer.get_remote_sender_id(), ref, field, value)
+
+
+## A character's layout is a sheet.changed event; a creature copy's goes into its template in
+## the world package (DM only), and every open copy of it gets the new one.
+func _handle_layout(sender: int, ref: String, field: String, value: Variant) -> bool:
+	var player := _sender_player(sender)
+	if not LAYOUT_FIELDS.has(field) or not value is Array or not may_see_sheet(player, ref):
+		_deny_sheet(sender, "that's not your sheet")
+		return false
+	var tpl := layout_template(ref)
+	if tpl == "":
+		var from: Variant = timeline.entry(ref).get(field)
+		var now: Variant = Replay.entity_state(timeline.entry(ref), event_log.effective(ref)).get(field, from)
+		event_log.change_sheet(ref, field, now, value, "", player)
+		_sheet_changed(ref)
+		return true
+	if player != Reveal.DM:
+		_deny_sheet(sender, "only the DM changes a creature's HUD")
+		return false
+	var store := EntryStore.open(timeline.world_dir)
+	var kind := tpl.get_slice("/", 0)
+	var e := store.find(kind, tpl.get_slice("/", 1)).duplicate(true)
+	if e.is_empty():
+		return false
+	e[field] = value
+	store.save(kind, e)
+	timeline.reload_world()
+	var open_refs := sheets.keys()
+	open_refs.append_array(sheet_watchers.keys())
+	var done := {}
+	for other: String in open_refs:
+		if not done.has(other) and layout_template(other) == tpl:
+			done[other] = true
+			_sheet_changed(other)
+	return true
 
 
 # --- Chat (TASK-46) ----------------------------------------------------------------------------

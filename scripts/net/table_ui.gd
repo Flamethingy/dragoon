@@ -83,6 +83,9 @@ func _ready() -> void:
 	chat.active_ref = func() -> String: return hud.active
 	chat.visible = false
 	root.add_child(chat)
+	hud.pages = SheetPages.new()  # above the chat (TASK-47)
+	hud.pages.hud = hud
+	root.add_child(hud.pages)
 	_build_picker(root)
 	_build_lobby(root)
 	table.status_changed.connect(_on_status)

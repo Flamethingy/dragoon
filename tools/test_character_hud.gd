@@ -41,14 +41,22 @@ func _init() -> void:
 	await _until(func() -> bool: return hud.active == "characters/aria" and ann.sheets.has("characters/aria"))
 	_check(hud.active == "characters/aria" and hud.visible, "Ann's own character is active")
 	await process_frame
-	_check(hud._hp_text.text.begins_with("27 / 27"), "HP on the portrait (%s)" % hud._hp_text.text)
-	_check(hud._name.text == "Aria Windrunner", "name under the portrait")
-	_check(hud._checks.get_child_count() == 3 and hud.find_child("Abilities", true, false) != null and hud.find_child("Skills", true, false) != null, "ability, save and skill panels")
-	var stealth: Button = hud.find_child("stealth", true, false)
+	_check(_hp(hud).begins_with("27 / 27"), "HP on the portrait (%s)" % _hp(hud))
+	_check(_name(hud) == "Aria Windrunner", "name under the portrait")
+	_check(hud.find_child("W_portrait", true, false) != null and hud.find_child("W_hp", true, false) != null and hud.find_child("W_slots", true, false) != null
+		and hud.find_child("W_skills", true, false) == null, "no layout yet: portrait, health and spell slots (TASK-47)")
+	# key 1: the first sheet page, with the checks
+	var one := InputEventKey.new()
+	one.pressed = true
+	one.physical_keycode = KEY_1
+	hud._input(one)
+	_check(hud.pages.visible and hud.pages.current == 0, "1 opens the first sheet page")
+	_check(hud.pages.find_child("W_abilities", true, false) != null and hud.pages.find_child("W_skills", true, false) != null, "the default page has the checks")
+	var stealth: Button = hud.pages.find_child("stealth", true, false)
 	_check(stealth != null and stealth.text == "Stealth +5", "skills with the sheet's bonus (%s)" % (stealth.text if stealth else "none"))
-	var dex_save: Button = hud.find_child("dex_save", true, false)
+	var dex_save: Button = hud.pages.find_child("dex_save", true, false)
 	_check(dex_save != null and dex_save.text == "DEX  +5", "saves (%s)" % (dex_save.text if dex_save else "none"))
-	var str_check: Button = hud.find_child("str_check", true, false)
+	var str_check: Button = hud.pages.find_child("str_check", true, false)
 	_check(str_check != null and str_check.text == "STR  10  +0", "abilities with score and modifier (%s)" % (str_check.text if str_check else "none"))
 	stealth.pressed.emit()
 	await _until(func() -> bool: return ann.rolls.size() == 1)
@@ -71,7 +79,9 @@ func _init() -> void:
 	dm.say("A goblin horn sounds.")
 	await _until(func() -> bool: return ann.rolls.size() == 4)
 	_check(ann.rolls.size() == 4 and ann.rolls[3].by == "dm", "the DM writes too")
-	_check(hud._slots_row.get_child_count() == 1 and hud._slots_row.get_child(0).get_child_count() == 3, "ranger 3: two level 1 slots")
+	hud._input(one)
+	_check(not hud.pages.visible, "1 again closes it")
+	_check(_slots(hud).get_child_count() == 1 and _slots(hud).get_child(0).get_child_count() == 3, "ranger 3: two level 1 slots")
 	_check(not ann._ui.sheet.visible, "the HUD's sheet does not open the sheet panel")
 	_check(Array(hud.controlled()) == ["characters/aria", "characters/borin"], "Ann controls Aria and Borin (%s)" % [hud.controlled()])
 
@@ -83,8 +93,8 @@ func _init() -> void:
 	_check(hud.active == "characters/borin", "E: next one")
 	await _until(func() -> bool: return ann.sheets.has("characters/borin"))
 	await process_frame
-	_check(hud._name.text == "Borin Stoneshield" and hud._hp_text.text.begins_with("24 / 24"), "Borin's portrait (%s)" % hud._hp_text.text)
-	_check(hud._slots_row.get_child_count() == 2, "cleric 3: level 1 and 2 slots")
+	_check(_name(hud) == "Borin Stoneshield" and _hp(hud).begins_with("24 / 24"), "Borin's portrait (%s)" % _hp(hud))
+	_check(_slots(hud).get_child_count() == 2, "cleric 3: level 1 and 2 slots")
 	hud.cycle(1)
 	_check(hud.active == "characters/aria", "round robin back to Aria")
 	var q_key := e_key.duplicate() as InputEventKey
@@ -124,12 +134,48 @@ func _init() -> void:
 	await _until(func() -> bool: return int(ann.sheets.get("characters/borin", {}).get("spell_slots_used", {}).get("1", 0)) == 2)
 	_check(int(ann.sheets["characters/borin"].spell_slots_used["1"]) == 2, "spent slots saved as an event")
 	await process_frame
-	var pip: Button = hud._slots_row.get_child(0).get_node("Pip1")
+	var pip: Button = _slots(hud).get_child(0).get_node("Pip1")
 	_check((pip.get_theme_stylebox("normal") as StyleBoxFlat).bg_color == UISkin.TAN, "spent pips look empty")
 	_check(not ann._ui.sheet.visible, "updates don't open the sheet panel either")
 	dm.change_hp("characters/borin", -5)
-	await _until(func() -> bool: return hud._hp_text.text.begins_with("19"))
-	_check(hud._hp_text.text.begins_with("19 / 24"), "damage shows on the portrait (%s)" % hud._hp_text.text)
+	await _until(func() -> bool: return _hp(hud).begins_with("19"))
+	_check(_hp(hud).begins_with("19 / 24"), "damage shows on the portrait (%s)" % _hp(hud))
+
+	# F2: Ann puts Borin's HUD together; it is saved in the character, for every owner
+	var f2 := InputEventKey.new()
+	f2.pressed = true
+	f2.physical_keycode = KEY_F2
+	hud._input(f2)
+	_check(hud.editor != null and not hud.visible, "F2 opens the HUD editor")
+	var ed := hud.editor
+	_check(ed.items().size() == 3, "it starts with the default HUD")
+	ed.add("skills")
+	ed.place(3, Rect2i(10, 18, 9, 9))
+	ed.remove(2)  # no spell slots
+	_check(ed.items().map(func(i: Dictionary) -> String: return i.w) == ["portrait", "hp", "skills"], "add, move, remove")
+	hud._input(f2)
+	_check(hud.editor == null and hud.visible, "F2 again saves and closes it")
+	await _until(func() -> bool: return dm.timeline.entry("characters/borin").is_empty() == false and (Replay.entity_state(dm.timeline.entry("characters/borin"), dm.event_log.effective("characters/borin")).get("hud", []) as Array).size() == 3)
+	var saved: Array = Replay.entity_state(dm.timeline.entry("characters/borin"), dm.event_log.effective("characters/borin")).get("hud", [])
+	_check(saved.size() == 3 and saved[2].w == "skills" and saved[2].r == [10, 18, 9, 9], "saved in Borin as an event (%s)" % [saved])
+	await process_frame
+	_check(hud.find_child("W_skills", true, false) != null and hud.find_child("W_slots", true, false) == null, "the HUD shows the new layout")
+	# F3: the sheet pages, like home screens
+	var f3 := f2.duplicate() as InputEventKey
+	f3.physical_keycode = KEY_F3
+	hud._input(f3)
+	_check(hud.editor != null and hud.editor.multi and hud.pages.visible, "F3 opens the page editor on the sheet")
+	hud.editor.add_page()
+	hud.editor.add("description")
+	hud._input(f3)
+	await _until(func() -> bool: return (ann.sheets.get("characters/borin", {}).get("_pages", []) as Array).size() == 3)
+	_check(hud.page_list().size() == 3 and hud.page_list()[2].items[0].w == "description", "a third page with the description (%s)" % [hud.page_list().map(func(pg: Dictionary) -> String: return pg.name)])
+	var three := one.duplicate() as InputEventKey
+	three.physical_keycode = KEY_3
+	hud.pages.close()
+	hud._input(three)
+	_check(hud.pages.visible and hud.pages.current == 2 and hud.pages.find_child("W_description", true, false) != null, "3 opens it")
+	hud.pages.close()
 
 	# a click on the empty map: nothing selected or active, the HUD goes away
 	ann.grid.select(["characters/aria"])
@@ -160,6 +206,32 @@ func _init() -> void:
 	_check("characters/aria" in all and "characters/borin" in all and all.size() == dm.grid.tokens.size(), "the DM cycles through every token (%s)" % [all])
 	_check(dm_hud.active != "" and dm_hud.visible, "the DM has an active one too")
 
+	# creatures: one HUD from the template in the Book, for every copy (DM only)
+	var world := EntryStore.open(ProjectSettings.globalize_path(DIR + "/worlds/westmarch"))
+	world.save("creatures", {"id": "bandit", "name": "Bandit", "hp": 11, "ac": 12, "size": "Medium",
+		"stats": {"str": 11, "dex": 12, "con": 12, "int": 10, "wis": 10, "cha": 10}})
+	var bandit := world.find("creatures", "bandit").duplicate(true)
+	bandit.merge({"_kind": "creatures", "_layer": "world", "_package": world.id, "_dir": world.folder}, true)
+	dm.timeline.reload_world()
+	var b1 := dm.drop_token(bandit, Vector2i(1, 1))
+	var b2 := dm.drop_token(bandit, Vector2i(1, 3))
+	_check(b1 != "" and b2 != "" and b1 != b2 and dm.layout_template(b1) == "creatures/bandit", "two bandit copies of one template (%s, %s)" % [b1, b2])
+	dm_hud.set_active(b1)
+	await _until(func() -> bool: return dm.sheets.has(b1))
+	dm_hud.edit_hud()
+	dm_hud.editor.add("abilities")
+	dm_hud.editor.finish(true)
+	_check(str(EntryStore.open(world.folder).find("creatures", "bandit").get("hud", [])).contains("abilities"), "saved in the template in the Book")
+	dm_hud.set_active(b2)
+	await _until(func() -> bool: return dm.sheets.has(b2))
+	await process_frame
+	_check(dm_hud.layout().any(func(i: Dictionary) -> bool: return i.w == "abilities") and dm_hud.find_child("W_abilities", true, false) != null, "the other bandit has it too")
+	var before_hud: Variant = Replay.entity_state(dm.timeline.entry("characters/aria"), dm.event_log.effective("characters/aria")).get("hud")
+	ann.save_layout(b1, "hud", [])
+	await process_frame
+	await process_frame
+	_check(str(EntryStore.open(world.folder).find("creatures", "bandit").get("hud", [])).contains("abilities") and before_hud == null, "players can't change a creature's HUD")
+
 	# the sheet panel still opens by hand
 	ann.open_sheet("characters/aria")
 	await _until(func() -> bool: return ann._ui.sheet.visible)
@@ -168,6 +240,21 @@ func _init() -> void:
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
 	print("character hud: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))
 	quit(1 if _failed > 0 else 0)
+
+
+func _hp(hud: CharacterHud) -> String:
+	var l := hud.find_child("HPText", true, false) as Label
+	return l.text if l != null else ""
+
+
+func _name(hud: CharacterHud) -> String:
+	var l := hud.find_child("Name", true, false) as Label
+	return l.text if l != null else ""
+
+
+func _slots(hud: CharacterHud) -> Control:
+	var c := hud.find_child("SpellSlots", true, false) as Control
+	return c if c != null else Control.new()
 
 
 func _table(branch: String, cache: String, ui := false) -> NetTable:

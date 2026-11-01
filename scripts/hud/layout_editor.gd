@@ -6,16 +6,21 @@ extends Control
 ## out"); the rest is blurred. Below, a catalog like the Sims' build bar / Android's widgets:
 ## tabs (Character, Checks, Spells, Items, App) with a live preview card per piece, every
 ## variant side by side (portrait as token / full picture / small, ...), one quick button per
-## spell, item and check (square or round). Click a card to add it, or drag it onto the
-## screen. On the screen: drag a piece to move it, its lower right corner to resize it,
-## double-click switches its variant, right-click removes it. The sheet pages: one tab each,
-## add / delete. Done saves (also F2 / Esc), Cancel drops the changes.
+## spell, item and check. Click a card to add it, or drag it onto the screen. On the screen
+## (TASK-50): click selects a piece, Shift + click more of them, a drag on empty space selects
+## with a box; dragging a selected piece moves them all, its lower right corner resizes it;
+## double-click switches its variant, right-click or Delete removes. The inspector on the
+## right shows the selection: variant, round, name, amount badge, size, position, what a
+## quick button is for; with several selected, what they share (changes go to all of them).
+## The sheet pages: one tab each, add / delete. Done saves (also F2 / Esc), Cancel drops
+## the changes.
 
 signal finished(sets: Array, saved: bool)
 
 const HANDLE := 16.0  ## the resize corner, in screen pixels
 const MARGIN := 16.0
 const CARD_W := 150.0
+const INSPECTOR_W := 250.0
 const BLUR := """
 shader_type canvas_item;
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
@@ -42,6 +47,7 @@ var sheet := {}
 var hud: CharacterHud
 var tab := "Character"  ## the catalog tab shown
 var shape := "square"  ## quick buttons from the catalog: square or round
+var selected: Array = []  ## indices of the selected pieces (TASK-50)
 
 var _blur: ColorRect
 var _screen: Control  ## the edited area, real size, scaled down
@@ -53,7 +59,12 @@ var _tab_buttons := {}
 var _tabs: HBoxContainer  ## page tabs
 var _drag := -1  ## index of the piece being moved / resized
 var _resizing := false
-var _grab := Vector2.ZERO  ## where in the piece it was grabbed (moving), canvas pixels
+var _press := Vector2.ZERO  ## where the mouse went down, canvas pixels
+var _start := {}  ## index -> its rect when a move of the selection began
+var _boxing := false
+var _box := Rect2()  ## the selection box being drawn, canvas pixels
+var _box_add := false  ## Shift: the box adds to the selection
+var _inspector: VBoxContainer
 
 
 func _init() -> void:
@@ -104,6 +115,7 @@ func _ready() -> void:
 	_frames.draw.connect(_draw_frames)
 	_screen.add_child(_frames)
 	_build_tray()
+	_build_inspector()
 	resized.connect(_layout)
 	_layout()
 	grab_focus()
@@ -142,14 +154,17 @@ func _layout() -> void:
 		return
 	var area := size if size.x > 0 and size.y > 0 else _canvas()
 	var tray_h := _tray_height()
-	var room := Vector2(area.x - MARGIN * 2, area.y - tray_h - MARGIN * 3)
+	var room := Vector2(area.x - MARGIN * 3 - INSPECTOR_W, area.y - tray_h - MARGIN * 3)
 	var c := _canvas()
-	var k := minf(room.x / c.x, room.y / c.y)
+	var k := maxf(minf(room.x / c.x, room.y / c.y), 0.05)
 	_screen.size = c
 	_screen.scale = Vector2(k, k)
 	_screen.position = Vector2(MARGIN + (room.x - c.x * k) * 0.5, MARGIN + (room.y - c.y * k) * 0.5)
 	_tray.position = Vector2(MARGIN, area.y - tray_h - MARGIN)
 	_tray.size = Vector2(area.x - MARGIN * 2, tray_h)
+	var panel := _inspector.get_parent().get_parent() as Control
+	panel.position = Vector2(area.x - MARGIN - INSPECTOR_W, MARGIN)
+	panel.size = Vector2(INSPECTOR_W, area.y - tray_h - MARGIN * 3)
 	var mat := _blur.material as ShaderMaterial
 	mat.set_shader_parameter("preview", Vector4(_screen.position.x / area.x, _screen.position.y / area.y, c.x * k / area.x, c.y * k / area.y))
 	mat.set_shader_parameter("show_screen", screen_backdrop)
@@ -205,16 +220,8 @@ func _build_tray() -> void:
 		side.add_child(pages_row)
 		_tool_button(pages_row, "+ Page", add_page)
 		_tool_button(pages_row, "Delete page", delete_page)
-	var round := CheckButton.new()
-	round.name = "Round"
-	round.text = "Round buttons"
-	round.focus_mode = Control.FOCUS_NONE
-	round.toggled.connect(func(on: bool) -> void:
-		shape = "round" if on else "square"
-		_fill_cards())
-	side.add_child(round)
 	var hint := Label.new()
-	hint.text = "Click or drag a card onto the screen\nDouble-click: variant · right-click: remove"
+	hint.text = "Click or drag a card onto the screen.\nClick a piece: select · Shift: more\nDouble-click: variant · Del: remove"
 	hint.add_theme_font_size_override("font_size", 11)
 	hint.add_theme_color_override("font_color", UISkin.INK_SOFT)
 	side.add_child(hint)
@@ -223,6 +230,222 @@ func _build_tray() -> void:
 	_tool_button(end, "Reset", reset).tooltip_text = "Back to the default layout"
 	_tool_button(end, "Cancel", finish.bind(false))
 	_tool_button(end, "Done", finish.bind(true))
+
+
+# --- The inspector (TASK-50) -----------------------------------------------------------------
+
+func _build_inspector() -> void:
+	var panel := PanelContainer.new()
+	panel.name = "InspectorPanel"
+	panel.theme_type_variation = UISkin.V_PAGE
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(panel)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	panel.add_child(scroll)
+	_inspector = VBoxContainer.new()
+	_inspector.name = "Inspector"
+	_inspector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_inspector.add_theme_constant_override("separation", 6)
+	scroll.add_child(_inspector)
+
+
+## The selected items.
+func picked() -> Array:
+	var list := items()
+	return selected.filter(func(i: int) -> bool: return i < list.size()).map(func(i: int) -> Dictionary: return list[i])
+
+
+## Selects pieces by index (`add`: to the ones selected; a selected one is then unselected).
+func select(indices: Array, add := false) -> void:
+	if not add:
+		selected = []
+	for i: int in indices:
+		if i < 0 or i >= items().size():
+			continue
+		if add and i in selected:
+			selected.erase(i)
+		elif i not in selected:
+			selected.append(i)
+	_rebuild()
+
+
+## Sets `key` on every selected piece (`value` null: back to the default, the key goes).
+func set_attr(key: String, value: Variant) -> void:
+	for it: Dictionary in picked():
+		if value == null:
+			it.erase(key)
+		else:
+			it[key] = value
+	_rebuild(false)
+
+
+## Round (or square) quick buttons.
+func set_round(on: bool) -> void:
+	for it: Dictionary in picked():
+		if str(it.w) in HudWidgets.QUICK:
+			it["v"] = "round" if on else "square"
+	_rebuild(false)
+
+
+## Every selected piece `w` x `h` cells (0 keeps that side), kept inside the grid.
+func set_cells(w: int, h: int) -> void:
+	for it: Dictionary in picked():
+		var r: Array = it.r
+		_set_rect(it, Rect2i(int(r[0]), int(r[1]), w if w > 0 else int(r[2]), h if h > 0 else int(r[3])))
+	_rebuild(false)
+
+
+func remove_selected() -> void:
+	var order := selected.duplicate()
+	order.sort()
+	order.reverse()
+	for i: int in order:
+		if i < items().size():
+			items().remove_at(i)
+	selected = []
+	_rebuild()
+
+
+## The value all selected pieces share for `read` (a Callable on an item), else null (mixed).
+func _shared(read: Callable) -> Variant:
+	var list := picked()
+	if list.is_empty():
+		return null
+	var first: Variant = read.call(list[0])
+	for it: Dictionary in list:
+		if read.call(it) != first:
+			return null
+	return first
+
+
+func _fill_inspector() -> void:
+	if _inspector == null:
+		return
+	for c in _inspector.get_children():
+		_inspector.remove_child(c)
+		c.queue_free()
+	var head := Label.new()
+	head.theme_type_variation = UISkin.V_HEADING
+	_inspector.add_child(head)
+	var list := picked()
+	if list.is_empty():
+		head.text = "Inspector"
+		_inspector.add_child(_note("Click a piece to change it.\nShift + click or a box on empty space: several at once."))
+		return
+	var kinds := {}
+	for it: Dictionary in list:
+		kinds[str(it.w)] = true
+	var one: Dictionary = list[0]
+	if list.size() == 1:
+		head.text = HudWidgets.quick_name(str(one.w), str(one.ref), sheet) if one.has("ref") else str(HudWidgets.KINDS[one.w].label)
+		if one.has("ref"):
+			_inspector.add_child(_note(str(HudWidgets.KINDS[one.w].label)))
+	else:
+		head.text = "%d pieces" % list.size()
+		_inspector.add_child(_note("Changes go to all of them" + ("" if kinds.size() == 1 else " (what they share)")))
+	var quick := kinds.keys().all(func(k: String) -> bool: return k in HudWidgets.QUICK)
+	# the variant: one kind with variants (quick buttons: Round below)
+	if kinds.size() == 1 and HudWidgets.VARIANTS.has(one.w) and not quick:
+		var opts := OptionButton.new()
+		opts.name = "Variant"
+		var names: Array = HudWidgets.VARIANTS[one.w]
+		for v: String in names:
+			opts.add_item(str(HudWidgets.VARIANT_LABELS.get(v, v)).capitalize())
+		var now: Variant = _shared(func(it: Dictionary) -> String: return HudWidgets.variant(it))
+		opts.select(names.find(now) if now != null else -1)
+		opts.item_selected.connect(func(i: int) -> void: set_attr("v", names[i]))
+		_row("Variant", opts)
+	if quick:
+		var round_now: Variant = _shared(func(it: Dictionary) -> bool: return HudWidgets.variant(it) == "round")
+		_tick("Round", "Round" + (" (mixed)" if round_now == null else ""), round_now == true, set_round)
+		var badge_now: Variant = _shared(func(it: Dictionary) -> bool: return it.get("badge", true) != false)
+		_tick("Badge", "Amount badge" + (" (mixed)" if badge_now == null else ""), badge_now != false,
+			func(on: bool) -> void: set_attr("badge", null if on else false))
+	if kinds.keys().all(func(k: String) -> bool: return k in HudWidgets.QUICK or k == "portrait"):
+		var name_now: Variant = _shared(func(it: Dictionary) -> bool: return it.get("name", true) != false)
+		_tick("ShowName", "Show the name" + (" (mixed)" if name_now == null else ""), name_now != false,
+			func(on: bool) -> void: set_attr("name", null if on else false))
+	# size (all), position (one)
+	var w_now: Variant = _shared(func(it: Dictionary) -> int: return int(it.r[2]))
+	var h_now: Variant = _shared(func(it: Dictionary) -> int: return int(it.r[3]))
+	var size_row := HBoxContainer.new()
+	size_row.add_child(_spin("W", int(one.r[2]) if w_now == null else int(w_now), grid.x, func(v: float) -> void: set_cells(int(v), 0)))
+	size_row.add_child(_spin("H", int(one.r[3]) if h_now == null else int(h_now), grid.y, func(v: float) -> void: set_cells(0, int(v))))
+	_row("Size" + (" (mixed)" if w_now == null or h_now == null else ""), size_row)
+	if list.size() == 1:
+		var pos_row := HBoxContainer.new()
+		var move_x := func(v: float) -> void:
+			var r: Array = one.r
+			_set_rect(one, Rect2i(int(v), int(r[1]), int(r[2]), int(r[3])))
+			_rebuild(false)
+		var move_y := func(v: float) -> void:
+			var r: Array = one.r
+			_set_rect(one, Rect2i(int(r[0]), int(v), int(r[2]), int(r[3])))
+			_rebuild(false)
+		pos_row.add_child(_spin("X", int(one.r[0]), grid.x - 1, move_x, 0))
+		pos_row.add_child(_spin("Y", int(one.r[1]), grid.y - 1, move_y, 0))
+		_row("Position", pos_row)
+	# what a quick button is for
+	if list.size() == 1 and one.has("ref"):
+		var refs := OptionButton.new()
+		refs.name = "Ref"
+		var choices := HudWidgets.catalog(sheet).filter(func(c: Dictionary) -> bool: return c.w == one.w)
+		var at := -1
+		for c: Dictionary in choices:
+			refs.add_item(str(c.label))
+			if c.ref == one.ref:
+				at = refs.item_count - 1
+		if at < 0:  # not on the sheet any more: still shown
+			refs.add_item(HudWidgets.quick_name(str(one.w), str(one.ref), sheet))
+			at = refs.item_count - 1
+		refs.select(at)
+		refs.item_selected.connect(func(i: int) -> void:
+			if i < choices.size():
+				one["ref"] = choices[i].ref
+				_rebuild())
+		_row({"spell": "Spell", "item": "Item", "check": "Check"}[one.w], refs)
+	var remove_button := _tool_button(_inspector, "Remove" + (" all %d" % list.size() if list.size() > 1 else ""), remove_selected)
+	remove_button.name = "Remove"
+
+
+func _note(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.add_theme_font_size_override("font_size", 12)
+	l.add_theme_color_override("font_color", UISkin.INK_SOFT)
+	return l
+
+
+func _row(label: String, field: Control) -> void:
+	var l := Label.new()
+	l.text = label
+	l.add_theme_font_size_override("font_size", 13)
+	_inspector.add_child(l)
+	_inspector.add_child(field)
+
+
+func _tick(id: String, text: String, on: bool, action: Callable) -> void:
+	var c := CheckBox.new()
+	c.name = id
+	c.text = text
+	c.button_pressed = on
+	c.focus_mode = Control.FOCUS_NONE
+	c.toggled.connect(func(v: bool) -> void: action.call(v))
+	_inspector.add_child(c)
+
+
+func _spin(id: String, value: int, max_value: int, action: Callable, min_value := 1) -> SpinBox:
+	var sp := SpinBox.new()
+	sp.name = id
+	sp.prefix = id
+	sp.min_value = min_value
+	sp.max_value = max_value
+	sp.value = value
+	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sp.value_changed.connect(func(v: float) -> void: action.call(v))
+	return sp
 
 
 func show_tab(t: String) -> void:
@@ -368,12 +591,14 @@ func add_item(kind: String, v := "", ref := "", at := Vector2i(-1, -1)) -> void:
 	if ref != "":
 		item["ref"] = ref
 	items().append(item)
+	selected = [items().size() - 1]  # the new piece is selected: the inspector shows it
 	_rebuild()
 
 
 func remove(index: int) -> void:
 	if index >= 0 and index < items().size():
 		items().remove_at(index)
+		selected = []
 		_rebuild()
 
 
@@ -395,6 +620,7 @@ func reset() -> void:
 		current = 0
 	else:
 		sets = [{"name": "HUD", "items": HudWidgets.DEFAULT_HUD.duplicate(true)}]
+	selected = []
 	_rebuild()
 
 
@@ -403,6 +629,7 @@ func add_page() -> void:
 		return
 	sets.append({"name": "Page %d" % (sets.size() + 1), "items": []})
 	current = sets.size() - 1
+	selected = []
 	_rebuild()
 
 
@@ -410,12 +637,14 @@ func delete_page() -> void:
 	if sets.size() <= 1:
 		return
 	sets.remove_at(current)
+	selected = []
 	current = clampi(current, 0, sets.size() - 1)
 	_rebuild()
 
 
 func show_set(index: int) -> void:
 	current = clampi(index, 0, maxi(sets.size() - 1, 0))
+	selected = []
 	_rebuild()
 
 
@@ -426,10 +655,14 @@ func finish(save: bool) -> void:
 
 ## Moves / resizes piece `index` to `r` (cells), kept inside the grid.
 func place(index: int, r: Rect2i) -> void:
+	_set_rect(items()[index], r)
+	_rebuild(false)
+
+
+func _set_rect(it: Dictionary, r: Rect2i) -> void:
 	var w := clampi(r.size.x, 1, grid.x)
 	var h := clampi(r.size.y, 1, grid.y)
-	items()[index].r = [clampi(r.position.x, 0, grid.x - w), clampi(r.position.y, 0, grid.y - h), w, h]
-	_rebuild()
+	it.r = [clampi(r.position.x, 0, grid.x - w), clampi(r.position.y, 0, grid.y - h), w, h]
 
 
 func _free(r: Rect2i, skip: int) -> bool:
@@ -451,7 +684,9 @@ func _to_canvas(pos: Vector2) -> Vector2:
 	return (pos - _screen.position) / view_scale()
 
 
-func _rebuild() -> void:
+## Builds the pieces again; `inspect`: the inspector too (not while one of its fields is
+## being changed: it would lose the field).
+func _rebuild(inspect := true) -> void:
 	if _layer == null:
 		return
 	for c in _layer.get_children():
@@ -476,6 +711,8 @@ func _rebuild() -> void:
 			b.tooltip_text = str(sets[i].get("name", ""))
 	if _frames != null:
 		_frames.queue_redraw()
+	if inspect:
+		_fill_inspector()
 
 
 static func _ignore_mouse(c: Control) -> void:
@@ -500,16 +737,22 @@ func _draw_grid(on: Control) -> void:
 	on.draw_rect(a, Color(1.0, 0.55, 0.1, 0.9), false, 2.0 * px)
 
 
-## Outlines and resize handles above the pieces.
+## Outlines and resize handles above the pieces: the selected ones orange; the box.
 func _draw_frames() -> void:
 	var px := 1.0 / maxf(view_scale(), 0.05)
 	var handle := HANDLE * px
 	var list := items()
 	for i in list.size():
 		var rect := _rect_px(list[i].r)
-		var col := Color(1.0, 0.55, 0.1, 0.95) if i == _drag else Color(1, 1, 1, 0.85)
-		_frames.draw_rect(rect, col, false, 2.0 * px)
+		var on := i in selected
+		var col := Color(1.0, 0.55, 0.1, 0.95) if on else Color(1, 1, 1, 0.85)
+		if on:
+			_frames.draw_rect(rect, Color(1.0, 0.55, 0.1, 0.12))
+		_frames.draw_rect(rect, col, false, (3.0 if on else 2.0) * px)
 		_frames.draw_rect(Rect2(rect.end - Vector2(handle, handle), Vector2(handle, handle)), col)
+	if _boxing and _box.has_area():
+		_frames.draw_rect(_box, Color(1.0, 0.55, 0.1, 0.12))
+		_frames.draw_rect(_box, Color(1.0, 0.55, 0.1, 0.9), false, 1.5 * px)
 
 
 ## The piece under a point (canvas pixels), the top one first.
@@ -522,9 +765,15 @@ func _piece_at(pos: Vector2) -> int:
 
 
 func _gui_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and (event as InputEventKey).keycode in [KEY_DELETE, KEY_BACKSPACE]:
+		remove_selected()
+		accept_event()
+		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		var at := _to_canvas(mb.position)
+		if mb.pressed:
+			grab_focus()
 		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			remove(_piece_at(at))
 		elif mb.button_index == MOUSE_BUTTON_LEFT:
@@ -532,26 +781,67 @@ func _gui_input(event: InputEvent) -> void:
 				cycle_variant(_piece_at(at))
 				_drag = -1
 			elif mb.pressed:
+				_press = at
 				_drag = _piece_at(at)
-				if _drag >= 0:
+				if _drag < 0:  # empty space: a selection box
+					_boxing = true
+					_box_add = mb.shift_pressed
+					_box = Rect2(at, Vector2.ZERO)
+					if not mb.shift_pressed and not selected.is_empty():
+						select([])
+				else:
 					var rect := _rect_px(items()[_drag].r)
-					var handle := HANDLE / maxf(view_scale(), 0.05)
+					var handle := minf(HANDLE / maxf(view_scale(), 0.05), minf(rect.size.x, rect.size.y) * 0.4)  # never most of a small piece
 					_resizing = Rect2(rect.end - Vector2(handle, handle), Vector2(handle, handle)).grow(handle * 0.3).has_point(at)
-					_grab = at - rect.position
+					if mb.shift_pressed:
+						select([_drag], true)
+						if _drag not in selected:
+							_drag = -1  # Shift + click took it out again
+					elif _drag not in selected:
+						select([_drag])
+					_start = {}
+					for i: int in selected:
+						_start[i] = (items()[i].r as Array).duplicate()
 			else:
+				if _boxing:
+					_boxing = false
+					var hits := []
+					if _box.size.length() > 4.0 / maxf(view_scale(), 0.05):
+						for i in items().size():
+							if _box.intersects(_rect_px(items()[i].r)):
+								hits.append(i)
+					if _box_add:
+						for i: int in hits:
+							if i not in selected:
+								selected.append(i)
+						_rebuild()
+					else:
+						select(hits)
+				elif _drag >= 0:
+					_fill_inspector()  # the new position / size
 				_drag = -1
 			_frames.queue_redraw()
 		accept_event()
-	elif event is InputEventMouseMotion and _drag >= 0:
-		var mm := event as InputEventMouseMotion
-		var c := cell_size()
-		var r: Array = items()[_drag].r
-		var local := _to_canvas(mm.position)
-		if _resizing:
-			var end := Vector2i((local / c).round())
-			place(_drag, Rect2i(int(r[0]), int(r[1]), maxi(1, end.x - int(r[0])), maxi(1, end.y - int(r[1]))))
-		else:
-			var to := Vector2i(((local - _grab) / c).round())
-			if to != Vector2i(int(r[0]), int(r[1])):
-				place(_drag, Rect2i(to.x, to.y, int(r[2]), int(r[3])))
-		accept_event()
+	elif event is InputEventMouseMotion:
+		var local := _to_canvas((event as InputEventMouseMotion).position)
+		if _boxing:
+			_box = Rect2(_press, local - _press).abs()
+			_frames.queue_redraw()
+			accept_event()
+		elif _drag >= 0:
+			var c := cell_size()
+			var r: Array = items()[_drag].r
+			if _resizing:
+				var end := Vector2i((local / c).round())
+				place(_drag, Rect2i(int(r[0]), int(r[1]), maxi(1, end.x - int(r[0])), maxi(1, end.y - int(r[1]))))
+			else:  # the whole selection moves by whole cells, kept inside the grid together
+				var step := Vector2i(((local - _press) / c).round())
+				for i: int in _start:
+					var s: Array = _start[i]
+					step.x = clampi(step.x, -int(s[0]), grid.x - int(s[0]) - int(s[2]))
+					step.y = clampi(step.y, -int(s[1]), grid.y - int(s[1]) - int(s[3]))
+				for i: int in _start:
+					var s: Array = _start[i]
+					_set_rect(items()[i], Rect2i(int(s[0]) + step.x, int(s[1]) + step.y, int(s[2]), int(s[3])))
+				_rebuild(false)
+			accept_event()

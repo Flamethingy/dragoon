@@ -90,6 +90,9 @@ static func clean(items: Variant, grid: Vector2i) -> Array:
 			item["v"] = str(it.v)
 		if kind in QUICK:
 			item["ref"] = str(it.ref)
+		for flag: String in ["name", "badge"]:  # the inspector's ticks (TASK-50), kept only when off
+			if it.get(flag, true) == false:
+				item[flag] = false
 		out.append(item)
 	return out
 
@@ -158,7 +161,7 @@ static func build(kind: String, s: Dictionary, hud: CharacterHud, size: Vector2,
 		return _app_button(kind, hud, size)
 	var v := variant({"w": kind, "v": it.get("v", "")})
 	if kind in QUICK:
-		return _quick(kind, str(it.get("ref", "")), v, s, hud, size)
+		return _hide_parts(_quick(kind, str(it.get("ref", "")), v, s, hud, size), it)
 	var panel := PanelContainer.new()
 	panel.name = "W_" + kind
 	panel.theme_type_variation = UISkin.V_PAGE
@@ -194,7 +197,20 @@ static func build(kind: String, s: Dictionary, hud: CharacterHud, size: Vector2,
 		_:
 			body = Label.new()
 	panel.add_child(body)
-	return panel
+	return _hide_parts(panel, it)
+
+
+## The inspector's ticks (TASK-50): "name": false hides the name (portrait, quick button),
+## "badge": false the amount badge.
+static func _hide_parts(w: Control, it: Dictionary) -> Control:
+	for part: Array in [["name", "Name"], ["name", "Caption"], ["badge", "Badge"]]:
+		if it.get(part[0], true) == false:
+			var c := w.find_child(str(part[1]), true, false) as Control
+			if c != null:
+				c.visible = false
+				if c.get_parent() is ColorRect:  # the full picture's shade behind the name
+					(c.get_parent() as Control).visible = false
+	return w
 
 
 ## Compendium / Book / Leave: the app's button (hidden when this user can't use it, e.g. a

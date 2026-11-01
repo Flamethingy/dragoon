@@ -89,6 +89,29 @@ func _init() -> void:
 	ann._ui._refresh()
 	var chat: ChatBox = ann._ui.chat
 	_check(chat.visible, "the chat on the calm table")
+	# it docks like an IDE panel, floats on the grid, pops out; its place is the player's (TASK-50)
+	await process_frame
+	_check(chat.place.dock == "right" and chat.position.x > chat.area().x * 0.6, "docked right at first")
+	chat.dock("left")
+	_check(chat.position.x < 10 and chat.size.y > chat.area().y * 0.7, "docks left")
+	chat.end_move(Vector2(chat.area().x - 3, 300))
+	_check(chat.place.dock == "right", "let go on the right zone: docked right")
+	chat.position = Vector2(chat.cell().x * 10.2, chat.cell().y * 5.1)
+	chat.end_move(Vector2(chat.area().x * 0.4, chat.area().y * 0.4))
+	_check(chat.place.dock == "float" and int(chat.place.r[0]) == 10 and int(chat.place.r[1]) == 5, "anywhere else it floats, snapped to cells (%s)" % [chat.place])
+	chat._resize_to(Vector2(chat.cell().x * 24, chat.cell().y * 20))
+	_check(int(chat.place.r[2]) == 14 and int(chat.place.r[3]) == 15, "its corner resizes it by cells (%s)" % [chat.place.r])
+	chat.save_place()
+	var again := ChatBox.new()
+	again.place_file = chat.place_file
+	again.load_place()
+	_check(again.place.dock == "float" and again.place.r == chat.place.r, "its place is saved for the player")
+	again.free()
+	chat.pop_out()
+	_check(chat.get_parent() is Window and chat.window != null and chat.window.visible, "pops out into its own window")
+	chat.dock_back()
+	_check(chat.get_parent() == ann._ui.hud.get_parent() and chat.window == null and int(chat.position.x) == int(chat.cell().x * 10) + 4, "and docks back where it was")
+	chat.dock("right")
 	chat.line.text = "Hello from Aria!"
 	chat.send()
 	await _until(func() -> bool: return dm.rolls.size() == 2 and ann.rolls.size() == 2)
@@ -172,7 +195,9 @@ func _init() -> void:
 	var ed := hud.editor
 	_check(ed.items().size() == 6, "it starts with the default HUD (portrait, health, slots, Compendium, Book, Leave)")
 	_check(ed.find_child("Grid", true, false) != null, "with a grid to build on")
-	_check(ed.view_scale() < 0.9 and ed.preview_rect().end.y < ed.find_child("Tray", false, false).position.y, "the screen is shown smaller, the catalog below it")
+	ed.canvas = Vector2(1600, 950)  # headless: the HUD has no real screen size
+	ed.size = Vector2(1600, 950)
+	_check(ed.view_scale() < 0.9 and ed.preview_rect().end.y < ed.find_child("Tray", false, false).position.y, "the screen is shown smaller, the catalog below it (%s %s %s %s)" % [ed.view_scale(), ed.preview_rect(), ed.find_child("Tray", false, false).position, ed.canvas])
 	_check(ed.find_child("Card_portrait_picture_", true, false) != null, "the catalog shows the portrait variants (Character tab)")
 	ed.show_tab("Spells")
 	_check(ed.find_child("Card_spell_square_spells/cure-wounds".validate_node_name(), true, false) != null, "a card per spell (Spells tab)")
@@ -225,6 +250,49 @@ func _init() -> void:
 	hud.editor.add_item("spell", "round", spell_ref)
 	hud.editor.add_item("check", "square", "wis save")
 	hud.editor.add_item("item", "square", "items/torch")
+	# select, Shift + click more, the inspector changes what they share (TASK-50)
+	var ed2 := hud.editor
+	var n := ed2.items().size()
+	_check(ed2.selected == [n - 1], "a new piece is selected")
+	ed2.select([n - 3])
+	ed2.select([n - 2], true)
+	var round_tick := ed2.find_child("Inspector", true, false).find_child("Round", true, false) as CheckBox
+	_check(ed2.selected.size() == 2 and round_tick != null and not round_tick.button_pressed and round_tick.text.contains("mixed"), "Shift: two selected; the inspector shows Round as mixed")
+	round_tick.button_pressed = true
+	_check(ed2.items()[n - 3].v == "round" and ed2.items()[n - 2].v == "round", "ticking Round makes both round")
+	(ed2.find_child("Inspector", true, false).find_child("W", true, false) as SpinBox).value = 3
+	_check(int(ed2.items()[n - 3].r[2]) == 3 and int(ed2.items()[n - 2].r[2]) == 3, "the width goes to both")
+	(ed2.find_child("Inspector", true, false).find_child("Badge", true, false) as CheckBox).button_pressed = false
+	_check(ed2.items()[n - 2].get("badge", true) == false, "the badge can be switched off")
+	var to_screen := func(cell: Vector2) -> Vector2: return ed2.preview_rect().position + cell * ed2.cell_size() * ed2.view_scale()
+	var item_r: Array = ed2.items()[n - 1].r
+	var shift_click := InputEventMouseButton.new()
+	shift_click.button_index = MOUSE_BUTTON_LEFT
+	shift_click.pressed = true
+	shift_click.shift_pressed = true
+	shift_click.position = to_screen.call(Vector2(float(item_r[0]) + 0.5, float(item_r[1]) + 0.5))
+	ed2._gui_input(shift_click)
+	var up := shift_click.duplicate() as InputEventMouseButton
+	up.pressed = false
+	ed2._gui_input(up)
+	_check(ed2.selected.size() == 3, "Shift + click on the screen adds one (%s)" % [ed2.selected])
+	var starts := ed2.items().slice(n - 3).map(func(it: Dictionary) -> Array: return (it.r as Array).duplicate())
+	var grab := InputEventMouseButton.new()
+	grab.button_index = MOUSE_BUTTON_LEFT
+	grab.pressed = true
+	var spell_r: Array = ed2.items()[n - 3].r
+	grab.position = to_screen.call(Vector2(float(spell_r[0]) + 0.5, float(spell_r[1]) + 0.5))
+	ed2._gui_input(grab)
+	var move := InputEventMouseMotion.new()
+	move.position = grab.position + Vector2(0, 2) * ed2.cell_size() * ed2.view_scale()
+	ed2._gui_input(move)
+	var let_go := grab.duplicate() as InputEventMouseButton
+	let_go.pressed = false
+	ed2._gui_input(let_go)
+	var moved := true
+	for k in 3:
+		moved = moved and int(ed2.items()[n - 3 + k].r[1]) == int(starts[k][1]) + 2 and int(ed2.items()[n - 3 + k].r[0]) == int(starts[k][0])
+	_check(moved and ed2.selected.size() == 3, "dragging one moves the whole selection (%s -> %s, %s)" % [starts, ed2.items().slice(n - 3).map(func(it: Dictionary) -> Array: return it.r), ed2.selected])
 	hud.editor.finish(true)
 	await _until(func() -> bool: return hud.find_child("W_check", true, false) != null)
 	await process_frame

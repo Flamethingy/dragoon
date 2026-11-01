@@ -176,6 +176,18 @@ static func theme() -> Theme:
 	t.set_color("font_pressed_color", V_TAB, WINE)
 	t.set_color("font_hover_pressed_color", V_TAB, WINE)
 
+	# Document tabs (TabBar): tan, cream on hover, light paper pill when open.
+	t.set_stylebox("tab_unselected", "TabBar", box("flat_tan", 18, Vector2(14, 6)))
+	t.set_stylebox("tab_hovered", "TabBar", box("flat_cream", 18, Vector2(14, 6)))
+	t.set_stylebox("tab_selected", "TabBar", box("pill_paper_hi", 22, Vector2(14, 6)))
+	t.set_stylebox("tab_focus", "TabBar", StyleBoxEmpty.new())
+	t.set_stylebox("tab_disabled", "TabBar", box("flat_cream", 18, Vector2(14, 6), Color(1, 1, 1, 0.5)))
+	t.set_stylebox("button_highlight", "TabBar", _flat(Color(WINE, 0.15), 4))
+	t.set_color("font_unselected_color", "TabBar", INK)
+	t.set_color("font_hovered_color", "TabBar", INK)
+	t.set_color("font_selected_color", "TabBar", WINE)
+	t.set_constant("h_separation", "TabBar", 6)
+
 	t.set_stylebox("normal", "LineEdit", box("flat_tan", 18, Vector2(18, 8)))
 	t.set_stylebox("focus", "LineEdit", box("outline_wine", 18, Vector2(18, 8)))
 	t.set_color("font_color", "LineEdit", INK)

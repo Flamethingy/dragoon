@@ -92,3 +92,13 @@ See the "Open questions" section of the concept (secrets marking, event log form
   logs the event and pushes new views to players who have the entry open. `secrets.gd` removed.
   Open question: players may currently request any entry by ref (they only see untagged text); whether an
   entry's existence itself is secret is for TASK-6/21. Test: `tools/test_reveal.gd`, `tools/test_net_table.gd`.
+
+- 2026-11-01: TASK-22 (Mochi): document tabs in the compendium. "Browse" (the binder, can't be closed) sits left
+  of a `TabBar`; double-click or middle-click on a card, the "Open" button on the quick card, or Ctrl+click on a
+  link opens an entry in its own full-view tab (`EntryView`): title plate with an Edit button (disabled until
+  TASK-21), monsters in two columns (stat block + features left, picture, chips and description right), other
+  kinds picture + chips left and the full text right. Links in a full view open new tabs; an open entry is
+  focused instead of duplicated. Close with x / middle-click / Ctrl+W, switch with Ctrl+Tab / Ctrl+Shift+Tab,
+  drag to reorder; every tab keeps its scroll position, and the tabs (order, shown tab, scroll) come back on the
+  next start (`user://compendium_tabs.json`). Test: `tools/test_compendium_tabs.gd`; screenshots:
+  `tools/screenshot_compendium.gd`.

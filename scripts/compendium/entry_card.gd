@@ -3,6 +3,7 @@ extends PanelContainer
 ## One card in the compendium binder: picture, badge (CR / level ...), name, subtitle.
 
 signal pressed(entry: Dictionary)
+signal open_requested(entry: Dictionary)  ## double-click or middle-click: own tab
 
 const SIZE := Vector2(150, 204)
 
@@ -68,6 +69,14 @@ func _restyle() -> void:
 
 
 func _gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		pressed.emit(entry)
+	if not (event is InputEventMouseButton and event.pressed):
+		return
+	if event.button_index == MOUSE_BUTTON_LEFT:
+		if event.double_click:
+			open_requested.emit(entry)
+		else:
+			pressed.emit(entry)
+		accept_event()
+	elif event.button_index == MOUSE_BUTTON_MIDDLE:
+		open_requested.emit(entry)
 		accept_event()

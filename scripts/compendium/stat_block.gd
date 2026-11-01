@@ -111,7 +111,9 @@ static func level_text(level: Variant) -> String:
 
 # --- Monsters ----------------------------------------------------------------------
 
-static func monster(e: Dictionary) -> String:
+## `with_description` = false leaves out the description and source (the full view shows
+## them in their own column).
+static func monster(e: Dictionary, with_description := true) -> String:
 	var kind := " ".join(PackedStringArray([str(e.get("size", "")), str(e.get("type", ""))])).strip_edges()
 	if str(e.get("subtype", "")) != "":
 		kind += " (%s)" % e.subtype
@@ -164,6 +166,8 @@ static func monster(e: Dictionary) -> String:
 		bb += _field("\nSpells", Markdown.inline(_join(e.spells)))
 	if e.get("environments") is Array and not e.environments.is_empty():
 		bb += _field("\nEnvironments", Markdown.escape(_join(e.environments)))
+	if not with_description:
+		return bb
 	if str(e.get("description", "")).strip_edges() != "":
 		bb += _heading("Description") + _md(e.description)
 	return bb + _footer(e)

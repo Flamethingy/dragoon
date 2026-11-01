@@ -5,14 +5,24 @@ extends Control
 ## the middle that flips page by page, and the open card on the right with its key facts.
 ## The full text (stat block, Markdown) is folded away under "Full text".
 ## [[Wikilinks]] in it open the entry they name; Back returns.
+## Document tabs (TASK-22) above the binder: "Browse" is the binder itself; double-click,
+## middle-click, "Open" or Ctrl+click on a link opens an entry in its own full-view tab
+## (EntryView). Tabs close (x, middle-click, Ctrl+W), switch (Ctrl+Tab), reorder by drag,
+## keep their scroll position and come back on the next start (tabs_file).
 ## Packages load on a worker thread (PackageDB), so the window stays responsive.
+
+signal tabs_restored  ## the saved tabs are open again (after loading)
 
 const SEARCH_DELAY := 0.15
 const GRID_GAP := 14
 const SORTS := ["Name", "CR / Level", "Type", "Package"]
 const DETAIL_WIDTH := 430
+const KIND_ICONS := {"monsters": "icon_sword", "spells": "star", "items": "icon_chest",
+	"features": "icon_dagger", "classes": "icon_helmet", "races": "icon_armor"}
 
 var db := PackageDB.new()
+## Where the open tabs are kept between runs ("" = don't keep them).
+var tabs_file := "user://compendium_tabs.json"
 
 var _status: Label
 var _progress: ProgressBar
@@ -46,6 +56,14 @@ var _per_page := 12
 var _columns := 4
 var _current: Dictionary = {}
 var _history: Array[Dictionary] = []
+
+var _browse_button: Button
+var _tab_bar: TabBar
+var _views: Control  ## holds _browse and the EntryViews, one shown at a time
+var _browse: Control
+var _open_views := {}  ## key -> EntryView
+var _saved_tabs: Variant = null  ## {tabs: [{key, scroll}], current} to restore after a load
+var _restoring := false
 
 
 func _ready() -> void:
@@ -104,11 +122,25 @@ func _build() -> void:
 	manage.pressed.connect(_open_packages)
 	side.add_child(manage)
 
-	# Middle: the binder page.
+	# Right of the cover: the document tabs over the binder (Browse) or a full view.
+	var main := VBoxContainer.new()
+	main.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	main.add_theme_constant_override("separation", 8)
+	row.add_child(main)
+	main.add_child(_build_tab_row())
+	_views = Control.new()
+	_views.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main.add_child(_views)
+	_browse = HBoxContainer.new()
+	_browse.add_theme_constant_override("separation", 12)
+	_browse.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_views.add_child(_browse)
+
+	# Browse, middle: the binder page.
 	var page := PanelContainer.new()
 	page.theme_type_variation = UISkin.V_PAGE
 	page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(page)
+	_browse.add_child(page)
 	var page_box := VBoxContainer.new()
 	page_box.add_theme_constant_override("separation", 10)
 	page.add_child(page_box)
@@ -128,9 +160,11 @@ func _build() -> void:
 	var detail := PanelContainer.new()
 	detail.theme_type_variation = UISkin.V_PAGE
 	detail.custom_minimum_size = Vector2(DETAIL_WIDTH, 0)
-	row.add_child(detail)
+	_browse.add_child(detail)
 	var detail_col := VBoxContainer.new()
 	detail.add_child(detail_col)
+	var detail_bar := HBoxContainer.new()
+	detail_col.add_child(detail_bar)
 	_back = Button.new()
 	_back.text = "Back"
 	_back.icon = _flipped(UISkin.tex("arrow_right"))
@@ -138,7 +172,15 @@ func _build() -> void:
 	_back.tooltip_text = "Back to the previous card (Alt+Left)"
 	_back.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_back.pressed.connect(_go_back)
-	detail_col.add_child(_back)
+	detail_bar.add_child(_back)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	detail_bar.add_child(spacer)
+	var open := Button.new()
+	open.text = "Open"
+	open.tooltip_text = "Open this card in its own tab (double-click a card)"
+	open.pressed.connect(func() -> void: open_tab(_current))
+	detail_bar.add_child(open)
 	_detail_scroll = ScrollContainer.new()
 	_detail_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_detail_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -154,6 +196,35 @@ func _build() -> void:
 	_search_timer.wait_time = SEARCH_DELAY
 	_search_timer.timeout.connect(_refresh_list)
 	add_child(_search_timer)
+
+
+func _build_tab_row() -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	_browse_button = Button.new()
+	_browse_button.text = "Browse"
+	_browse_button.icon = UISkin.tex("icon_chest")
+	_browse_button.add_theme_constant_override("icon_max_width", 18)
+	_browse_button.toggle_mode = true
+	_browse_button.button_pressed = true
+	_browse_button.tooltip_text = "The card binder (Ctrl+Tab switches tabs)"
+	_browse_button.pressed.connect(show_browse)
+	row.add_child(_browse_button)
+	_tab_bar = TabBar.new()
+	_tab_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_tab_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_tab_bar.deselect_enabled = true
+	_tab_bar.drag_to_rearrange_enabled = true
+	_tab_bar.clip_tabs = true
+	_tab_bar.max_tab_width = 240
+	_tab_bar.tab_close_display_policy = TabBar.CLOSE_BUTTON_SHOW_ALWAYS
+	_tab_bar.add_theme_constant_override("icon_max_width", 18)
+	_tab_bar.tab_changed.connect(_on_tab_changed)
+	_tab_bar.tab_close_pressed.connect(close_tab)
+	_tab_bar.active_tab_rearranged.connect(func(_to: int) -> void: _save_tabs())
+	_tab_bar.gui_input.connect(_on_tab_bar_input)
+	row.add_child(_tab_bar)
+	return row
 
 
 func _build_filters() -> Control:
@@ -242,6 +313,8 @@ func _flipped(t: Texture2D) -> Texture2D:
 
 func _on_loaded() -> void:
 	_progress.hide()
+	if _saved_tabs == null and tabs_file != "" and FileAccess.file_exists(tabs_file):
+		_saved_tabs = JSON.parse_string(FileAccess.get_file_as_string(tabs_file))
 	for c in _tabs.get_children():
 		_tabs.remove_child(c)
 		c.queue_free()
@@ -267,6 +340,9 @@ func _on_loaded() -> void:
 	else:
 		_matches = []
 		_render_page()
+	var saved: Variant = _saved_tabs
+	_saved_tabs = {}
+	_restore_tabs(saved)
 
 
 ## The Packages window; after changes the book reloads.
@@ -282,10 +358,15 @@ func _reload() -> void:
 	_status.text = "Re-reading packages..."
 	_current = {}
 	_history.clear()
+	_saved_tabs = _tabs_state()
+	_restoring = true
+	_close_all_tabs()
+	_restoring = false
 	db.load_async(db.root)
 
 
 func _select_kind(kind: String) -> void:
+	show_browse()
 	_kind = kind
 	var list: Array = db.entries.get(kind, [])
 	var pkgs := {}
@@ -438,6 +519,7 @@ func _render_page() -> void:
 		card.setup(_matches[i])
 		card.selected = _matches[i] == _current
 		card.pressed.connect(_show)
+		card.open_requested.connect(open_tab)
 		_grid.add_child(card)
 	_center_grid()
 	_prev.disabled = _page == 0
@@ -601,6 +683,10 @@ func _build_detail(e: Dictionary) -> void:
 
 ## A rounded paper chip: optional icon, small label, value.
 func _chip(icon_name: String, label: String, value: String) -> Control:
+	return chip(icon_name, label, value)
+
+
+static func chip(icon_name: String, label: String, value: String) -> Control:
 	var chip := PanelContainer.new()
 	chip.theme_type_variation = UISkin.V_CHIP
 	var row := HBoxContainer.new()
@@ -633,23 +719,210 @@ func _go_back() -> void:
 	_back.disabled = _history.is_empty()
 
 
+## A link in the quick card: opens there, or in a new tab with Ctrl.
 func _on_meta(meta: Variant) -> void:
-	var link := str(meta)
+	_follow(str(meta), _current, Input.is_key_pressed(KEY_CTRL))
+
+
+## Follows a link from `from`: entry:/wiki: links open the entry (quick card or new tab),
+## web links the browser.
+func _follow(link: String, from: Dictionary, in_tab: bool) -> void:
+	var e := {}
 	if link.begins_with("entry:"):
 		var parts := link.substr(6).split("/")
 		if parts.size() == 3:
-			_show(db.get_entry(parts[0], parts[1], parts[2]))
+			e = db.get_entry(parts[0], parts[1], parts[2])
 	elif link.begins_with(Markdown.WIKI):
 		var target := link.substr(Markdown.WIKI.length()).get_slice("#", 0)
 		if target == "":
 			return
-		var e := db.resolve(target, str(_current.get("_package", "")))
+		e = db.resolve(target, str(from.get("_package", "")))
 		if e.is_empty():
 			_status.text = "No card named \"%s\"" % target
-		else:
-			_show(e)
+			return
 	elif link.begins_with("https://") or link.begins_with("http://"):
 		OS.shell_open(link)
+		return
+	if e.is_empty():
+		return
+	if in_tab:
+		open_tab(e)
+	else:
+		_show(e)
+
+
+# --- Document tabs (TASK-22) ------------------------------------------------------------
+
+## Opens an entry in its own full-view tab, or focuses the tab it already has.
+func open_tab(e: Dictionary) -> EntryView:
+	if e.is_empty():
+		return null
+	var key := EntryView.key_of(e)
+	if _open_views.has(key):
+		_tab_bar.current_tab = _tab_index(key)
+		return _open_views[key]
+	var view := EntryView.new()
+	view.setup(e)
+	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	view.hide()
+	view.link_clicked.connect(func(link: String) -> void: _follow(link, view.entry, true))
+	_views.add_child(view)
+	_open_views[key] = view
+	_tab_bar.add_tab(str(e.get("name", "?")), UISkin.tex(KIND_ICONS.get(e.get("_kind"), "dot_wine")))
+	var i := _tab_bar.tab_count - 1
+	_tab_bar.set_tab_metadata(i, key)
+	_tab_bar.set_tab_tooltip(i, "%s\n%s · %s" % [e.get("name", "?"), CardData.subtitle(e), e.get("_package_name", "")])
+	_tab_bar.current_tab = i
+	_on_tab_changed(i)  # tab_changed isn't sent when the first tab is selected on its own
+	return view
+
+
+func close_tab(index: int) -> void:
+	if index < 0 or index >= _tab_bar.tab_count:
+		return
+	var key: String = _tab_bar.get_tab_metadata(index)
+	var view: EntryView = _open_views.get(key)
+	_open_views.erase(key)
+	if view:
+		_views.remove_child(view)
+		view.queue_free()
+	_tab_bar.remove_tab(index)
+	_on_tab_changed(_tab_bar.current_tab)
+
+
+func show_browse() -> void:
+	if _tab_bar == null:
+		return
+	if _tab_bar.current_tab != -1:
+		_tab_bar.current_tab = -1
+	_on_tab_changed(-1)
+
+
+## Key of the shown tab ("" = Browse).
+func current_tab_key() -> String:
+	var i := _tab_bar.current_tab
+	return str(_tab_bar.get_tab_metadata(i)) if i >= 0 and i < _tab_bar.tab_count else ""
+
+
+## Keys of the open tabs in tab order.
+func tab_keys() -> PackedStringArray:
+	var out := PackedStringArray()
+	for i in _tab_bar.tab_count:
+		out.append(str(_tab_bar.get_tab_metadata(i)))
+	return out
+
+
+func open_view(key: String) -> EntryView:
+	return _open_views.get(key)
+
+
+func _tab_index(key: String) -> int:
+	for i in _tab_bar.tab_count:
+		if _tab_bar.get_tab_metadata(i) == key:
+			return i
+	return -1
+
+
+func _on_tab_changed(_index: int) -> void:
+	var key := current_tab_key()
+	_browse.visible = key == ""
+	_browse_button.set_pressed_no_signal(key == "")
+	for k: String in _open_views:
+		_open_views[k].visible = k == key
+	_save_tabs()
+
+
+## Ctrl+Tab / Ctrl+Shift+Tab: Browse, then the tabs in order, round.
+func _cycle_tab(by: int) -> void:
+	var count := _tab_bar.tab_count + 1  # + Browse
+	var to := posmod(_tab_bar.current_tab + 1 + by, count) - 1
+	if to < 0:
+		show_browse()
+	else:
+		_tab_bar.current_tab = to
+		_on_tab_changed(to)
+
+
+func _on_tab_bar_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_MIDDLE:
+		var i := _tab_bar.get_tab_idx_at_point(event.position)
+		if i >= 0:
+			close_tab(i)
+			_tab_bar.accept_event()
+
+
+func _tabs_state() -> Dictionary:
+	var list := []
+	for key in tab_keys():
+		list.append({"key": key, "scroll": _open_views[key].scroll_vertical})
+	return {"tabs": list, "current": current_tab_key()}
+
+
+func _save_tabs() -> void:
+	if tabs_file == "" or _restoring or _tab_bar == null:
+		return
+	var f := FileAccess.open(tabs_file, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(_tabs_state(), "  "))
+
+
+## Reopens saved tabs (after a start or a reload); entries that are gone are skipped.
+func _restore_tabs(state: Variant) -> void:
+	if not state is Dictionary or state.is_empty():
+		return
+	_restoring = true
+	var scrolls := {}
+	for t: Variant in state.get("tabs", []):
+		if not t is Dictionary:
+			continue
+		var parts := str(t.get("key", "")).split("/")
+		if parts.size() != 3:
+			continue
+		var view := open_tab(db.get_entry(parts[0], parts[1], parts[2]))
+		if view:
+			scrolls[view] = int(t.get("scroll", 0))
+	var current := str(state.get("current", ""))
+	if _open_views.has(current):
+		_tab_bar.current_tab = _tab_index(current)
+		_on_tab_changed(_tab_bar.current_tab)
+	else:
+		show_browse()
+	# Scroll once the views have their size (texts lay out over a frame or two).
+	for i in 3:
+		await get_tree().process_frame
+	for view: EntryView in scrolls:
+		if is_instance_valid(view):
+			view.scroll_vertical = scrolls[view]
+	_restoring = false
+	_save_tabs()
+	tabs_restored.emit()
+
+
+func _close_all_tabs() -> void:
+	while _tab_bar.tab_count > 0:
+		close_tab(_tab_bar.tab_count - 1)
+
+
+func _exit_tree() -> void:
+	_save_tabs()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_save_tabs()
+
+
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventKey and event.pressed and event.ctrl_pressed) or not is_visible_in_tree():
+		return
+	if event.keycode == KEY_TAB:
+		_cycle_tab(-1 if event.shift_pressed else 1)
+	elif event.keycode == KEY_W:
+		if _tab_bar.current_tab >= 0:
+			close_tab(_tab_bar.current_tab)
+	else:
+		return
+	get_viewport().set_input_as_handled()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -661,9 +934,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_search.select_all()
 	elif event.keycode == KEY_LEFT and event.alt_pressed:
 		_go_back()
-	elif event.keycode == KEY_PAGEDOWN:
+	elif event.keycode == KEY_PAGEDOWN and _browse.visible:
 		_flip(1)
-	elif event.keycode == KEY_PAGEUP:
+	elif event.keycode == KEY_PAGEUP and _browse.visible:
 		_flip(-1)
 	else:
 		handled = false

@@ -244,6 +244,11 @@ static func theme() -> Theme:
 
 	# Popups (e.g. "Visible for") on paper; check boxes without the pill.
 	t.set_stylebox("panel", "PopupPanel", box("page", 14, Vector2(12, 10)))
+	# Dialogs (token editor, import, ...) on the same paper, dark ink (Nico, 2026-11-01).
+	t.set_stylebox("panel", "AcceptDialog", box("page", 14, Vector2(14, 12)))
+	t.set_stylebox("embedded_border", "Window", box("page", 14, Vector2(10, 10)))
+	t.set_stylebox("embedded_unfocused_border", "Window", box("page", 14, Vector2(10, 10)))
+	t.set_color("title_color", "Window", INK)
 	for st in ["normal", "hover", "pressed", "hover_pressed", "focus", "disabled"]:
 		t.set_stylebox(st, "CheckBox", StyleBoxEmpty.new())
 	t.set_color("font_hover_color", "CheckBox", INK)

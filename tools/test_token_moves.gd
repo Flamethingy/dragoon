@@ -91,6 +91,24 @@ func _init() -> void:
 		grid.step_selection(Vector2i(1, 0))
 		_check(grid.token_cell(a) == next_to and table.event_log.events.size() == count + 1 and table.event_log.events.back().type == "token.turned", "into another token: no move, but it turns")
 
+	# A numbered copy follows the token look of its world entry (Nico: the settings didn't show).
+	var core_dir := PackageDB.default_root().path_join("5e-core-rules")
+	var goblin := EntryStore.open(core_dir).find("monsters", "goblin")
+	goblin.merge({"_kind": "monsters", "_layer": "core", "_package": "5e-core-rules", "_dir": core_dir}, true)
+	var free := Vector2i(0, 0)
+	for y in 6:
+		for x in 6:
+			if free == Vector2i.ZERO and Vector2i(x, y) != Vector2i.ZERO and not grid.tokens.values().any(func(t: Sprite2D) -> bool: return t.get_meta("cell") == Vector2i(x, y)):
+				free = Vector2i(x, y)
+	var copy_ref := table.drop_token(goblin, free)
+	var ws := table.timeline.world_store()
+	var wg := ws.find("monsters", "goblin")
+	wg["token_style"] = {"border": "#00aa00", "background": "#112233", "faces": "left"}
+	ws.save("monsters", wg)
+	table.refresh_tokens()
+	var shown: Variant = (grid.tokens[copy_ref].get_meta("info", {}) as Dictionary).get("token_style")
+	_check(shown is Dictionary and shown.border == "#00aa00", "a copy on the map takes the world goblin's new look (%s)" % [shown])
+
 	# Keys without a selection do nothing.
 	grid.select([])
 	_check(not grid.key_step(KEY_W, false, true), "no selection: keys are left alone")

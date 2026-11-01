@@ -23,6 +23,7 @@ var _dragging := false
 
 func setup(e: Dictionary) -> void:
 	entry = e
+	theme = UISkin.theme()  # paper and ink like the rest, also as its own window
 	style = TokenArt.style_of(e.get("token_style"), str(e.get("_kind", "")))
 	name = "TokenEditor"
 	title = "Token · %s" % e.get("name", "?")

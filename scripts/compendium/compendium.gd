@@ -1359,6 +1359,7 @@ func confirm_import(e: Dictionary) -> ConfirmationDialog:
 		where = str(target.manifest.get("name", target.id))
 	var d := ConfirmationDialog.new()
 	d.name = "ImportDialog"
+	d.theme = UISkin.theme()
 	d.title = "Import"
 	d.ok_button_text = "Import"
 	var col := VBoxContainer.new()

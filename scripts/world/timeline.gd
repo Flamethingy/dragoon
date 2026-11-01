@@ -443,6 +443,12 @@ func token_view(ref: String, owner := "", for_owner := false) -> Dictionary:
 	for key: String in TOKEN_FIELDS:
 		if e.has(key):
 			view[key] = e[key]
+	if not e.get("token_style") is Dictionary:  # a numbered copy: the look of what it was copied from
+		var src := str(e.get("copy_of", "")).split("/")
+		if src.size() == 3 and src[0] == world_id():
+			var style: Variant = (world_entries(src[1]).get(src[2], {}) as Dictionary).get("token_style")
+			if style is Dictionary:
+				view["token_style"] = style
 	if for_owner:
 		for key: String in OWNER_FIELDS:
 			if e.has(key):

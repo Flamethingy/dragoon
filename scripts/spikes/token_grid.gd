@@ -358,11 +358,26 @@ func _token_under(at: Vector2) -> Sprite2D:
 	return best
 
 
+## Movement keys are taken before the UI sees them (Nico, 2026-11-01: the arrow keys only
+## worked sometimes, a focused button used them to move its focus), unless something is
+## being typed.
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventKey and event.pressed):
+		return
+	var k := event as InputEventKey
+	if k.ctrl_pressed or k.alt_pressed or _typing():
+		return
+	if key_step(k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode, k.shift_pressed, k.echo):
+		get_viewport().set_input_as_handled()
+
+
+func _typing() -> bool:
+	var f := get_viewport().gui_get_focus_owner()
+	return f is LineEdit or f is TextEdit or f is SpinBox
+
+
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed:
-		var k := event as InputEventKey
-		if not k.ctrl_pressed and not k.alt_pressed and key_step(k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode, k.shift_pressed, k.echo):
-			get_viewport().set_input_as_handled()
+	if event is InputEventKey:
 		return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
@@ -374,6 +389,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.button_index == MOUSE_BUTTON_LEFT:
 			var at := get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position
 			if event.pressed:
+				get_viewport().gui_release_focus()  # the map has the keys now
 				_pressed = _token_under(at)
 				_press_at = event.position
 				if _pressed == null:

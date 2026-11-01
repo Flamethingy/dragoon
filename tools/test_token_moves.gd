@@ -109,6 +109,34 @@ func _init() -> void:
 	var shown: Variant = (grid.tokens[copy_ref].get_meta("info", {}) as Dictionary).get("token_style")
 	_check(shown is Dictionary and shown.border == "#00aa00", "a copy on the map takes the world goblin's new look (%s)" % [shown])
 
+	# Arrow keys while a button has the focus (Nico: they only worked sometimes).
+	var focus_box := VBoxContainer.new()
+	var b1 := Button.new()
+	var b2 := Button.new()
+	focus_box.add_child(b1)
+	focus_box.add_child(b2)
+	root.add_child(focus_box)
+	b1.grab_focus()
+	grid.select([a])
+	var cell_before := grid.token_cell(a)
+	var arrow := Vector2i(-1, 0) if grid.can_place(a, cell_before + Vector2i(-1, 0)) else Vector2i(0, 1)
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.keycode = KEY_LEFT if arrow.x < 0 else KEY_DOWN
+	key.physical_keycode = key.keycode
+	root.push_input(key)
+	await create_timer(TokenGrid.COMBINE_SECONDS * 3).timeout
+	_check(grid.token_cell(a) == cell_before + arrow and b1.has_focus(), "arrow keys move the token even when a button has the focus (%s -> %s)" % [cell_before, grid.token_cell(a)])
+	var typing := LineEdit.new()
+	root.add_child(typing)
+	typing.grab_focus()
+	var cell_typing := grid.token_cell(a)
+	root.push_input(key)
+	await create_timer(TokenGrid.COMBINE_SECONDS * 3).timeout
+	_check(grid.token_cell(a) == cell_typing, "but not while typing")
+	focus_box.queue_free()
+	typing.queue_free()
+
 	# Keys without a selection do nothing.
 	grid.select([])
 	_check(not grid.key_step(KEY_W, false, true), "no selection: keys are left alone")

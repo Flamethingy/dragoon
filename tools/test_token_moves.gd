@@ -212,6 +212,25 @@ func _init() -> void:
 	grid.plans.drag_by(a, Vector2(grid.cell * 2, 0))
 	grid.plans.end_drag(a, grid.plans.cell_under_ghost(a), {})
 	_check(grid.plans.has_plans(), "a plan")
+	# its ghost can be picked up again: the trail goes on from its end (Nico, 2026-11-02)
+	var ghost_at := grid.get_canvas_transform() * (grid.plans.plans[a].ghost as Sprite2D).position
+	var pick := InputEventMouseButton.new()
+	pick.button_index = MOUSE_BUTTON_LEFT
+	pick.pressed = true
+	pick.position = ghost_at
+	grid._unhandled_input(pick)
+	var nudge := InputEventMouseMotion.new()
+	nudge.relative = Vector2(0, grid.cell) * grid._camera.zoom
+	nudge.position = ghost_at + nudge.relative
+	grid._unhandled_input(nudge)
+	var drop := pick.duplicate() as InputEventMouseButton
+	drop.pressed = false
+	drop.position = nudge.position
+	grid._unhandled_input(drop)
+	var again: Array = grid.plans.plans.get(a, {}).get("path", [])
+	_check(again.size() == 4 and again[0] == a_from and again[2] == a_from + Vector2i(2, 0) and again[3] == a_from + Vector2i(2, 1),
+		"a picked-up ghost adjusts its move, the trail goes on (%s)" % [again])
+	_check(grid.token_cell(a) == a_from and grid.plans.plans.size() == 1, "the real token still waits, one plan")
 	var esc := InputEventKey.new()
 	esc.pressed = true
 	esc.physical_keycode = KEY_ESCAPE

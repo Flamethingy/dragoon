@@ -139,8 +139,7 @@ func _init() -> void:
 	ann.grid.select(["characters/borin"])
 	await process_frame
 	_check(hud.active == "characters/borin", "selecting a group without the active one switches to its first")
-	hud.cycle(1)
-	_check(hud.active == "characters/borin", "and Q / E stay there: it's the only one selected")
+	_check(Array(hud.cycle_list()) == ["characters/aria", "characters/borin"], "just one selected: Q / E still go through all of them")
 	ann.grid.select([])
 	_check(ann.grid.selection() == ["characters/borin"] and ann.grid.picked().is_empty(), "the active one counts as selected")
 	var b_cell := ann.grid.token_cell("characters/borin")

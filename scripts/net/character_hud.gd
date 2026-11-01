@@ -90,7 +90,8 @@ func controlled() -> PackedStringArray:
 	return out
 
 
-## What Q / E go through: the selected tokens one controls, or all of them if none is.
+## What Q / E go through: the selected tokens one controls, or all of them if at most one
+## is (Nico, 2026-11-02: with just the active one you still go through the characters).
 func cycle_list() -> PackedStringArray:
 	var list := controlled()
 	if table == null or table.grid == null:
@@ -100,7 +101,7 @@ func cycle_list() -> PackedStringArray:
 	for ref in list:
 		if ref in picked:
 			out.append(ref)
-	return out if not out.is_empty() else list
+	return out if out.size() > 1 else list
 
 
 ## Q (-1) / E (+1): the next one round robin, with the slide animation.

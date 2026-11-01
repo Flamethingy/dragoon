@@ -4,7 +4,9 @@ extends Node2D
 ## where it is: a transparent ghost follows the mouse and a dotted trail marks the way it
 ## took, with the distance. On release the ghost stays at the end; nothing has moved yet.
 ## Space sends every planned move: the tokens glide along their trails, which disappear
-## behind them. Esc drops the plans. Also the ghost of a token being spawned from the Book.
+## behind them. Esc drops the plans. A ghost can be picked up again to change its move
+## (Nico, 2026-11-02): the trail goes on from where it ended. Also the ghost of a token being
+## spawned from the Book.
 ## A child of the TokenGrid, drawn above the tokens.
 
 const GHOST_ALPHA := 0.45
@@ -34,6 +36,26 @@ func begin_drag(ids: Array) -> void:
 		var token: Sprite2D = grid.tokens[id]
 		plans[id] = {"path": [grid.token_cell(id)], "ghost": _ghost_of(token), "done": 0}
 		(plans[id].ghost as Sprite2D).position = token.position
+		_dragging[id] = true
+	queue_redraw()
+
+
+## The planned ghost under `pos` (map pixels), "" if none: it can be picked up again.
+func ghost_at(pos: Vector2) -> String:
+	for id: String in plans:
+		var plan: Dictionary = plans[id]
+		if plan.has("going") or _dragging.has(id) or not grid.tokens.has(id):
+			continue
+		var cells: float = grid.tokens[id].get_meta("cells")
+		if (plan.ghost as Sprite2D).position.distance_to(pos) <= grid.cell * maxf(cells, 1.0) * 0.5:
+			return id
+	return ""
+
+
+## Picks up the ghost of `id` again: dragging it goes on with its trail.
+func resume_drag(id: String) -> void:
+	_dragging.clear()
+	if plans.has(id) and not plans[id].has("going"):
 		_dragging[id] = true
 	queue_redraw()
 

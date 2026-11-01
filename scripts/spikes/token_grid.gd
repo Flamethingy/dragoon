@@ -45,6 +45,7 @@ var _camera: Camera2D
 var _info: Label
 var _panning := false
 var _dragging: Sprite2D
+var _resume := ""  ## the token whose planned ghost was picked up again (its trail goes on)
 var _drag_from := Vector2.ZERO
 var _pressed: Sprite2D  ## the token under the mouse when the left button went down
 var _press_at := Vector2.ZERO  ## screen position of that press
@@ -511,7 +512,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			var at := get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position
 			if event.pressed:
 				get_viewport().gui_release_focus()  # the map has the keys now
-				_pressed = _token_under(at)
+				var ghost := plans.ghost_at(at)  # a planned move's ghost is picked up again
+				_resume = ghost if tokens.has(ghost) and (not can_drag.is_valid() or can_drag.call(ghost)) else ""
+				_pressed = tokens[_resume] if _resume != "" else _token_under(at)
 				_press_at = event.position
 				if _pressed == null:
 					_boxing = true
@@ -523,7 +526,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					_drag_started = false
 					_drag_group.clear()
 					var lead := str(_dragging.get_meta("entity"))
-					if lead in selection():  # the whole selection comes along, the active one too
+					if _resume == "" and lead in selection():  # the whole selection comes along, the active one too
 						for other: String in selection():
 							if other != lead:
 								_drag_group[other] = true
@@ -567,7 +570,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			var lead := str(_dragging.get_meta("entity"))
 			if not _drag_started:
 				_drag_started = true
-				plans.begin_drag([lead] + _drag_group.keys())
+				if _resume == lead:
+					plans.resume_drag(lead)
+				else:
+					plans.begin_drag([lead] + _drag_group.keys())
 			plans.drag_by(lead, event.relative / _camera.zoom)
 		elif _boxing:
 			_box.queue_redraw()

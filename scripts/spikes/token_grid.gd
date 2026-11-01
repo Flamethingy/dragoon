@@ -177,9 +177,13 @@ func can_place(id: String, at: Vector2i) -> bool:
 	return true
 
 
+var info_visible := true  ## the help line at the top left (off at the app's calm table)
+
+
 func set_info(text: String) -> void:
 	if _info:
 		_info.text = text
+		_info.visible = info_visible
 
 
 func _draw() -> void:

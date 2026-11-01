@@ -32,6 +32,10 @@ var timeline_view: TimelineView
 var encounters_view: EncountersView
 
 var dock: Dock  ## the panels around the table (TASK-37)
+## Nico, 2026-11-01: a calm table to start with. Only the map and two buttons at the top
+## right: Compendium (its own window, pressed again closes it) and Leave. No other bars or
+## panels. false = the full bar with every view (the tests use it).
+var minimal := true
 
 var _layer: CanvasLayer
 var _bar: PanelContainer
@@ -70,6 +74,10 @@ func _ready() -> void:
 	dock.panel_hidden.connect(func(_id: String) -> void: _sync_buttons())
 	dock.panel_shown.connect(func(_id: String) -> void: _sync_buttons())
 	_build_bar(root)
+	if minimal:
+		table_ui.minimal = true
+		table.show_map_info = false
+		dock.close_hides = true  # closing the compendium window closes it
 	start = StartScreen.new()
 	start.name = "Start"
 	start.worlds_root = worlds_root
@@ -200,7 +208,7 @@ func show_view(which: String) -> void:
 				dock.hide_panel(id)
 	else:
 		_panel(which)
-		dock.show_panel(which)
+		dock.show_panel(which, "window" if minimal and which == "compendium" else "")
 		if which in BOOK_VIEWS:
 			book = books[which]
 		_refresh_view(which)
@@ -285,7 +293,7 @@ func _sync_buttons() -> void:
 	for v: String in _view_buttons:
 		var b: Button = _view_buttons[v]
 		b.set_pressed_no_signal(dock.is_shown(v) if v != "table" else view == "table")
-		b.visible = table.is_dm() or v not in DM_VIEWS
+		b.visible = (table.is_dm() or v not in DM_VIEWS) and (not minimal or v == "compendium")
 
 
 ## The panels of the session that was left (a new session builds new ones).
@@ -303,6 +311,9 @@ func _drop_views() -> void:
 
 ## After hosting or joining: the panels that were open last time (the session log at first).
 func _open_panels() -> void:
+	if minimal:
+		_sync_buttons()
+		return  # nothing opens by itself
 	var allowed := ["session", "sheet", "notes"]
 	if table.is_dm():
 		allowed.append_array(DM_VIEWS)
@@ -352,10 +363,11 @@ func _build_bar(root: Control) -> void:
 	_bar = PanelContainer.new()
 	_bar.name = "ViewBar"
 	_bar.theme_type_variation = UISkin.V_PAGE
-	_bar.anchor_left = 0.5
-	_bar.anchor_right = 0.5
-	_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_bar.offset_top = 4
+	_bar.anchor_left = 1.0 if minimal else 0.5
+	_bar.anchor_right = _bar.anchor_left
+	_bar.grow_horizontal = Control.GROW_DIRECTION_BEGIN if minimal else Control.GROW_DIRECTION_BOTH
+	_bar.offset_top = 8 if minimal else 4
+	_bar.offset_right = -8 if minimal else 0
 	root.add_child(_bar)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)

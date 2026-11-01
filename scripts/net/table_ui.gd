@@ -40,6 +40,7 @@ var _color: ColorPickerButton
 var _book_button: Button
 var _book: Compendium
 var sheet: SheetPanel
+var minimal := false  ## the app's calm table: no bar at the top (App.minimal)
 var dock: Dock  ## the app's panels (TASK-37); null when the table runs on its own
 
 var _notes_panel: PanelContainer
@@ -95,7 +96,7 @@ func _refresh() -> void:
 	var online := table.is_online()
 	var dm := table.is_dm()
 	_lobby.visible = lobby and not online
-	_bar.visible = online
+	_bar.visible = online and not minimal
 	_notes_panel.visible = online
 	if not online:
 		sheet.hide()

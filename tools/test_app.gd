@@ -206,6 +206,7 @@ func _app(branch: String) -> App:
 	app.name = "App"  # the same node path on every peer, as in scenes/app.tscn
 	app.worlds_root = ProjectSettings.globalize_path(DIR.path_join("worlds"))
 	app.packages_root = ProjectSettings.globalize_path(DIR.path_join("packages"))
+	app.minimal = false  # the full bar (the calm table is checked in test_minimal)
 	holder.add_child(app)
 	return app
 

@@ -40,6 +40,7 @@ const LOCKED_FIELDS := ["id", "player", "ref", "origin"]
 ## Host: the event log; empty = the timeline's events.jsonl (with its fork's inherited events).
 @export var log_path := ""
 @export var auto_ui := true
+var show_map_info := true  ## the help line at the top left of the map (off at the app's calm table)
 @export var calendar_path := "res://calendars/default.json"
 ## The login: a player's id or name from timeline.json (they are recognised by it when
 ## they rejoin).
@@ -668,6 +669,7 @@ func _apply_state(view: Dictionary) -> void:
 			grid.tokens[id].queue_free()
 			grid.tokens.erase(id)
 	var count := grid.tokens.size()
+	grid.info_visible = show_map_info
 	grid.set_info("%s · %d token%s · left drag: move, wheel: zoom, right drag: pan" % [map.get("name", map.id), count, "" if count == 1 else "s"])
 	table_changed.emit()
 

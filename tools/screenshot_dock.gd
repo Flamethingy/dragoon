@@ -15,6 +15,7 @@ func _init() -> void:
 	ServerStatus.servers_file = DIR.path_join("servers.json")
 	Dock.layout_file = DIR.path_join("layout.json")
 	var app := App.new()
+	app.minimal = false  # the full layout
 	app.name = "App"
 	app.worlds_root = base.path_join("worlds")
 	root.add_child(app)

@@ -17,6 +17,7 @@ const DEFAULT_SIZES := {"left": 420.0, "right": 480.0, "bottom": 280.0}
 static var layout_file := "user://layout.json"
 
 var top_margin := 96.0  ## room for the bars at the top
+var close_hides := false  ## closing a panel's window hides the panel (else it docks back)
 var sizes := DEFAULT_SIZES.duplicate()
 var panels := {}  ## id -> {title, holder: Control, place: area|"window"|"hidden", last_area, window: Window, rect: Rect2i, screen}
 var areas := {}  ## area -> TabContainer
@@ -171,7 +172,11 @@ func detach(id: String) -> Window:
 		rect = Rect2i(get_window().position + Vector2i(80, 80), Vector2i(1280, 820))
 	w.size = rect.size
 	w.position = rect.position
-	w.close_requested.connect(func() -> void: dock(id, str(p.last_area)))
+	w.close_requested.connect(func() -> void:
+		if close_hides:
+			hide_panel(id)
+		else:
+			dock(id, str(p.last_area)))
 	w.size_changed.connect(_save_soon)
 	var bg := Panel.new()
 	bg.theme_type_variation = UISkin.V_PAGE

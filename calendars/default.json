@@ -1,0 +1,29 @@
+{
+  "name": "Dragoon Reckoning",
+  "comment": "Placeholder calendar until the world's own one exists. Events only store day numbers, so swapping this file never breaks data.",
+  "hours_per_day": 24,
+  "first_year": 1,
+  "weekdays": ["Moonday", "Tidesday", "Windsday", "Thornsday", "Fireday", "Starday", "Sunday"],
+  "weekday_of_day_0": 0,
+  "months": [
+    { "name": "Deepwinter", "days": 30 },
+    { "name": "Thawing", "days": 30 },
+    { "name": "Seedtime", "days": 30 },
+    { "name": "Blossom", "days": 30 },
+    { "name": "Highsun", "days": 30 },
+    { "name": "Midsummer", "days": 1, "festival": true },
+    { "name": "Goldfields", "days": 30 },
+    { "name": "Harvest", "days": 30 },
+    { "name": "Leaffall", "days": 30 },
+    { "name": "Mistmoon", "days": 30 },
+    { "name": "Frostfall", "days": 30 },
+    { "name": "Longnight", "days": 30 },
+    { "name": "Yearsend", "days": 4, "festival": true }
+  ],
+  "eras": [
+    { "from_year": 1, "name": "After the Founding", "abbr": "AF" }
+  ],
+  "format": "{weekday}, {day}. {month} {year} {era}",
+  "festival_format": "{month}, {year} {era}",
+  "festival_day_format": "{month} (day {day}), {year} {era}"
+}

@@ -7,6 +7,9 @@
   (decisions, spikes, MVP features).
 - 2026-11-01: Core data = JSON source packages (see package-format.md). Obsidian vault converted into 33
   packages in `data/packages` (2160 monsters, 1272 spells, ...). New: TASK-15 compendium, TASK-16 package import/export.
+- 2026-11-01: TASK-2 (Mochi): event format proposal in `doc-1 - Event-format.md` (JSONL per campaign, 13 MVP
+  event types), placeholder calendar `calendars/default.json` + `WorldCalendar` (`scripts/timeline/calendar.gd`),
+  test `tools/test_calendar.gd`. Waiting for the event type list to be confirmed.
 
 ## Open questions
 See the "Open questions" section of the concept (secrets marking, event log format, YAML parsing, hosting ...).

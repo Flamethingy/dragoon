@@ -47,6 +47,7 @@ var _pressed: Sprite2D  ## the token under the mouse when the left button went d
 var _press_at := Vector2.ZERO  ## screen position of that press
 var selected := {}  ## entity id -> true (TASK-42)
 var active := ""  ## the active token (TASK-44, orange ring); "" = none
+var _drag_group := {}  ## the other selected tokens dragged along: id -> start position
 var _box_from := Vector2.ZERO  ## map position where a selection box started
 var _boxing := false
 var _box: Node2D
@@ -339,6 +340,63 @@ func can_place(id: String, at: Vector2i) -> bool:
 	return true
 
 
+## Where a dragged group lands (Nico, 2026-11-01): the dragged token on `target`, the other
+## selected ones on the free cells closest to it (nearest ones first). Cells of the other
+## tokens count as taken, also those of the group (so the moves work in any order), except
+## a token's own. Returns id -> cell (tokens that found no place are left out).
+func plan_group_move(lead: String, others: Array, target: Vector2i) -> Dictionary:
+	var movers: Array = [lead]
+	var rest := others.filter(func(id: Variant) -> bool: return tokens.has(str(id)) and str(id) != lead)
+	var from := token_cell(lead)
+	rest.sort_custom(func(a: String, b: String) -> bool:
+		return Vector2(token_cell(a) - from).length_squared() < Vector2(token_cell(b) - from).length_squared())
+	movers.append_array(rest)
+	var claimed: Array[Rect2i] = []
+	var out := {}
+	for id: String in movers:
+		if not tokens.has(id):
+			continue
+		var size := maxi(1, int(tokens[id].get_meta("cells")))
+		var cell := _free_cell_near(id, target, size, claimed)
+		if cell.x < 0:
+			continue
+		out[id] = cell
+		claimed.append(Rect2i(cell, Vector2i(size, size)))
+	return out
+
+
+func _free_cell_near(id: String, target: Vector2i, size: int, claimed: Array[Rect2i]) -> Vector2i:
+	var reach := maxi(grid_size.x, grid_size.y)
+	for r in reach + 1:
+		var ring: Array[Vector2i] = []
+		for y in range(target.y - r, target.y + r + 1):
+			for x in range(target.x - r, target.x + r + 1):
+				if maxi(absi(x - target.x), absi(y - target.y)) == r:
+					ring.append(Vector2i(x, y))
+		ring.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+			return Vector2(a - target).length_squared() < Vector2(b - target).length_squared())
+		for at in ring:
+			if _fits(id, at, size, claimed):
+				return at
+	return Vector2i(-1, -1)
+
+
+func _fits(id: String, at: Vector2i, size: int, claimed: Array[Rect2i]) -> bool:
+	if at.x < 0 or at.y < 0 or at.x + size > grid_size.x or at.y + size > grid_size.y:
+		return false
+	var mine := Rect2i(at, Vector2i(size, size))
+	for r in claimed:
+		if mine.intersects(r):
+			return false
+	for other: String in tokens:
+		if other == id or float(tokens[other].get_meta("cells")) < 1.0:
+			continue
+		var s := int(tokens[other].get_meta("cells"))
+		if mine.intersects(Rect2i(tokens[other].get_meta("cell"), Vector2i(s, s))):
+			return false
+	return true
+
+
 var info_visible := true  ## the help line at the top left (off at the app's calm table)
 
 
@@ -412,6 +470,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				if _dragging:
 					_drag_from = _dragging.position
 					_dragging.z_index = 10
+					_drag_group.clear()
+					var lead := str(_dragging.get_meta("entity"))
+					if selected.has(lead):  # the whole selection comes along
+						for other: String in selection():
+							if other != lead:
+								_drag_group[other] = tokens[other].position
+								tokens[other].z_index = 9
 			elif _dragging:
 				var id: String = _dragging.get_meta("entity")
 				var cells: float = _dragging.get_meta("cells")
@@ -421,8 +486,20 @@ func _unhandled_input(event: InputEvent) -> void:
 				_dragging.z_index = 0
 				_dragging.position = _drag_from  # snaps back until the move is confirmed
 				_dragging = null
-				if target != token_cell(id):
-					move_requested.emit(id, target)
+				var group: Array = _drag_group.keys()
+				for other: String in group:
+					if tokens.has(other):
+						tokens[other].position = _drag_group[other]
+						tokens[other].z_index = 0
+				_drag_group.clear()
+				if group.is_empty():
+					if target != token_cell(id):
+						move_requested.emit(id, target)
+				else:
+					var plan := plan_group_move(id, group, target)
+					for mover: String in plan:
+						if plan[mover] != token_cell(mover):
+							move_requested.emit(mover, plan[mover])
 			if not event.pressed:
 				var clicked := _pressed
 				_pressed = null
@@ -448,6 +525,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			_camera.position -= event.relative / _camera.zoom
 		if _dragging:
 			_dragging.position += event.relative / _camera.zoom
+			for other: String in _drag_group:
+				if tokens.has(other):
+					tokens[other].position += event.relative / _camera.zoom
 		elif _boxing:
 			_box.queue_redraw()
 		else:

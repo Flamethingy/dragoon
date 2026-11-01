@@ -137,6 +137,50 @@ func _init() -> void:
 	focus_box.queue_free()
 	typing.queue_free()
 
+	# --- Dragging a selection moves all of it (Nico, 2026-11-01) ---------------------------------
+	var group: Array = grid.tokens.keys().filter(func(id: String) -> bool: return id != NetTable.PARTY)
+	grid.select(group)
+	var lead: String = group[0]
+	var spot := Vector2i(-1, -1)
+	for y in range(1, grid.grid_size.y - 4):
+		for x in range(1, grid.grid_size.x - 4):
+			if spot.x < 0 and grid.tokens.keys().all(func(id: String) -> bool:
+					var c := grid.token_cell(id)
+					return c.x < x - 2 or c.x > x + 5 or c.y < y - 2 or c.y > y + 5):
+				spot = Vector2i(x, y)
+	_check(spot.x >= 0, "a free spot to drag to")
+	var lead_token: Sprite2D = grid.tokens[lead]
+	var cells: float = lead_token.get_meta("cells")
+	var goal := grid.cell_center(spot, cells)
+	var screen := grid.get_canvas_transform() * lead_token.position
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = screen
+	grid._unhandled_input(press)
+	var zoom: Vector2 = grid._camera.zoom
+	var motion := InputEventMouseMotion.new()
+	motion.relative = (goal - lead_token.position) * zoom
+	motion.position = screen + motion.relative
+	grid._unhandled_input(motion)
+	var release := press.duplicate() as InputEventMouseButton
+	release.pressed = false
+	release.position = motion.position
+	grid._unhandled_input(release)
+	await process_frame
+	_check(grid.token_cell(lead) == spot, "the dragged token lands under the mouse (%s, wanted %s)" % [grid.token_cell(lead), spot])
+	var rects: Array[Rect2i] = []
+	var near := true
+	for id: String in group:
+		var c := grid.token_cell(id)
+		var size := maxi(1, int(grid.tokens[id].get_meta("cells")))
+		near = near and maxi(absi(c.x - spot.x), absi(c.y - spot.y)) <= 3
+		for r in rects:
+			near = near and not r.intersects(Rect2i(c, Vector2i(size, size)))
+		rects.append(Rect2i(c, Vector2i(size, size)))
+	_check(near, "the others gather on the closest free cells, none overlapping (%s)" % [group.map(func(id: String) -> Vector2i: return grid.token_cell(id))])
+	_check(grid.selection().size() == group.size(), "still all selected")
+
 	# Keys without a selection do nothing.
 	grid.select([])
 	_check(not grid.key_step(KEY_W, false, true), "no selection: keys are left alone")

@@ -69,3 +69,5 @@ schemas follow when the VTT needs them.
 `C:\Obsidian\RPG\DnD5e` (read-only). Re-running it rebuilds the packages.
 Known gaps: most monster `Image` fields point to files that are not in the vault (cleared);
 ~5% of attack texts don't match the attack parser (text still complete).
+Units: the vault's incomplete ft->m conversion is repaired (`fix_units`): half-converted ranges
+("range 80/97.5 m" -> "24.4/97.5 m"), leftover `60'`, `30 feet`, `10 ft.` and "20 feet【6 m】".

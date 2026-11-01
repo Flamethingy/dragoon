@@ -100,7 +100,7 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
 
 
 def clean_str(v) -> str:
-    return "" if v is None else str(v).strip()
+    return "" if v is None else fix_units(str(v).strip())
 
 
 def clean_list(v) -> list[str]:
@@ -188,7 +188,34 @@ def convert_embeds(md: str, images: set[str]) -> str:
             images.add(name)
             return f"![](assets/{name})"
         return m.group(0)
-    return re.sub(r"!\[\[([^\]]+)\]\]", repl, md)
+    return fix_units(re.sub(r"!\[\[([^\]]+)\]\]", repl, md))
+
+
+FT_TO_M = 0.3048
+
+
+def metres(feet: float) -> str:
+    return f"{round(feet * FT_TO_M, 1):g}"
+
+
+def fix_units(text: str) -> str:
+    """The vault's ft->m conversion is incomplete:
+    - "range 80/97.5 m": only the long range was converted. Long range is always at least
+      twice the short range, so a ratio below 2 means the first number is still feet.
+    - "60'", "30 feet", "10 ft." were left in feet."""
+    def fix_range(m):
+        a, b = float(m.group(1).replace(",", ".")), float(m.group(2).replace(",", "."))
+        if a and b / a < 2:
+            return f"range {metres(a)}/{m.group(2)} m"
+        return m.group(0)
+    # "20 feet​【6 m】": the converted value is already given in brackets
+    text = re.sub(r"\d+(?:\s|-)?(?:feet|foot|ft\.?)\s*​?\s*【([^】]+)】", r"\1", text)
+    text = re.sub(r"range\s+([\d.,]+)/([\d.,]+)\s*m\b", fix_range, text)
+    text = re.sub(r"range\s+(\d+)/(\d+)\s*(?:'|ft\.?|feet)",
+                  lambda m: f"range {metres(int(m.group(1)))}/{metres(int(m.group(2)))} m", text)
+    text = re.sub(r"\b(\d+)(?:\s*(?:-|\s)?(?:feet|foot|ft\b\.?)|')(?!\w)",
+                  lambda m: f"{metres(int(m.group(1)))} m", text)
+    return text
 
 
 def split_sections(body: str) -> dict[str, str]:
@@ -242,7 +269,8 @@ def parse_features(section: str, images: set[str]) -> list[dict]:
         text = unquote(block)
         m = re.match(r"\*\*(.+?)\*\*\s*\n?(.*)", text, re.S)
         if m:
-            feats.append(parse_feature(m.group(1).strip(), convert_embeds(m.group(2).strip(), images)))
+            feats.append(parse_feature(fix_units(m.group(1).strip()),
+                                       convert_embeds(m.group(2).strip(), images)))
         elif feats:  # continuation paragraph
             feats[-1]["text"] += "\n\n" + convert_embeds(text, images)
     return feats

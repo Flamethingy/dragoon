@@ -46,7 +46,7 @@ KINDS = {
     "Tot Wildshape Forms": "monsters",
     "Traits": "feats",
     "Mechanics": "rules",
-    "Tables": "tables",
+    "Tables": "rules",  # reference charts; rollable tables are extracted into "tables"
 }
 
 ABILITIES = ["str", "dex", "con", "int", "wis", "cha"]
@@ -529,6 +529,116 @@ def extract_features(monsters: list[dict], source: str) -> list[dict]:
     return list(by_key.values())
 
 
+# ---------------------------------------------------------------- rollable tables
+
+DICE_HEAD = re.compile(r"^\s*(?:(\d*)d(\d+|%)|roll|w(\d+))\s*$", re.I)
+STANDARD_DICE = [2, 3, 4, 6, 8, 10, 12, 20, 100]
+
+
+def split_row(line: str) -> list[str]:
+    cells = re.split(r"(?<!\\)\|", line.strip().strip("|"))
+    return [c.strip().replace("\\|", "|") for c in cells]
+
+
+def parse_range(cell: str, die: int) -> tuple[int, int] | None:
+    """'1', '01', '1–2', '01-05', '96-00', '17+', '00' -> (min, max)."""
+    c = cell.replace("–", "-").replace("—", "-").replace(" ", "").strip("*")
+    m = re.fullmatch(r"(\d+)(?:-(\d+)|(\+))?", c)
+    if not m:
+        return None
+    def val(s: str) -> int:
+        v = int(s)
+        return die if v == 0 and len(s) >= 2 and die == 100 else v  # "00" = 100
+    lo = val(m.group(1))
+    hi = val(m.group(2)) if m.group(2) else (die if m.group(3) else lo)
+    return lo, hi
+
+
+def find_tables(md: str):
+    """Yield (start_line, end_line, heading, lines) for every Markdown table."""
+    lines = md.split("\n")
+    heading = ""
+    i = 0
+    while i < len(lines):
+        if re.match(r"#+\s", lines[i]):
+            heading = re.sub(r"^#+\s*", "", lines[i]).strip(" *")
+        if lines[i].lstrip().startswith("|"):
+            j = i
+            while j < len(lines) and lines[j].lstrip().startswith("|"):
+                j += 1
+            if j - i >= 3:
+                yield i, j, heading, lines[i:j]
+            i = j
+            continue
+        i += 1
+
+
+def parse_rollable(lines: list[str]) -> dict | None:
+    head = split_row(lines[0])
+    m = DICE_HEAD.match(head[0])
+    if not m or not re.fullmatch(r"[\s|:\-]+", lines[1]):
+        return None
+    rows_raw = [split_row(l) for l in lines[2:]]
+    if m.group(2):
+        die = 100 if m.group(2) == "%" else int(m.group(2))
+        count = int(m.group(1) or 1)
+    elif m.group(3):
+        die, count = int(m.group(3)), 1
+    else:  # "Roll": guess the die from the highest value
+        highest = 0
+        for r in rows_raw:
+            rg = parse_range(r[0], 100)
+            highest = max(highest, rg[1] if rg else 0)
+        die = next((d for d in STANDARD_DICE if d >= highest), highest)
+        count = 1
+    rows = []
+    for r in rows_raw:
+        rg = parse_range(r[0], die * count)
+        if rg is None:
+            return None  # not a roll table after all
+        rows.append({"min": rg[0], "max": rg[1], "cells": [re.sub(r"<br\s*/?>", "\n", c) for c in r[1:]]})
+    covered = sorted(v for r in rows for v in range(r["min"], r["max"] + 1))
+    lo, hi = (count, die * count) if covered and covered[0] >= 1 else (0, die * count - 1)
+    return {
+        "dice": f"{count if count > 1 else ''}d{die}",
+        "columns": head[1:],
+        "rows": rows,
+        "complete": covered == list(range(lo, hi + 1)),
+    }
+
+
+def extract_tables(kinds: dict, source: str, report: Counter) -> list[dict]:
+    """Rollable Markdown tables (first column d6 / d20 / d100 / Roll) become entries of kind
+    `tables`; the text keeps an embed `![[tables/<id>]]` at their place."""
+    tables = []
+    seen = Counter()
+    for kind, entries in sorted(kinds.items()):
+        for e in entries:
+            for field, value in list(e.items()):
+                if not isinstance(value, str) or "|" not in value:
+                    continue
+                lines = value.split("\n")
+                found = list(find_tables(value))
+                for start, end, heading, tlines in reversed(found):
+                    t = parse_rollable(tlines)
+                    if not t:
+                        continue
+                    cols = ", ".join(re.sub(r"\s*\(.*", "", c) for c in t["columns"] if c)
+                    name = heading if heading and heading.lower() != e["name"].lower() else (
+                        f"{e['name']}: {cols}" if cols else e["name"])
+                    base = slug(name)
+                    seen[base] += 1
+                    tid = base if seen[base] == 1 else f"{base}-{seen[base]}"
+                    tables.append({"id": tid, "name": name, "source": source, **t,
+                                   "parent": f"{kind}/{e['id']}", "field": field, "description": ""})
+                    lines[start:end] = [f"![[tables/{tid}]]"]
+                    report["rollable tables"] += 1
+                    if not t["complete"]:
+                        report["rollable tables with gaps"] += 1
+                e[field] = "\n".join(lines)
+    return tables
+
+
 # ---------------------------------------------------------------- documents (PDFs)
 
 pdf_index: dict[str, Path] = {}  # lower-case file name -> path, from all vaults
@@ -671,9 +781,13 @@ def main() -> int:
                     shutil.rmtree(child) if child.is_dir() else child.unlink()
         pdir.mkdir(parents=True, exist_ok=True)
         counts = {}
+        for entries in kinds.values():
+            unique_ids(entries)
         if "monsters" in kinds:
-            unique_ids(kinds["monsters"])
             kinds["features"] = extract_features(kinds["monsters"], package_names[pid])
+        tables = extract_tables(kinds, package_names[pid], report)
+        if tables:
+            kinds["tables"] = tables
         for kind, entries in sorted(kinds.items()):
             seen = Counter()
             for e in sorted(entries, key=lambda e: e["name"].lower()):

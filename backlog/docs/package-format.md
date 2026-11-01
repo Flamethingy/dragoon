@@ -21,7 +21,7 @@ data/packages/<package-id>/
 import it. The VTT loads packages at runtime with `FileAccess`.
 
 Kinds: `monsters, spells, items, feats, races, subraces, classes, subclasses, backgrounds,
-invocations, infusions, rules, conditions, diseases, tables, features`.
+invocations, infusions, rules, conditions, diseases, features, tables (rollable)`.
 
 ## Manifest (`package.json`)
 
@@ -78,6 +78,33 @@ now: see idea-shared-features-and-package-dependencies.md.
 `level (0 = cantrip), school, subschool (e.g. "Dunamancy: Graviturgy"), casting_time, range_m
 (0 = touch/self), duration, concentration, ritual, components{verbal, somatic, material,
 material_text}, classes[]`. `casting_time` and `duration` are in sentence case ("1 bonus action").
+
+### Rollable table (`tables.json`)
+
+Every Markdown table whose first column header is a die (`d4`, `1d6`, `D20`, `d100`, `d%`,
+`Roll`) is extracted from the text into its own entry, so the VTT can roll it with one click:
+
+```json
+{ "id": "confusion-behavior", "name": "Confusion: Behavior", "source": "5e Core Rules",
+  "dice": "d10", "columns": ["Behavior"],
+  "rows": [ { "min": 1, "max": 1, "cells": ["The creature uses all its movement ..."] },
+            { "min": 2, "max": 6, "cells": ["The creature doesn't move ..."] } ],
+  "complete": true, "parent": "spells/confusion", "field": "description", "description": "" }
+```
+
+- `rows[].cells` are Markdown, one per entry in `columns` (the columns after the die column).
+- `min`/`max`: ranges like `1–2`, `01-05`, `96-00` (`00` = 100) and `17+` are resolved.
+- `complete`: the rows cover every result of the die without gaps or overlaps.
+- `parent` + `field`: the entry and text field the table came from (`features/<id>` for monster
+  features). At the table's place the text now holds an **embed** `![[tables/<id>]]`, which the
+  VTT renders as the table with a roll button.
+- Tables without a die column (class level tables, weapon lists, stat tables) stay Markdown.
+- The vault's `Tables` folder (reference charts such as Da Big Diaper Chart) is imported as
+  `rules`; rollable tables inside it are extracted like everywhere else.
+
+Currently 32 rollable tables (e.g. Confusion, Chaos Bolt, the Fools Gold chaos surges d100,
+Wild Magic Tantrum d100, Sip's Hairbrush). One has gaps in the vault: Tome of Beasts 2,
+Cloves of Fate (d4 with 6 rows).
 
 ### Other kinds
 

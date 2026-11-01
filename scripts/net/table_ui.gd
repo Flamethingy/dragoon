@@ -40,6 +40,7 @@ var _color: ColorPickerButton
 var _book_button: Button
 var _book: Compendium
 var sheet: SheetPanel
+var hud: CharacterHud  ## the active character, lower left (TASK-44)
 var minimal := false  ## the app's calm table: no bar at the top (App.minimal)
 var dock: Dock  ## the app's panels (TASK-37); null when the table runs on its own
 
@@ -70,7 +71,12 @@ func _ready() -> void:
 	sheet = SheetPanel.new()
 	sheet.table = table
 	root.add_child(sheet)
-	table.sheet_received.connect(func(ref: String) -> void: sheet.show_sheet(table.sheets[ref]))
+	table.sheet_received.connect(func(ref: String) -> void:
+		if table.sheet_wanted(ref) or (sheet.visible and sheet.ref == ref):
+			sheet.show_sheet(table.sheets[ref]))
+	hud = CharacterHud.new()
+	hud.table = table
+	root.add_child(hud)
 	_build_picker(root)
 	_build_lobby(root)
 	table.status_changed.connect(_on_status)

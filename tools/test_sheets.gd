@@ -31,9 +31,9 @@ func _init() -> void:
 	var at := token.get_global_transform_with_canvas().origin
 	_click(ann.grid, at)
 	await process_frame
-	_check(ann.grid.selection() == ["characters/aria"] and not ann.sheets.has("characters/aria"), "a click selects my token, no sheet pops up")
+	_check(ann.grid.selection() == ["characters/aria"] and not ann._ui.sheet.visible, "a click selects my token, no sheet pops up")
 	ann.open_sheet("characters/aria")
-	await _until(func() -> bool: return ann.sheets.has("characters/aria"))
+	await _until(func() -> bool: return ann.sheets.has("characters/aria") and ann._ui.sheet.visible)
 	var mine: Dictionary = ann.sheets.get("characters/aria", {})
 	_check(mine.get("_full") == true and int(mine.get("hp", 0)) == 27 and int(mine.get("ac", 0)) == 15 and mine.has("stats"), "my token: my full sheet (%s)" % [mine.keys()])
 	_check(mine.get("_class") == "Ranger 3" and int(mine.get("_hp_max", 0)) == 27, "class and max HP")

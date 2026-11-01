@@ -74,6 +74,8 @@ var rng := RandomNumberGenerator.new()  ## host: rolls the dice
 var tables := {}  ## id -> rollable table (packages' tables.json, the timeline's win) (TASK-25)
 const ROLL_LOG_SIZE := 100
 var sheet_watchers := {}  ## host: ref -> {peer id: true} who has the sheet open
+var hud_ref := ""  ## the active character (CharacterHud, TASK-44): its sheet stays open
+var _show_sheet := {}  ## refs whose sheet should show in the sheet panel when it arrives
 var _state := {}  ## the last table view from the host
 var _status: ServerStatus.Responder  ## host: answers the start screens' heartbeat (TASK-38)
 var _requested := {}  ## sha -> true while downloading
@@ -1084,7 +1086,10 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 
 
 ## Opens a sheet: the DM builds it, players ask the host (and get updates while it is open).
-func open_sheet(ref: String) -> void:
+## show = false: only fetch it (the HUD), don't open the sheet panel.
+func open_sheet(ref: String, show := true) -> void:
+	if show:
+		_show_sheet[ref] = true
 	if is_dm():
 		var sheet := sheet_for(Reveal.DM, ref)
 		if not sheet.is_empty():
@@ -1094,7 +1099,15 @@ func open_sheet(ref: String) -> void:
 		request_sheet.rpc_id(1, ref)
 
 
+## True once if the sheet panel asked for this sheet (open_sheet with show).
+func sheet_wanted(ref: String) -> bool:
+	return _show_sheet.erase(ref)
+
+
 func close_sheet(ref: String) -> void:
+	_show_sheet.erase(ref)
+	if ref == hud_ref and ref != "":
+		return  # the HUD still shows it
 	sheets.erase(ref)
 	if is_online() and not is_dm():
 		forget_sheet.rpc_id(1, ref)
@@ -1226,7 +1239,7 @@ func _sheet_changed(ref: String) -> void:
 		else:
 			sheet_watchers[ref].erase(peer_id)
 	if sheets.has(ref):
-		open_sheet(ref)
+		open_sheet(ref, false)
 	_apply_state(view_for(""))
 	_send_tables()
 

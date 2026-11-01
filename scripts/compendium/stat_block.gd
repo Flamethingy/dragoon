@@ -15,7 +15,10 @@ const HIDDEN := ["id", "name", "source", "image", "description", "origin",
 const SINGULAR := {"classes": "Class", "subclasses": "Subclass", "races": "Race", "subraces": "Subrace",
 	"items": "Item", "feats": "Feat", "backgrounds": "Background", "invocations": "Invocation",
 	"infusions": "Infusion", "conditions": "Condition", "diseases": "Disease", "rules": "Rule",
-	"tables": "Table"}
+	"tables": "Table", "features": "Monster feature"}
+## Set by the compendium (and tests): resolves feature ids and used_by monsters.
+static var db: PackageDB
+
 const SCHOOLS_ORDINAL := ["cantrip", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th"]
 
 
@@ -25,6 +28,8 @@ static func to_bbcode(e: Dictionary) -> String:
 			return monster(e)
 		"spells":
 			return spell(e)
+		"features":
+			return feature(e)
 		_:
 			return generic(e)
 
@@ -147,11 +152,14 @@ static func monster(e: Dictionary) -> String:
 	bb += _field("Challenge", cr_text(cr) + (" (%s XP)" % _thousands(xp) if xp != null else ""))
 	bb += _rule()
 
-	bb += _features(e.get("traits"))
+	bb += _features(_resolve(e, "traits"))
 	for pair in [["Actions", "actions"], ["Bonus Actions", "bonus_actions"], ["Reactions", "reactions"],
 			["Legendary Actions", "legendary_actions"]]:
 		if e.get(pair[1]) is Array and not e[pair[1]].is_empty():
-			bb += _heading(pair[0]) + _features(e[pair[1]])
+			bb += _heading(pair[0])
+			if pair[1] == "legendary_actions" and str(e.get("legendary_intro", "")).strip_edges() != "":
+				bb += _md(e.legendary_intro) + "\n\n"
+			bb += _features(_resolve(e, pair[1]))
 	if e.get("spells") is Array and not e.spells.is_empty():
 		bb += _field("\nSpells", Markdown.inline(_join(e.spells)))
 	if e.get("environments") is Array and not e.environments.is_empty():
@@ -187,6 +195,16 @@ static func _bonuses(label: String, values: Variant) -> String:
 	return _field(label, ", ".join(parts))
 
 
+## A monster's feature list as feature dicts (ids resolved through db).
+static func _resolve(e: Dictionary, key: String) -> Array:
+	if db != null:
+		return db.features_of(e, key)
+	var list: Variant = e.get(key)
+	if not list is Array:
+		return []
+	return list.map(func(f: Variant) -> Dictionary: return f if f is Dictionary else {"name": str(f), "_missing": true})
+
+
 ## Features as "***Name (uses).*** text" paragraphs.
 static func _features(list: Variant) -> String:
 	if not list is Array:
@@ -194,6 +212,9 @@ static func _features(list: Variant) -> String:
 	var bb := ""
 	for f: Variant in list:
 		if not f is Dictionary:
+			continue
+		if f.get("_missing", false):
+			bb += "[color=#%s][i]Missing feature \"%s\" (not in this package's features.json)[/i][/color]\n\n" % [Markdown.MUTED.to_html(), Markdown.escape(str(f.name))]
 			continue
 		var name := str(f.get("name", ""))
 		var extra := PackedStringArray()
@@ -214,6 +235,52 @@ static func _thousands(n: int) -> String:
 		out = "," + s.substr(s.length() - 3) + out
 		s = s.substr(0, s.length() - 3)
 	return s + out
+
+
+# --- Monster features ----------------------------------------------------------------
+
+static func feature(e: Dictionary) -> String:
+	var bb := _title(e, "Monster feature") + _rule()
+	bb += _features([e])
+	var atk: Variant = e.get("attack")
+	if atk is Dictionary:
+		var parts := PackedStringArray()
+		if str(atk.get("kind", "")) != "":
+			parts.append(str(atk.kind).capitalize())
+		if atk.get("to_hit") != null:
+			parts.append(_signed(int(atk.to_hit)) + " to hit")
+		if str(atk.get("range", "")) != "":
+			parts.append(str(atk.range))
+		bb += _field("Attack", Markdown.escape(", ".join(parts)))
+		var dmg := damage_text(atk.get("damage"))
+		if dmg != "":
+			bb += _field("Damage", dmg)
+	var save: Variant = e.get("save")
+	if save is Dictionary:
+		bb += _field("Save", "DC %s %s" % [_num(save.get("dc")), str(save.get("ability", "")).to_upper()])
+	var extra := damage_text(e.get("damage"))
+	if extra != "":
+		bb += _field("Damage", extra)
+	var users: Variant = e.get("used_by")
+	if users is Array and not users.is_empty():
+		var links := PackedStringArray()
+		for id: Variant in users:
+			var m: Dictionary = db.get_entry(str(e["_package"]), "monsters", str(id)) if db != null else {}
+			var label := str(m.get("name", id))
+			links.append("[url=entry:%s/monsters/%s][color=#%s]%s[/color][/url]" % [e["_package"], id, Markdown.LINK.to_html(), Markdown.escape(label)])
+		bb += _heading("Used by %d monster%s" % [users.size(), "" if users.size() == 1 else "s"]) + ", ".join(links)
+	return bb + _footer(e)
+
+
+## "12 (2d6 + 5) bludgeoning + 3 (1d6) fire" from [{dice, average, type}].
+static func damage_text(list: Variant) -> String:
+	if not list is Array:
+		return ""
+	var parts := PackedStringArray()
+	for d: Variant in list:
+		if d is Dictionary:
+			parts.append(("%s (%s) %s" % [_num(d.get("average")), d.get("dice", ""), d.get("type", "")]).strip_edges())
+	return Markdown.escape(" + ".join(parts))
 
 
 # --- Spells ------------------------------------------------------------------------

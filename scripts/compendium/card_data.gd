@@ -24,6 +24,9 @@ static func badge(e: Dictionary) -> Array:
 			var rarity := str(e.get("rarity", "")).to_lower()
 			var colors := {"common": "cream", "uncommon": "green", "rare": "tan", "very rare": "red", "legendary": "wine", "artifact": "wine"}
 			return [rarity.substr(0, 1).to_upper(), colors[rarity]] if colors.has(rarity) else []
+		"features":
+			var n: int = e.used_by.size() if e.get("used_by") is Array else 0
+			return [str(n), "tan"] if n > 0 else []
 		"classes":
 			var hd: Variant = e.get("hit_dice", e.get("hit_die"))
 			return ["d" + StatBlock._num(hd), "wine"] if hd != null else []
@@ -36,6 +39,7 @@ static func badge_label(e: Dictionary) -> String:
 		"spells": return "Spell level (C = cantrip)"
 		"items": return "Rarity: " + str(e.get("rarity", ""))
 		"classes": return "Hit die"
+		"features": return "Monsters using it"
 	return ""
 
 
@@ -77,6 +81,20 @@ static func chips(e: Dictionary) -> Array:
 			out.append(["icon_boot", "Range", "Self / Touch" if r == null or float(r) == 0 else StatBlock._metres(r)])
 			out.append(["icon_helmet", "Duration", str(e.get("duration", "—"))])
 			out.append(["icon_chest", "Components", _components(e.get("components"))])
+		"features":
+			var atk: Variant = e.get("attack")
+			if atk is Dictionary:
+				if atk.get("to_hit") != null:
+					out.append(["icon_sword", "To hit", StatBlock._signed(int(atk.to_hit))])
+				if str(atk.get("range", "")) != "":
+					out.append(["icon_boot", "Range", str(atk.range)])
+				var dmg := StatBlock.damage_text(atk.get("damage")).replace("[lb]", "[")
+				if dmg != "":
+					out.append(["icon_dagger", "Damage", dmg])
+			if e.get("save") is Dictionary:
+				out.append(["icon_shield", "Save", "DC %s %s" % [StatBlock._num(e.save.get("dc")), str(e.save.get("ability", "")).to_upper()]])
+			if e.get("uses") != null and str(e.uses) != "":
+				out.append(["", "Uses", str(e.uses)])
 		"items":
 			if e.get("gold") != null and float(e.gold) > 0:
 				out.append(["coin_gold", "Cost", StatBlock._num(e.gold) + " gp"])

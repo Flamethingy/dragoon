@@ -8,12 +8,14 @@ extends RefCounted
 signal loaded
 
 ## Kinds in display order (others found in packages are appended).
-const KINDS := ["monsters", "spells", "items", "classes", "subclasses", "races", "subraces",
+const KINDS := ["monsters", "features", "spells", "items", "classes", "subclasses", "races", "subraces",
 	"backgrounds", "feats", "invocations", "infusions", "conditions", "diseases", "rules", "tables"]
 ## Kind order for resolving a wikilink name that exists in several kinds.
 const LINK_PRIORITY := ["classes", "spells", "monsters", "items", "races", "subclasses",
 	"subraces", "feats", "conditions", "rules", "backgrounds", "invocations", "infusions",
-	"diseases", "tables"]
+	"diseases", "tables", "features"]
+## Monster keys that list feature ids (in this order in a stat block).
+const FEATURE_LISTS := ["traits", "actions", "bonus_actions", "reactions", "legendary_actions"]
 
 var root := ""
 var packages: Array[Dictionary] = []  ## manifests, sorted by name
@@ -23,6 +25,7 @@ var is_loaded := false
 var load_msec := 0
 
 var _by_name := {}  ## lower-case name -> Array of entries (all kinds)
+var _by_id := {}  ## "package/kind/id" -> entry
 var _task := -1
 
 
@@ -85,13 +88,16 @@ func _load_all() -> void:
 	found_packages.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return str(a.get("name", "")).to_lower() < str(b.get("name", "")).to_lower())
 	var names := {}
+	var ids := {}
 	for kind: String in found:
 		for e: Dictionary in found[kind]:
 			names.get_or_add(e["_key"], []).append(e)
+			ids["%s/%s/%s" % [e["_package"], kind, e.get("id", "")]] = e
 	# Hand over in one go (the main thread only reads after `loaded`).
 	packages = found_packages
 	entries = found
 	_by_name = names
+	_by_id = ids
 	errors = problems
 	load_msec = Time.get_ticks_msec() - started
 	if _task >= 0:
@@ -155,6 +161,32 @@ func resolve(target: String, prefer_package := "") -> Dictionary:
 			best_rank = rank
 			best = e
 	return best
+
+
+## An entry by package, kind and id, or {}.
+func get_entry(package_id: String, kind: String, id: String) -> Dictionary:
+	return _by_id.get("%s/%s/%s" % [package_id, kind, id], {})
+
+
+## A monster feature (features.json of that package) by id, or {}.
+func feature(package_id: String, id: String) -> Dictionary:
+	return get_entry(package_id, "features", id)
+
+
+## A monster's feature list (FEATURE_LISTS key) as feature dicts; ids that don't
+## resolve become {"name": id, "_missing": true}. Inline dicts (old format) pass through.
+func features_of(monster: Dictionary, list_key: String) -> Array:
+	var out := []
+	var list: Variant = monster.get(list_key)
+	if not list is Array:
+		return out
+	for f: Variant in list:
+		if f is Dictionary:
+			out.append(f)
+		else:
+			var found := feature(str(monster.get("_package", "")), str(f))
+			out.append(found if not found.is_empty() else {"name": str(f), "_missing": true})
+	return out
 
 
 func package_name(id: String) -> String:

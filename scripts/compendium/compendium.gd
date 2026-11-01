@@ -51,6 +51,7 @@ var _history: Array[Dictionary] = []
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	theme = UISkin.theme()
+	StatBlock.db = db
 	_build()
 	db.loaded.connect(_on_loaded)
 	db.load_async()
@@ -337,11 +338,10 @@ func _refresh_list() -> void:
 func _text_of(e: Dictionary) -> String:
 	if not e.has("_text"):
 		var parts := PackedStringArray([str(e.get("description", ""))])
-		for k in ["traits", "actions", "bonus_actions", "reactions", "legendary_actions"]:
-			if e.get(k) is Array:
-				for f: Variant in e[k]:
-					if f is Dictionary:
-						parts.append(str(f.get("name", "")) + " " + str(f.get("text", "")))
+		parts.append(str(e.get("text", "")))
+		for k in PackageDB.FEATURE_LISTS:
+			for f: Dictionary in db.features_of(e, k):
+				parts.append(str(f.get("name", "")) + " " + str(f.get("text", "")))
 		e["_text"] = "\n".join(parts).to_lower()
 	return e["_text"]
 
@@ -605,7 +605,11 @@ func _go_back() -> void:
 
 func _on_meta(meta: Variant) -> void:
 	var link := str(meta)
-	if link.begins_with(Markdown.WIKI):
+	if link.begins_with("entry:"):
+		var parts := link.substr(6).split("/")
+		if parts.size() == 3:
+			_show(db.get_entry(parts[0], parts[1], parts[2]))
+	elif link.begins_with(Markdown.WIKI):
 		var target := link.substr(Markdown.WIKI.length()).get_slice("#", 0)
 		if target == "":
 			return

@@ -132,6 +132,8 @@ func _ready() -> void:
 func _build() -> void:
 	var cover := PanelContainer.new()
 	cover.theme_type_variation = UISkin.V_COVER
+	if scope() != "core":
+		cover.add_theme_stylebox_override("panel", UISkin.cover_box(UISkin.FOREST))  # the world's book
 	cover.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(cover)
 	var row := HBoxContainer.new()
@@ -144,7 +146,7 @@ func _build() -> void:
 	side.add_theme_constant_override("separation", 6)
 	row.add_child(side)
 	var title := Label.new()
-	title.text = "Compendium"
+	title.text = "Compendium" if scope() == "core" else "Book"  # the world's book (Nico, 2026-11-01)
 	title.theme_type_variation = UISkin.V_PLATE_LABEL
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_scope_label = Label.new()
@@ -1289,17 +1291,107 @@ func _restore_tabs(state: Variant) -> void:
 
 # --- Timeline (TASK-6, TASK-32) ---------------------------------------------------------------
 
-## Dropping an entry from another book (TASK-37): a timeline's book makes it the timeline's
-## own (entity.created), a world's book copies it into the world. The core book takes none.
+## Dropping an entry from another book (TASK-37): it is imported after a dialog that lists
+## what comes along (the entry and the features it needs). Into the world's book: copied
+## into the world; into a timeline's book: the timeline's own (entity.created); into the
+## compendium (core): a world's or timeline's own entry goes into a homebrew package.
 func _can_drop_data(_at: Vector2, data: Variant) -> bool:
-	if not EntryDrag.is_entry(data) or scope() == "core":
+	if not EntryDrag.is_entry(data):
 		return false
 	var e := EntryDrag.entry_of(data)
-	return str(e.get("_layer", "")) != scope() and str(e.get("_kind", "")) not in [PACKAGES, DRAFTS, ""]
+	if str(e.get("_kind", "")) in [PACKAGES, DRAFTS, ""]:
+		return false
+	if scope() == "core":
+		return str(e.get("_layer", "core")) != "core"
+	return str(e.get("_layer", "")) != scope()
 
 
 func _drop_data(_at: Vector2, data: Variant) -> void:
-	take_entry(EntryDrag.entry_of(data))
+	confirm_import(EntryDrag.entry_of(data))
+
+
+## Where an import goes: the world / timeline, or in the compendium the first homebrew
+## package (null: a new "Homebrew" package is made on import).
+func import_target() -> EntryStore:
+	var stores := writable_stores()
+	return stores[0] if not stores.is_empty() else null
+
+
+## What importing `e` brings along: [{kind, id, name, there}], the entry first, then the
+## features its lists use; `there` = the target has it already.
+func import_list(e: Dictionary) -> Array:
+	var kind := str(e.get("_kind", ""))
+	var target := import_target()
+	var out := [{"kind": kind, "id": str(e.get("id", "")), "name": str(e.get("name", "?")),
+		"there": target != null and _has_import(target, kind, e)}]
+	if kind == "monsters":
+		var from := EntryStore.open(str(e.get("_dir", "")))
+		for key: String in PackageDB.FEATURE_LISTS:
+			var ids: Array = e.get(key, []) if e.get(key) is Array else []
+			for fid: Variant in ids:
+				var f := from.find("features", str(fid))
+				if f.is_empty() or out.any(func(o: Dictionary) -> bool: return o.kind == "features" and o.id == str(fid)):
+					continue
+				out.append({"kind": "features", "id": str(fid), "name": str(f.get("name", fid)),
+					"there": target != null and target.has("features", str(fid))})
+	return out
+
+
+## The target has this entry already: a copy of it (origin) or the same entry.
+static func _has_import(target: EntryStore, kind: String, e: Dictionary) -> bool:
+	for m: Dictionary in target.list(kind):
+		var o: Variant = m.get("origin")
+		if o is Dictionary and str(o.get("id", "")) == str(e.get("id", "")) and str(o.get("package", "")) == str(e.get("_package", "")):
+			return true
+	return false
+
+
+## The import dialog: the list of what comes along, Import / Cancel.
+func confirm_import(e: Dictionary) -> ConfirmationDialog:
+	var target := import_target()
+	var where := 'a new package "Homebrew"'
+	if target != null:
+		where = str(target.manifest.get("name", target.id))
+	var d := ConfirmationDialog.new()
+	d.name = "ImportDialog"
+	d.title = "Import"
+	d.ok_button_text = "Import"
+	var col := VBoxContainer.new()
+	d.add_child(col)
+	var head := Label.new()
+	head.text = "Import into %s:" % where
+	col.add_child(head)
+	var list := ItemList.new()
+	list.name = "ImportList"
+	list.custom_minimum_size = Vector2(440, 220)
+	for item: Dictionary in import_list(e):
+		var line := "%s  (%s)" % [item.name, str(item.kind).capitalize().trim_suffix("s")]
+		if item.there:
+			line += "  - already there" if item.kind == "features" else "  - already there, imported again as a copy"
+		list.add_item(line)
+	col.add_child(list)
+	d.confirmed.connect(func() -> void:
+		import_entry(e)
+		d.queue_free())
+	d.canceled.connect(d.queue_free)
+	add_child(d)
+	d.popup_centered()
+	return d
+
+
+## Imports an entry with its features (see confirm_import). Returns the new entry.
+func import_entry(e: Dictionary) -> Dictionary:
+	if scope() != "core":
+		return take_entry(e)
+	var target := import_target()
+	if target == null:
+		target = new_package("Homebrew")
+	var made := target.copy_entry(EntryStore.open(str(e.get("_dir", ""))), str(e.get("_kind", "")), str(e.get("id", "")))
+	if not made.is_empty():
+		_status.text = "%s is in %s now" % [made.get("name", "?"), target.manifest.get("name", target.id)]
+		_stores.clear()
+		_reload()
+	return made
 
 
 ## While an entry this book can take is dragged, a drop zone covers the book (its cards
@@ -1313,7 +1405,7 @@ func _drop_zone(on: bool) -> void:
 	if zone == null:
 		zone = Label.new()
 		zone.name = "DropZone"
-		zone.text = "Drop here: it becomes this %s's own" % scope()
+		zone.text = "Drop here to import it into the %s" % ("compendium" if scope() == "core" else scope())
 		zone.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		zone.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		zone.add_theme_color_override("font_color", UISkin.CREAM)

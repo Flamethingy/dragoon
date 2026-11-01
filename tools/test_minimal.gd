@@ -27,7 +27,7 @@ func _init() -> void:
 	_check(app.host(red, 47833) == OK, "hosted")
 	await process_frame
 	var shown := app._view_buttons.keys().filter(func(v: String) -> bool: return (app._view_buttons[v] as Button).visible)
-	_check(shown == ["compendium"] and app._bar.find_child("Leave", true, false).visible, "only Compendium and Leave (%s)" % [shown])
+	_check(shown == ["compendium", "world"] and (app._view_buttons.world as Button).text == "Book" and app._bar.find_child("Leave", true, false).visible, "only Compendium, Book and Leave (%s)" % [shown])
 	_check(app._bar.anchor_left == 1.0, "at the top right")
 	_check(not app.table_ui._bar.visible and not app.dock.panels.keys().any(app.dock.is_shown), "no table bar, no panels")
 	_check(not app.table.show_map_info, "no help line on the map")

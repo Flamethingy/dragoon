@@ -109,6 +109,37 @@ static func tex(name: String) -> Texture2D:
 
 
 ## A 9-slice stylebox of a sprite: margin in sheet pixels, pad = content margins (x, y).
+## The world's book has its own leather (Nico, 2026-11-01): a forest green cover instead of
+## the compendium's wine red.
+const FOREST := Color8(46, 92, 70)
+static var _covers := {}
+
+
+## The cover box re-dyed in another colour (hue and saturation of `tint`, the leather's
+## light and shade kept). Cached per colour.
+static func cover_box(tint: Color) -> StyleBoxTexture:
+	var key := tint.to_html()
+	if not _covers.has(key):
+		var r := Rect2i(R["cover"])
+		var img := sheet().get_image().get_region(r)
+		if img.is_compressed():
+			img.decompress()
+		img.convert(Image.FORMAT_RGBA8)
+		for y in img.get_height():
+			for x in img.get_width():
+				var c := img.get_pixel(x, y)
+				if c.a == 0.0:
+					continue
+				var v := clampf(c.v / WINE.v * tint.v, 0.0, 1.0)
+				var sat := minf(c.s / maxf(WINE.s, 0.01) * tint.s, 1.0)
+				img.set_pixel(x, y, Color.from_hsv(tint.h, sat, v, c.a))
+		var s := box("cover", 8, Vector2(12, 12))
+		s.texture = ImageTexture.create_from_image(img)
+		s.region_rect = Rect2(Vector2.ZERO, img.get_size())
+		_covers[key] = s
+	return _covers[key]
+
+
 static func box(name: String, margin: int, pad := Vector2(10, 6), modulate := Color.WHITE) -> StyleBoxTexture:
 	var s := StyleBoxTexture.new()
 	s.texture = sheet()

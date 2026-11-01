@@ -15,6 +15,8 @@ const DM_VIEWS := ["compendium", "world", "timeline", "events", "encounters"]
 const BOOK_VIEWS := ["compendium", "world", "timeline"]
 ## Panels the table's UI brings (the session log with notes and rolls, the open sheet).
 const KEEP_PANELS := ["session", "sheet"]
+## The calm table's buttons: the compendium and the world's book ("Book"), each its own window.
+const MINIMAL_VIEWS := ["compendium", "world"]
 
 static var settings_file := "user://app.cfg"
 
@@ -208,7 +210,7 @@ func show_view(which: String) -> void:
 				dock.hide_panel(id)
 	else:
 		_panel(which)
-		dock.show_panel(which, "window" if minimal and which == "compendium" else "")
+		dock.show_panel(which, "window" if minimal and which in MINIMAL_VIEWS else "")
 		if which in BOOK_VIEWS:
 			book = books[which]
 		_refresh_view(which)
@@ -263,7 +265,7 @@ func _panel(which: String) -> Control:
 			encounters_view.calendar = table.notes.calendar
 			encounters_view.assets = table.assets
 			c = encounters_view
-	dock.add_panel(which, VIEW_NAMES[which], c, _default_place(which))
+	dock.add_panel(which, "Book" if minimal and which == "world" else VIEW_NAMES[which], c, _default_place(which))
 	return c
 
 
@@ -293,7 +295,7 @@ func _sync_buttons() -> void:
 	for v: String in _view_buttons:
 		var b: Button = _view_buttons[v]
 		b.set_pressed_no_signal(dock.is_shown(v) if v != "table" else view == "table")
-		b.visible = (table.is_dm() or v not in DM_VIEWS) and (not minimal or v == "compendium")
+		b.visible = (table.is_dm() or v not in DM_VIEWS) and (not minimal or v in MINIMAL_VIEWS)
 
 
 ## The panels of the session that was left (a new session builds new ones).
@@ -375,7 +377,7 @@ func _build_bar(root: Control) -> void:
 	for v: String in VIEWS:
 		var b := Button.new()
 		b.name = "View_" + v
-		b.text = VIEW_NAMES[v]
+		b.text = "Book" if minimal and v == "world" else VIEW_NAMES[v]
 		b.toggle_mode = true
 		b.pressed.connect(toggle_view.bind(v))
 		row.add_child(b)

@@ -98,6 +98,9 @@ func _init() -> void:
 	_check(tl_book._can_drop_data(Vector2.ZERO, EntryDrag.data(lantern)), "a core entry can be dropped on the timeline's book")
 	var before := dm.table.event_log.events.size()
 	tl_book._drop_data(Vector2.ZERO, EntryDrag.data(lantern))
+	var dialog := tl_book.find_child("ImportDialog", true, false) as ConfirmationDialog
+	_check(dialog != null and (dialog.find_child("ImportList", true, false) as ItemList).get_item_text(0).begins_with("Storm Lantern"), "a drop asks first, with the list of what comes along")
+	dialog.confirmed.emit()
 	_check(dm.table.timeline.entry("items/storm-lantern").get("name") == "Storm Lantern", "dropped on the timeline: the entry is in the timeline")
 	_check(dm.table.event_log.events.size() == before + 1 and str(dm.table.event_log.events.back().get("type")) == "entity.created", "...as an entity.created event")
 	var world_book: Compendium = dm.books.world
@@ -113,6 +116,28 @@ func _init() -> void:
 	_check(world_book.db.list("monsters").any(func(m: Dictionary) -> bool: return str(m.get("name", "")) == "Goblin"), "...and shows up in the world's book")
 	var t2 := dm.table.drop_token(goblin, Vector2i(3, 2))
 	_check(t2 != "" and t2 != t1 and dm.table.timeline.world_store().list("monsters").size() == had + 1, "a second one reuses the imported monster")
+
+	# Compendium -> Book: the monster and the features it needs (Nico, 2026-11-01).
+	var aboleth := EntryStore.open(core_dir).find("monsters", "aboleth")
+	aboleth.merge({"_kind": "monsters", "_layer": "core", "_package": "5e-core-rules", "_dir": core_dir}, true)
+	var bring := world_book.import_list(aboleth)
+	var feature_ids: Array = bring.filter(func(i: Dictionary) -> bool: return i.kind == "features").map(func(i: Dictionary) -> String: return i.id)
+	_check(bring[0].name == "Aboleth" and not bring[0].there and feature_ids.size() >= 3, "the import list: the monster and its traits/actions (%d features)" % feature_ids.size())
+	_check(world_book._can_drop_data(Vector2.ZERO, EntryDrag.data(aboleth)), "the Book takes compendium entries")
+	world_book._drop_data(Vector2.ZERO, EntryDrag.data(aboleth))
+	(world_book.find_child("ImportDialog", true, false) as ConfirmationDialog).confirmed.emit()
+	var ws := dm.table.timeline.world_store()
+	var imported := ws.list("monsters").filter(func(m: Dictionary) -> bool: return m.get("name") == "Aboleth")
+	_check(imported.size() == 1 and feature_ids.all(func(f: String) -> bool: return ws.has("features", f)), "Import copies the monster and all its features into the world")
+	_check(world_book.import_list(aboleth)[0].there, "next time the list says it's already there")
+	# Book -> Compendium: a world's own entry goes into a homebrew package.
+	var comp_book: Compendium = dm.books.compendium
+	var mira := ws.find("npcs", "mira")
+	mira.merge({"_kind": "npcs", "_layer": "world", "_package": ws.id, "_dir": ws.folder}, true)
+	_check(comp_book._can_drop_data(Vector2.ZERO, EntryDrag.data(mira)) and not comp_book._can_drop_data(Vector2.ZERO, EntryDrag.data(aboleth)), "the compendium takes world entries, not its own")
+	var to_core := comp_book.import_entry(mira)
+	var homebrew := comp_book.import_target()
+	_check(not to_core.is_empty() and homebrew != null and homebrew.has("npcs", str(to_core.id)) and str(homebrew.manifest.name) == "Homebrew", "Mira goes into a new Homebrew package")
 	dm.show_view("events")
 	await process_frame
 	_check(dm.dock.is_shown("events") and dm.dock.place_of("events") == "bottom" and dm.timeline_view.tree.get_root().get_child_count() == dm.table.event_log.events.size(), "events view lists the events")

@@ -9,7 +9,7 @@ One package per source (book / PDF / homebrew), each a folder:
 
 All text fields (description, action text, ...) are Markdown. The vault is only read.
 
-Usage: python tools/import_obsidian.py <vault> <out> [--limit N]
+Usage: python tools/import_obsidian.py <vault> [<vault> ...] <out> [--limit N]
 """
 from __future__ import annotations
 
@@ -42,6 +42,11 @@ KINDS = {
     "Rules": "rules",
     "Conditions": "conditions",
     "Diseases": "diseases",
+    # DnD5e ABDL vault
+    "Tot Wildshape Forms": "monsters",
+    "Traits": "feats",
+    "Mechanics": "rules",
+    "Tables": "tables",
 }
 
 ABILITIES = ["str", "dex", "con", "int", "wis", "cha"]
@@ -100,7 +105,11 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
 
 
 def clean_str(v) -> str:
-    return "" if v is None else fix_units(str(v).strip())
+    if v is None:
+        return ""
+    if isinstance(v, list):  # "Type: [Beast]" -> "Beast"
+        return ", ".join(clean_str(x) for x in v if clean_str(x))
+    return fix_units(str(v).strip())
 
 
 def clean_list(v) -> list[str]:
@@ -157,8 +166,17 @@ def strip_dataview(body: str) -> str:
     out, block = [], []
 
     def flush():
-        if block and not any("`=" in l for l in block):
-            out.extend(block)
+        # drop inline dataview blocks and callout headers left empty after removing dataview
+        empty = all(re.fullmatch(r">\s*(\[![^\]]*\].*)?\s*", l) for l in block)
+        if block and not empty and not any("`=" in l for l in block):
+            # Obsidian callout header ">[!note|style] Title" -> "> **Title**" (or dropped)
+            for l in block:
+                m = re.fullmatch(r">\s*\[![^\]]*\][+-]?\s*(.*)", l)
+                if m:
+                    if m.group(1).strip():
+                        out.append(f"> **{m.group(1).strip()}**")
+                else:
+                    out.append(l)
         block.clear()
 
     for line in lines:
@@ -171,6 +189,27 @@ def strip_dataview(body: str) -> str:
     md = "\n".join(out)
     md = re.sub(r"\n{3,}", "\n\n", md)
     return md.strip()
+
+
+def drop_empty_headings(md: str) -> str:
+    """Remove headings whose section is empty (left over after removing dataview lists)."""
+    lines = md.split("\n")
+    keep = [True] * len(lines)
+    next_level = -1  # what follows: -1 = end, 99 = content, n = heading of level n
+    for i in range(len(lines) - 1, -1, -1):
+        line = lines[i]
+        if not line.strip():
+            continue
+        m = re.match(r"(#+)\s", line)
+        if m:
+            level = len(m.group(1))
+            if next_level == -1 or next_level <= level:
+                keep[i] = False
+                continue
+            next_level = level
+        else:
+            next_level = 99
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(l for l, k in zip(lines, keep) if k)).strip()
 
 
 def unquote(block: str) -> str:
@@ -385,23 +424,25 @@ CONVERTERS = {"monsters": convert_monster, "spells": convert_spell}
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("vault", type=Path)
+    ap.add_argument("vaults", type=Path, nargs="+", help="one or more vault folders")
     ap.add_argument("out", type=Path)
     ap.add_argument("--limit", type=int, default=0, help="max files per folder (test runs)")
     args = ap.parse_args()
 
-    vault: Path = args.vault
-    image_index.update({p.name.lower(): p for p in vault.rglob("*")
-                        if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif")})
-    source_docs = {p.stem: p for p in (vault / "Sources").glob("*.md")}
+    source_docs: dict[str, Path] = {}
+    for vault in args.vaults:
+        image_index.update({p.name.lower(): p for p in vault.rglob("*")
+                            if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif")})
+        source_docs.update({p.stem: p for p in (vault / "Sources").glob("*.md")})
 
     packages: dict[str, dict] = defaultdict(lambda: defaultdict(list))
     package_names: dict[str, str] = {}
     package_images: dict[str, set] = defaultdict(set)
+    package_vaults: dict[str, set] = defaultdict(set)
     report = Counter()
     missing_images = []
 
-    for folder, kind in KINDS.items():
+    for vault, folder, kind in [(v, f, k) for v in args.vaults for f, k in KINDS.items()]:
         files = sorted((vault / folder).rglob("*.md"))
         if args.limit:
             files = files[: args.limit]
@@ -431,9 +472,10 @@ def main() -> int:
                 images.add(img)
                 entry["image"] = f"assets/{img}"
             entry.update(CONVERTERS.get(kind, convert_generic)(fm, body, images))
-            entry["origin"] = {"vault": "DnD5e", "path": path.relative_to(vault).as_posix()}
+            entry["origin"] = {"vault": vault.name, "path": path.relative_to(vault).as_posix()}
             packages[pid][kind].append(entry)
             package_images[pid] |= images
+            package_vaults[pid].add(vault.name)
             report[kind] += 1
 
     out: Path = args.out
@@ -466,7 +508,7 @@ def main() -> int:
         name = package_names[pid]
         desc = ""
         if name in source_docs:
-            desc = strip_dataview(split_frontmatter(read_text(source_docs[name]))[1])
+            desc = drop_empty_headings(strip_dataview(split_frontmatter(read_text(source_docs[name]))[1]))
         manifest = {
             "format": "dragoon-package",
             "format_version": FORMAT_VERSION,
@@ -477,7 +519,7 @@ def main() -> int:
             "description": desc,
             "counts": counts,
             "created": now,
-            "imported_from": "Obsidian vault DnD5e",
+            "imported_from": "Obsidian vault " + ", ".join(sorted(package_vaults[pid])),
         }
         (pdir / "package.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
         summary.append((pid, sum(counts.values()), counts))

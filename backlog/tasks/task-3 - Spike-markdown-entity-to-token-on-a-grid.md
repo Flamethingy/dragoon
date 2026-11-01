@@ -1,9 +1,11 @@
 ---
 id: TASK-3
 title: 'Spike: markdown entity to token on a grid'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@Mochi'
 created_date: '2026-11-01 11:17'
+updated_date: '2026-11-01 11:43'
 labels:
   - spike
 dependencies: []
@@ -25,3 +27,9 @@ First Godot spike (concept: Next steps 4): load one entity markdown file, parse 
 - [ ] #3 A map image with a grid overlay is shown
 - [ ] #4 The entity's token image appears on the grid at its size
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+YAML: own GDScript subset parser (scripts/data/frontmatter.gd) with a headless test. Example campaign files in examples/ (monster + map .md, generated placeholder PNGs). Spike scene scenes/spikes/token_grid.tscn: map image, grid overlay, token at its cell and size.
+<!-- SECTION:PLAN:END -->

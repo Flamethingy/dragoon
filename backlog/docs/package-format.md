@@ -20,7 +20,7 @@ data/packages/<package-id>/
 import it. The VTT loads packages at runtime with `FileAccess`.
 
 Kinds: `monsters, spells, items, feats, races, subraces, classes, subclasses, backgrounds,
-invocations, infusions, rules, conditions, diseases`.
+invocations, infusions, rules, conditions, diseases, tables`.
 
 ## Manifest (`package.json`)
 
@@ -65,8 +65,9 @@ schemas follow when the VTT needs them.
 
 ## Importer
 
-`tools/import_obsidian.py <vault> data/packages` converts the Obsidian vault
-`C:\Obsidian\RPG\DnD5e` (read-only). Re-running it rebuilds the packages.
+`tools/import_obsidian.py <vault> [<vault> ...] data/packages` converts Obsidian vaults (read-only).
+Current run: `python tools/import_obsidian.py C:/Obsidian/RPG/DnD5e "C:/Obsidian/RPG/DnD5e ABDL" data/packages`
+(34 packages; the ABDL vault becomes the `abdl-dnd5e` package). Re-running rebuilds the packages.
 Known gaps: most monster `Image` fields point to files that are not in the vault (cleared);
 ~5% of attack texts don't match the attack parser (text still complete).
 Units: the vault's incomplete ft->m conversion is repaired (`fix_units`): half-converted ranges

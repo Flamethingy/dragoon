@@ -24,6 +24,7 @@ func _init() -> void:
 	get_root().add_child(screen)
 	var book := Compendium.new()
 	book.tabs_file = ""
+	book.world_dir = root.path_join("westmarch")  # the world's book: its package card and entries too
 	book.packages_root = root
 	screen.add_child(book)
 	await book.db.loaded

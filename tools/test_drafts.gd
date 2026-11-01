@@ -57,6 +57,7 @@ func _init() -> void:
 	var book := Compendium.new()
 	book.tabs_file = ""
 	book.packages_root = root
+	book.world_dir = vale  # Vale is a world: its book (TASK-39)
 	screen.add_child(book)
 	await book.db.loaded
 	await process_frame

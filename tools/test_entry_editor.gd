@@ -40,8 +40,16 @@ func _init() -> void:
 	_check(not view.is_editing(), "Cancel goes back to the view")
 
 	# --- A world package, then edit a copy -------------------------------------------------------
-	var world := book.new_world("Sunken Coast")
-	_check(world in book.writable_stores(), "the new world is writable")
+	var world := book.new_package("Sunken Coast")
+	_check(world in book.writable_stores() and not world.is_read_only(), "a new homebrew package is writable")
+	_check(book.scope() == "core" and book.find_child("TimelinePick", true, false) == null, "the compendium is the core book, no timeline picker (TASK-39)")
+	var quick := book.new_entry("spells")
+	_check(quick != null and book.find_child("NewEntryDialog", true, false) == null and world.list("spells").size() == 1, "New in the spells overview makes a spell right away")
+	if quick != null:
+		quick.cancelled.emit()
+	book.new_entry("packages")
+	_check(book.find_child("NewEntryDialog", true, false) != null, "without a kind it asks")
+	(book.find_child("NewEntryDialog", true, false) as ConfirmationDialog).queue_free()
 	form = book.start_edit(view)
 	_check(world in form.copy_targets, "and offered as copy target")
 	form.edit_copy_in(world)

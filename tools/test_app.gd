@@ -68,10 +68,17 @@ func _init() -> void:
 	_check(dm.view == "table" and not dm.start.visible and dm._bar.visible, "table view after hosting")
 	dm.show_view("compendium")
 	await process_frame
-	_check(dm.book != null and dm.book.visible and dm.book.closable and dm.book.timeline_dir == red, "compendium view on the hosted timeline")
+	_check(dm.book != null and dm.book.visible and dm.book.closable and dm.book.scope() == "core" and dm.book.find_child("TimelinePick", true, false) == null, "compendium view: the core book, no timeline picker")
+	var core_book := dm.book
+	dm.show_view("world")
+	await process_frame
+	_check(dm.book.scope() == "world" and dm.book.world_dir == str(west._dir) and not core_book.visible, "world view: the world's book")
 	dm.show_view("timeline")
 	await process_frame
-	_check(dm.timeline_view.visible and not dm.book.visible and dm.timeline_view.tree.get_root().get_child_count() == dm.table.event_log.events.size(), "timeline view lists the events")
+	_check(dm.book.scope() == "timeline" and dm.book.timeline_dir == red and dm.book.event_log == dm.table.event_log, "timeline view: the timeline's book")
+	dm.show_view("events")
+	await process_frame
+	_check(dm.timeline_view.visible and not dm.book.visible and dm.timeline_view.tree.get_root().get_child_count() == dm.table.event_log.events.size(), "events view lists the events")
 	dm.show_view("encounters")
 	await process_frame
 	_check(dm.encounters_view != null and dm.encounters_view.visible and not dm.timeline_view.visible, "encounters view")
@@ -86,7 +93,7 @@ func _init() -> void:
 	_check(dm.table.is_online() and not dm.notes_view.visible and dm.view == "table", "back to the table, still hosting")
 	dm.table_ui._book_button.pressed.emit()
 	_check(dm.view == "compendium", "the table's Compendium button switches the view")
-	dm.book.close_requested.emit()
+	dm.books.compendium.close_requested.emit()
 	_check(dm.view == "table", "closing the compendium goes back to the table")
 
 	# --- A player joins from another app ---------------------------------------------------------
@@ -133,7 +140,11 @@ func _init() -> void:
 	_check(again.start.server_state(0) == "offline", "the DM is gone: offline")
 
 	# --- Compendium without a session -----------------------------------------------------------
-	var b := again.open_book_alone(a_dir)
+	var b := again.open_world(world)
+	await process_frame
+	_check(b.scope() == "world" and b.world_dir == world, "Edit world opens the world's book")
+	b.close_requested.emit()
+	b = again.open_book_alone()
 	await process_frame
 	_check(again.view == "compendium" and b.visible and not again.start.visible, "compendium from the start screen")
 	b.close_requested.emit()

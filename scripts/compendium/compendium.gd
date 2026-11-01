@@ -29,14 +29,16 @@ var db := PackageDB.new()
 var tabs_file := "user://compendium_tabs.json"
 ## The packages folder ("" = PackageDB.default_root()).
 var packages_root := ""
-## The timeline whose own entries are in the book too (TASK-6, TASK-32); "" = none.
-## Standalone the side bar has a picker (remembered in tabs_file); the table sets it to its
-## timeline.
+## What this book is (TASK-39). Neither set: the compendium, the core books and source
+## packages only (new entries go into a package). `world_dir`: a world's book (its NPCs,
+## places, maps, ... over the core; new entries go into the world). `timeline_dir`: a
+## timeline's book (its own entries over its world and the core; new ones go into the
+## timeline). There is no picker: the app opens the book it needs.
 var timeline_dir := ""
-## Shown over the table: a Close button and no timeline picker.
+var world_dir := ""
+## Shown over the table: a Close button.
 var closable := false
-var _timeline_pick: OptionButton
-var _timelines: PackedStringArray = []
+var _scope_label: Label
 
 var _status: Label
 var _progress: ProgressBar
@@ -113,12 +115,11 @@ func _ready() -> void:
 	if packages_root == "":  # the real data folder: old campaigns become timelines (TASK-32)
 		for line in Worlds.migrate_data(PackageDB.default_root().get_base_dir()):
 			print("Migrated: ", line)
-	if timeline_dir == "" and not closable and tabs_file != "" and FileAccess.file_exists(tabs_file):
-		var state: Variant = JSON.parse_string(FileAccess.get_file_as_string(tabs_file))
-		if state is Dictionary and Timeline.is_timeline(str(state.get("timeline", ""))):
-			timeline_dir = str(state.timeline)
-	_fill_timelines()
+	if scope() != "core":
+		tabs_file = ""  # only the compendium keeps its tabs between runs
 	db.timeline_dir = timeline_dir
+	db.world_filter = scope_world_id()
+	_scope_label.text = scope_title()
 	_open_timeline_log()
 	for pkg in ImportJobs.new(packages_root).merge_finished():  # imports finished while the book was closed
 		PackageManager.new(packages_root).set_enabled(pkg, true)
@@ -145,7 +146,13 @@ func _build() -> void:
 	title.text = "Compendium"
 	title.theme_type_variation = UISkin.V_PLATE_LABEL
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_scope_label = Label.new()
+	_scope_label.name = "Scope"
+	_scope_label.add_theme_color_override("font_color", UISkin.CREAM)
+	_scope_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_scope_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	side.add_child(title)
+	side.add_child(_scope_label)
 	_status = Label.new()
 	_status.text = "Opening the book..."
 	_status.add_theme_color_override("font_color", UISkin.TAN)
@@ -165,12 +172,6 @@ func _build() -> void:
 	_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_tabs.add_theme_constant_override("separation", 6)
 	tabs_scroll.add_child(_tabs)
-	_timeline_pick = OptionButton.new()
-	_timeline_pick.name = "TimelinePick"
-	_timeline_pick.tooltip_text = "A timeline whose own entries are in the book too (they win over world and core)"
-	_timeline_pick.clip_text = true
-	_timeline_pick.item_selected.connect(func(i: int) -> void: set_timeline(_timelines[i]))
-	side.add_child(_timeline_pick)
 	if closable:
 		var close := Button.new()
 		close.text = "Back to the table"
@@ -326,8 +327,9 @@ func _build_filters() -> Control:
 	row.add_child(_show_drafts)
 	var new := Button.new()
 	new.text = "New..."
-	new.tooltip_text = "Create an entry in a world package"
-	new.pressed.connect(_new_entry_dialog)
+	new.tooltip_text = "Create an entry of the kind shown here (asks for the kind on the package and draft pages)"
+	new.name = "NewEntry"
+	new.pressed.connect(func() -> void: new_entry(_kind))
 	row.add_child(new)
 
 	var filters := HBoxContainer.new()
@@ -1234,7 +1236,7 @@ func _tabs_state() -> Dictionary:
 	var list := []
 	for key in tab_keys():
 		list.append({"key": key, "scroll": _open_views[key].scroll_vertical})
-	return {"tabs": list, "current": current_tab_key(), "back_closes_tab": back_closes_tab, "timeline": timeline_dir}
+	return {"tabs": list, "current": current_tab_key(), "back_closes_tab": back_closes_tab}
 
 
 func _save_tabs() -> void:
@@ -1280,34 +1282,28 @@ func _restore_tabs(state: Variant) -> void:
 
 # --- Timeline (TASK-6, TASK-32) ---------------------------------------------------------------
 
-func _fill_timelines() -> void:
-	_timelines = PackedStringArray([""])
-	var labels := PackedStringArray(["No timeline"])
-	for w in Worlds.list(PackageManager.new(packages_root).worlds_root):
-		for t in Timeline.list(str(w._dir)):
-			_timelines.append(str(t._dir))
-			labels.append("%s: %s" % [w.get("name", w.get("id", "")), t.get("name", t.get("id", ""))])
-	if timeline_dir != "" and timeline_dir not in _timelines:
-		_timelines.append(timeline_dir)
-		labels.append("Timeline: " + timeline_dir.get_file())
-	_timeline_pick.clear()
-	for l in labels:
-		_timeline_pick.add_item(l)
-	_timeline_pick.selected = _timelines.find(timeline_dir)
-	_timeline_pick.visible = not closable
+## "core", "world" or "timeline" (see timeline_dir / world_dir).
+func scope() -> String:
+	return "timeline" if timeline_dir != "" else "world" if world_dir != "" else "core"
 
 
-## Shows another timeline's entries (or none) together with the packages.
-func set_timeline(path: String) -> void:
-	if path == timeline_dir and db.is_loaded:
-		return
-	timeline_dir = path
-	db.timeline_dir = path
-	if not closable:
-		event_log = null
-	_open_timeline_log()
-	_save_tabs()
-	_reload()
+## The world packages the book reads: none for the core book, else its world.
+func scope_world_id() -> String:
+	if timeline_dir != "" and Timeline.is_timeline(timeline_dir):
+		return Timeline.new(timeline_dir).world_id()
+	if world_dir != "":
+		return str(EntryStore.open(world_dir).id)
+	return ""
+
+
+func scope_title() -> String:
+	match scope():
+		"timeline":
+			var tl := Timeline.new(timeline_dir)
+			return "Timeline: %s" % tl.info.get("name", tl.id())
+		"world":
+			return "World: %s" % EntryStore.open(world_dir).name
+	return "Books and source packages"
 
 
 func timeline_store() -> EntryStore:
@@ -1365,10 +1361,22 @@ func store_for(e: Dictionary) -> EntryStore:
 	return _stores[pkg]
 
 
-## Stores entries can be created or copied into: world packages and unlocked packages.
+## Stores entries can be created or copied into (TASK-39): the core book only its unlocked
+## (homebrew) packages, a world's book only the world, a timeline's book only the timeline.
 func writable_stores() -> Array:
+	match scope():
+		"timeline":
+			var t := timeline_store()
+			return [t] if t != null else []
+		"world":
+			for p in db.packages:
+				if str(p.get("_dir", "")).simplify_path() == world_dir.simplify_path():
+					return [store_for({"_package": p.get("id", ""), "_dir": world_dir})]
+			return [EntryStore.open(world_dir)]
 	var out := []
 	for p in db.packages:
+		if str(p.get("_layer", "")) != "core":
+			continue
 		var s := store_for({"_package": p.get("id", ""), "_dir": p.get("_dir", "")})
 		if s != null and not s.is_read_only():
 			out.append(s)
@@ -1722,9 +1730,27 @@ func _after_db_change(kind: String) -> void:
 		_render_page()
 
 
-## "New...": kind, target package (or a new world package) and name.
-func _new_entry_dialog() -> void:
+## "New...": in a kind's overview a new entry of that kind right away (TASK-39), in the
+## first writable store (a new "Homebrew" package if the core book has none). Elsewhere
+## (packages, drafts) it asks for the kind and where to put it.
+func new_entry(kind := "") -> EntryEditor:
+	if kind != "" and kind not in [PACKAGES, DRAFTS]:
+		var store := default_store()
+		return create_entry(store, kind, "New " + kind.trim_suffix("s").replace("_", " "))
+	_new_entry_dialog()
+	return null
+
+
+## Where new entries go when nobody asked: the timeline, the world, or the first unlocked
+## package (a new Homebrew package if there is none).
+func default_store() -> EntryStore:
+	var stores := writable_stores()
+	return stores[0] if not stores.is_empty() else new_package("Homebrew")
+
+
+func _new_entry_dialog() -> ConfirmationDialog:
 	var dialog := ConfirmationDialog.new()
+	dialog.name = "NewEntryDialog"
 	dialog.title = "New entry"
 	dialog.ok_button_text = "Create"
 	var box := VBoxContainer.new()
@@ -1737,6 +1763,7 @@ func _new_entry_dialog() -> void:
 			kinds.append(k)
 	kinds.sort()
 	var kind_pick := OptionButton.new()
+	kind_pick.name = "Kind"
 	for k in kinds:
 		kind_pick.add_item(k.capitalize())
 	kind_pick.selected = maxi(0, kinds.find(_kind))
@@ -1744,34 +1771,38 @@ func _new_entry_dialog() -> void:
 	var targets := writable_stores()
 	var target_pick := OptionButton.new()
 	for t: EntryStore in targets:
-		target_pick.add_item("In %s (%s)" % [t.name, t.layer])
-	target_pick.add_item("In a new world package...")
+		target_pick.add_item("In %s" % t.name)
+	var core := scope() == "core"
+	if core:
+		target_pick.add_item("In a new package...")
 	box.add_child(target_pick)
-	var world_name := LineEdit.new()
-	world_name.placeholder_text = "Name of the new world"
-	world_name.visible = targets.is_empty()
-	box.add_child(world_name)
-	target_pick.item_selected.connect(func(i: int) -> void: world_name.visible = i == targets.size())
+	var package_name := LineEdit.new()
+	package_name.placeholder_text = "Name of the new package"
+	package_name.visible = core and targets.is_empty()
+	box.add_child(package_name)
+	target_pick.item_selected.connect(func(i: int) -> void: package_name.visible = core and i == targets.size())
 	var entry_name := LineEdit.new()
 	entry_name.placeholder_text = "Name"
 	box.add_child(entry_name)
 	dialog.confirmed.connect(func() -> void:
-		var store: EntryStore = targets[target_pick.selected] if target_pick.selected < targets.size() else null
+		var store: EntryStore = targets[target_pick.selected] if target_pick.selected >= 0 and target_pick.selected < targets.size() else null
 		if store == null:
-			store = new_world(world_name.text if world_name.text.strip_edges() != "" else "New World")
+			store = new_package(package_name.text if package_name.text.strip_edges() != "" else "Homebrew")
 		create_entry(store, kinds[kind_pick.selected], entry_name.text if entry_name.text.strip_edges() != "" else "New " + kinds[kind_pick.selected].trim_suffix("s"))
 		dialog.queue_free())
 	dialog.canceled.connect(dialog.queue_free)
 	add_child(dialog)
 	dialog.popup_centered()
 	entry_name.grab_focus()
+	return dialog
 
 
-## A new world package in the packages folder (shows up in the book right away).
-func new_world(world_name: String) -> EntryStore:
-	var store := EntryStore.create_world(db.root, world_name)
+## A new editable source package in the packages folder (shows up in the book right away).
+func new_package(package_name: String) -> EntryStore:
+	var store := EntryStore.create_package(db.root, package_name)
 	var m := store.manifest.duplicate()
 	m["_dir"] = store.folder
+	m["_layer"] = "core"
 	db.packages.append(m)
 	_stores[store.id] = store
 	return store

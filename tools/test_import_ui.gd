@@ -114,7 +114,7 @@ func _init() -> void:
 	await _wait_done(jobs, str(job3.id))
 	panel.refresh_jobs()
 	var swamp := EntryStore.open(PackageManager.new(root).folder_of("swamp-finds"))
-	_check(swamp != null and swamp.layer == EntryStore.WORLD and EntryStore.is_draft(swamp.find("monsters", "bog-hag")), "a new world package (in worlds/, with its Prologue) gets the drafts")
+	_check(swamp != null and swamp.layer == EntryStore.SOURCE and not swamp.is_read_only() and EntryStore.is_draft(swamp.find("monsters", "bog-hag")), "a new editable book package gets the drafts (TASK-39)")
 	_check(str(jobs.status(str(job3.id)).target) == "swamp-finds", "the job now points at it")
 	var changed := [false]
 	panel.changed.connect(func() -> void: changed[0] = true)

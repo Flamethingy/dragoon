@@ -58,6 +58,11 @@ static func open(path: String) -> EntryStore:
 
 ## A new, empty world package in `packages_root`/<id>.
 static func create_world(packages_root: String, world_name: String) -> EntryStore:
+	return create_package(packages_root, world_name, WORLD)
+
+
+## A new empty package (TASK-39: homebrew books are editable source packages).
+static func create_package(packages_root: String, world_name: String, kind := SOURCE) -> EntryStore:
 	var world_id := slug(world_name)
 	var path := packages_root.path_join(world_id)
 	var n := 2
@@ -66,7 +71,11 @@ static func create_world(packages_root: String, world_name: String) -> EntryStor
 		n += 1
 	DirAccess.make_dir_recursive_absolute(path.path_join("assets"))
 	var m := {"format": "dragoon-package", "format_version": 1, "id": path.get_file(), "name": world_name,
-		"kind": WORLD, "version": "0.1.0", "description": "", "calendar": "default", "counts": {}}
+		"kind": kind, "version": "0.1.0", "description": "", "counts": {}}
+	if kind == WORLD:
+		m["calendar"] = "default"
+	else:
+		m["editable"] = true
 	_write(path.path_join("package.json"), m)
 	return open(path)
 

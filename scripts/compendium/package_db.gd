@@ -28,6 +28,8 @@ var timeline_dir := ""
 var timeline_world := ""  ## the timeline's world package id
 ## Worlds folder ("" = data/worlds next to the packages folder).
 var worlds_root := ""
+## Which world packages are read: "*" every one, "" none (the core book, TASK-39), or one id.
+var world_filter := "*"
 const LAYERS := ["timeline", "world", "core"]
 var packages: Array[Dictionary] = []  ## manifests, sorted by name
 var entries := {}  ## kind -> Array[Dictionary], sorted by name (published entries only)
@@ -86,6 +88,8 @@ func _load_all() -> void:
 		var manifest: Variant = _read_json(folder.path_join("package.json"), problems)
 		if not manifest is Dictionary:
 			continue
+		if str(manifest.get("kind", "")) == "world" and world_filter != "*" and str(manifest.get("id", id)) != world_filter:
+			continue  # another world (or the core book: none)
 		manifest["_dir"] = folder
 		found_packages.append(manifest)
 		for file in DirAccess.get_files_at(folder):

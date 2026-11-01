@@ -6,9 +6,12 @@ extends Node
 ## session (or the DM closing it) goes back to the start screen.
 ## The last used world, timeline, name, address and port are kept in `settings_file`.
 
-const VIEWS := ["table", "compendium", "notes", "timeline", "encounters"]
-const VIEW_NAMES := {"table": "Table", "compendium": "Compendium", "notes": "Notes", "timeline": "Timeline", "encounters": "Encounters"}
-const DM_VIEWS := ["compendium", "timeline", "encounters"]
+const VIEWS := ["table", "compendium", "world", "timeline", "events", "notes", "encounters"]
+const VIEW_NAMES := {"table": "Table", "compendium": "Compendium", "world": "World", "timeline": "Timeline",
+	"events": "Events", "notes": "Notes", "encounters": "Encounters"}
+const DM_VIEWS := ["compendium", "world", "timeline", "events", "encounters"]
+## The views that are books (TASK-39): the core compendium, the world's and the timeline's.
+const BOOK_VIEWS := ["compendium", "world", "timeline"]
 
 static var settings_file := "user://app.cfg"
 
@@ -19,7 +22,8 @@ var table: NetTable
 var table_ui: TableUI
 var start: StartScreen
 var view := ""  ## "" = start screen, else one of VIEWS
-var book: Compendium
+var book: Compendium  ## the open book (the current book view, or the one opened from the start screen)
+var books := {}  ## book view -> Compendium (in a session)
 var notes_view: NotesView
 var timeline_view: TimelineView
 var encounters_view: EncountersView
@@ -104,15 +108,17 @@ func join(address: String, player_name: String) -> Error:
 	return err
 
 
-## The compendium without a session (back to the start screen when closed).
-func open_book_alone(timeline_dir := "") -> Compendium:
-	_drop_book()
+## The compendium without a session (back to the start screen when closed): the core book,
+## or a world's (`world_dir`) or a timeline's (`timeline_dir`) book.
+func open_book_alone(timeline_dir := "", world_dir := "") -> Compendium:
+	_drop_books()
 	book = _new_book()
 	book.timeline_dir = timeline_dir
+	book.world_dir = world_dir
 	_layer.get_node("Views").add_child(book)
 	book.move_to_front()
 	book.close_requested.connect(func() -> void:
-		_drop_book()
+		_drop_books()
 		show_view(""))
 	if timeline_dir != "":
 		_remember({"timeline": timeline_dir, "world": timeline_dir.get_base_dir().get_base_dir()})
@@ -122,9 +128,9 @@ func open_book_alone(timeline_dir := "") -> Compendium:
 	return book
 
 
-## A world's own book: its NPCs, places, maps, factions and lore (from the start screen).
+## A world's own book: its NPCs, places, maps, factions and lore (Edit world on the start screen).
 func open_world(world_dir: String) -> Compendium:
-	return open_book_alone(Worlds.start_timeline(world_dir))
+	return open_book_alone("", world_dir)
 
 
 ## Leaves the session: closes the connection and goes back to the start screen.
@@ -148,22 +154,27 @@ func show_view(which: String) -> void:
 	_bar.visible = which != ""
 	if which == "":
 		start.refresh(start.world_dir(), start.timeline_dir())
-		_drop_book()
+		_drop_books()
 	for v: String in _view_buttons:
 		(_view_buttons[v] as Button).set_pressed_no_signal(v == which)
 		(_view_buttons[v] as Button).visible = table.is_dm() or v not in DM_VIEWS
-	if which == "compendium":
-		if book == null:
-			book = _new_book()
-			book.closable = true
-			book.timeline_dir = table.timeline_dir
-			book.event_log = table.event_log
-			book.close_requested.connect(func() -> void: show_view("table"))
-			_layer.get_node("Views").add_child(book)
+	if which in BOOK_VIEWS:
+		if not books.has(which):
+			var b := _new_book()
+			b.name = "Book_" + which
+			b.closable = true
+			if which == "world":
+				b.world_dir = table.timeline.world_dir
+			elif which == "timeline":
+				b.timeline_dir = table.timeline_dir
+				b.event_log = table.event_log  # session edits become events
+			b.close_requested.connect(func() -> void: show_view("table"))
+			_layer.get_node("Views").add_child(b)
 			_bar.move_to_front()
-		book.show()
-	elif book != null and book.closable:
-		book.hide()
+			books[which] = b
+		book = books[which]
+	for v: String in books:
+		(books[v] as Compendium).visible = v == which
 	if which == "notes":
 		if notes_view == null:
 			notes_view = NotesView.new()
@@ -173,7 +184,7 @@ func show_view(which: String) -> void:
 		notes_view.refresh()
 	if notes_view != null:
 		notes_view.visible = which == "notes"
-	if which == "timeline":
+	if which == "events":
 		if timeline_view == null or timeline_view.event_log != table.event_log:
 			if timeline_view != null:
 				timeline_view.queue_free()
@@ -185,7 +196,7 @@ func show_view(which: String) -> void:
 			_place(timeline_view)
 		timeline_view.refresh()
 	if timeline_view != null:
-		timeline_view.visible = which == "timeline"
+		timeline_view.visible = which == "events"
 	if which == "encounters":
 		if encounters_view == null or encounters_view.events_log != table.event_log:
 			if encounters_view != null:
@@ -221,17 +232,19 @@ func _new_book() -> Compendium:
 	return b
 
 
-func _drop_book() -> void:
-	if book != null:
+func _drop_books() -> void:
+	if book != null and not book in books.values():
 		book.get_parent().remove_child(book)
 		book.queue_free()
-		book = null
+	for b: Compendium in books.values():
+		b.get_parent().remove_child(b)
+		b.queue_free()
+	books.clear()
+	book = null
 
 
 func _on_table_changed() -> void:
-	if not table.is_online() and view != "" and view != "compendium":
-		show_view("")
-	elif not table.is_online() and view == "compendium" and book != null and book.closable:
+	if not table.is_online() and view != "" and (view != "compendium" or not books.is_empty()):
 		show_view("")
 	elif table.is_online():
 		for v: String in _view_buttons:

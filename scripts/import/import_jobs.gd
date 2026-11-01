@@ -158,7 +158,7 @@ func drafts(job_id: String) -> EntryStore:
 ## The target package for a job: an existing package or a new world package ("new:<name>").
 func target_store(target: String) -> EntryStore:
 	if target.begins_with("new:"):
-		return EntryStore.open(Worlds.create(target.substr(4).strip_edges(), "default", PackageManager.new(packages_root).worlds_root))
+		return EntryStore.create_package(PackageManager.new(packages_root).root, target.substr(4).strip_edges())  # a new book (TASK-39)
 	return EntryStore.open(PackageManager.new(packages_root).folder_of(target))
 
 

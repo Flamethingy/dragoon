@@ -1,7 +1,7 @@
 class_name ImportPanel
 extends Control
 ## The Import window over the compendium (TASK-28): pick a PDF, image or link (or it comes from
-## drag & drop), the target package (or a new world package) and start the import agent; the
+## drag & drop), the target package (or a new package) and start the import agent; the
 ## jobs with their progress log. A finished job lands in its package as drafts (TASK-30);
 ## "Show drafts" opens the Drafts page, where they are edited and published. The API key and
 ## Python path are set here and kept in user:// only. Emits `changed` when drafts arrived.
@@ -163,7 +163,7 @@ func _fill_targets() -> void:
 	for m: Dictionary in manager.list():
 		target_pick.add_item("%s (%s)" % [m.get("name", m.id), m.get("kind", "source")])
 		_targets.append(str(m.id))
-	target_pick.add_item("New world package...")
+	target_pick.add_item("New package...")
 	_targets.append(NEW_PACKAGE)
 	target_pick.select(0)
 	new_name.visible = _targets.size() == 1

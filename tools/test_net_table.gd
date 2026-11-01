@@ -10,7 +10,7 @@ var _failed := 0
 
 
 func _init() -> void:
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(LOG))
+	PackageManager._delete_tree(ProjectSettings.globalize_path(LOG.get_base_dir()))
 	await process_frame  # the tree is ready from the first frame on
 	var dm := _table("DM")
 	var player := _table("Player")
@@ -51,6 +51,22 @@ func _init() -> void:
 	dm.grid.move_requested.emit(chief, Vector2i(2, 2))
 	await _until(func() -> bool: return player.grid.token_cell(chief) == Vector2i(2, 2))
 	_check(player.grid.token_cell(chief) == Vector2i(2, 2), "player sees the DM's move")
+
+	# Notes: a player's note is stamped and saved by the DM and shown to everyone.
+	player.add_note("We hide in the **barn**.")
+	await _until(func() -> bool: return player.notes.entries.size() == 1 and dm.notes.entries.size() == 1)
+	_check(dm.notes.entries.size() == 1 and player.notes.entries.size() == 1, "note reaches DM and player")
+	if player.notes.entries.size() == 1:
+		var n: Dictionary = player.notes.entries[0]
+		_check(str(n.by).begins_with("Player ") and n.session == dm.event_log.session, "note stamped by the DM (%s)" % n)
+		_check(player.notes.heading(n).contains(" · Prep · "), "player formats the heading")
+	_check(FileAccess.get_file_as_string(SessionNotes.path_for(LOG.get_base_dir(), 0)).contains("**barn**"), "note saved as markdown")
+	dm.start_next_session()
+	await _until(func() -> bool: return player.notes.session == 1)
+	_check(player.notes.session == 1 and player.notes.entries.is_empty(), "next session: new empty notes for everyone")
+	dm.add_note("Session one begins.")
+	await _until(func() -> bool: return player.notes.entries.size() == 1)
+	_check(player.notes.entries.size() == 1 and player.notes.entries[0].session == 1, "DM note in session 1")
 
 	# A second DM start continues from the log.
 	var dm2 := _table("DM2")

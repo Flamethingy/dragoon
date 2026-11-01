@@ -43,6 +43,13 @@
   `data/removed`). "Packages..." window in the compendium (`PackagesPanel`); the book reloads on close.
   Test: `tools/test_packages.gd`; screenshot: `tools/screenshot_packages.gd`.
 
+- 2026-11-01: TASK-14 (Mochi): session notes. `SessionNotes` (`scripts/notes/session_notes.gd`) writes one
+  markdown file per session to `<campaign>/notes/session-NN.md` (`prep.md` between sessions). Each entry has a
+  heading with the real date, session number, in-world moment (calendar formatted) and writer, plus a hidden
+  data comment so the VTT can read it back. In the net table, a notes panel on the right: players send notes
+  to the DM, who stamps, saves and shares them; "Next session" logs session.started and opens a new file.
+  Tests: `tools/test_session_notes.gd`, `tools/test_net_table.gd`.
+
 ## Open questions
 See the "Open questions" section of the concept (secrets marking, event log format, YAML parsing, hosting ...).
 

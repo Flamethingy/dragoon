@@ -142,6 +142,8 @@ func _ready() -> void:
 		return
 	table.table_changed.connect(_check_active)
 	table.pcs_changed.connect(_check_active)
+	if table.grid != null:
+		table.grid.selection_changed.connect(_on_selection)
 	table.sheet_received.connect(func(ref: String) -> void:
 		if ref == active:
 			_fill())
@@ -221,6 +223,19 @@ func _panel_shows(ref: String) -> bool:
 	while ui != null and not ui is TableUI:
 		ui = ui.get_parent()
 	return ui is TableUI and (ui as TableUI).sheet.visible and (ui as TableUI).sheet.ref == ref
+
+
+## A selection without the active one makes its first token (that one controls) active
+## (Nico, 2026-11-01); a selection with it keeps it.
+func _on_selection() -> void:
+	var picked := table.grid.picked()
+	if picked.is_empty() or active in picked:
+		return
+	var mine := controlled()
+	for ref: String in picked:
+		if ref in mine:
+			set_active(ref, 1)
+			return
 
 
 ## Keeps the active one valid: the own character when there is one, else the first token.

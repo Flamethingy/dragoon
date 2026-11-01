@@ -65,28 +65,32 @@ func _init() -> void:
 	hud._input(q_key)
 	_check(hud.active == "characters/borin", "Q: the other way")
 
-	# a click selects but keeps the active one
-	ann.grid.select(["characters/aria"])
+	# a selection with the active one keeps it; Q / E only go through the selected ones
+	ann.grid.select(["characters/borin", "characters/aria"])
 	await process_frame
-	_check(hud.active == "characters/borin", "selecting a token does not change the active one")
+	_check(hud.active == "characters/borin", "a selection with the active one keeps it")
 	var aria_marks: TokenMarks = ann.grid.tokens["characters/aria"].get_node("Marks")
 	var borin_marks: TokenMarks = ann.grid.tokens["characters/borin"].get_node("Marks")
-	_check(borin_marks.active and not borin_marks.selected and aria_marks.selected and not aria_marks.active, "three marks: active orange, selected white")
-	# with a selection, Q / E only go through the selected ones
-	_check(Array(hud.cycle_list()) == ["characters/aria"], "only the selected one to cycle (%s)" % [hud.cycle_list()])
+	_check(borin_marks.active and aria_marks.selected and not aria_marks.active, "three marks: active orange, selected white")
+	_check(Array(hud.cycle_list()) == ["characters/aria", "characters/borin"], "the selected ones to cycle (%s)" % [hud.cycle_list()])
 	hud.cycle(1)
-	_check(hud.active == "characters/aria" and aria_marks.active and not borin_marks.active, "E goes to the selected token, the orange ring follows")
+	_check(hud.active == "characters/aria" and aria_marks.active and not borin_marks.active, "E goes to the next selected token, the orange ring follows")
+	# a selection without the active one: its first token becomes active
+	ann.grid.select(["characters/borin"])
+	await process_frame
+	_check(hud.active == "characters/borin", "selecting a group without the active one switches to its first")
 	hud.cycle(1)
-	_check(hud.active == "characters/aria", "and stays there: it's the only one selected")
+	_check(hud.active == "characters/borin", "and Q / E stay there: it's the only one selected")
 	ann.grid.select([])
-	_check(ann.grid.selection() == ["characters/aria"] and ann.grid.picked().is_empty(), "the active one counts as selected")
-	var aria_cell := ann.grid.token_cell("characters/aria")
-	var dir := Vector2i(1, 0) if ann.grid.can_place("characters/aria", aria_cell + Vector2i(1, 0)) else Vector2i(0, 1)
+	_check(ann.grid.selection() == ["characters/borin"] and ann.grid.picked().is_empty(), "the active one counts as selected")
+	var b_cell := ann.grid.token_cell("characters/borin")
+	var dir := Vector2i(1, 0) if ann.grid.can_place("characters/borin", b_cell + Vector2i(1, 0)) else Vector2i(0, 1)
 	ann.grid.step_selection(dir)
-	await _until(func() -> bool: return ann.grid.token_cell("characters/aria") == aria_cell + dir)
-	_check(ann.grid.token_cell("characters/aria") == aria_cell + dir, "WASD moves the active one without a selection")
+	await _until(func() -> bool: return ann.grid.token_cell("characters/borin") == b_cell + dir)
+	_check(ann.grid.token_cell("characters/borin") == b_cell + dir, "WASD moves the active one without a selection")
 	hud.cycle(1)
-	_check(hud.active == "characters/borin", "nothing selected: all of them again")
+	_check(hud.active == "characters/aria", "nothing selected: all of them again")
+	hud.cycle(1)  # back to Borin for the slots
 
 	# spend a slot: an event, the HUD follows
 	hud.use_slots(1, 2)

@@ -1,12 +1,17 @@
 class_name TableUI
 extends CanvasLayer
-## The screens around the shared table (TASK-8/14): the start screen (host a campaign as
-## DM, or join with a name and address), the character picker for players, a top bar with
-## the status (the DM also picks the map there) and the session notes on the right.
+## The screens around the shared table (TASK-8/14): the start screen (host a timeline as
+## DM, or join with a name and address; in the app the App's StartScreen does that instead,
+## `lobby` = false), the character picker for players, a top bar with the status (the DM also
+## picks the map there) and the session notes on the right.
 
 const PC_CARD := Vector2(150, 190)
 
 var table: NetTable
+## Show the built-in start screen when offline (scenes/table.tscn); the app has its own.
+var lobby := true
+## Called by the Compendium button instead of opening the overlay (the app switches views).
+var compendium_opener := Callable()
 
 var _lobby: Control
 var _timeline: LineEdit
@@ -74,7 +79,7 @@ func _ready() -> void:
 func _refresh() -> void:
 	var online := table.is_online()
 	var dm := table.is_dm()
-	_lobby.visible = not online
+	_lobby.visible = lobby and not online
 	_bar.visible = online
 	_notes_panel.visible = online
 	if not online:
@@ -281,7 +286,11 @@ func _build_bar(root: Control) -> void:
 	_book_button = Button.new()
 	_book_button.text = "Compendium"
 	_book_button.tooltip_text = "Core, world and this timeline's entries; edit them (session edits become events)"
-	_book_button.pressed.connect(open_compendium)
+	_book_button.pressed.connect(func() -> void:
+		if compendium_opener.is_valid():
+			compendium_opener.call()
+		else:
+			open_compendium())
 	row.add_child(_book_button)
 	_color = ColorPickerButton.new()
 	_color.custom_minimum_size = Vector2(36, 28)

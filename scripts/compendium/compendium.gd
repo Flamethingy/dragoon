@@ -455,7 +455,7 @@ func _build_bookmarks() -> void:
 		tab.theme_type_variation = UISkin.V_TAB
 		tab.toggle_mode = true
 		tab.button_group = _tab_group
-		tab.text = "%s  %d" % [k.capitalize(), db.list(k, show_drafts).size()]
+		tab.text = "%s  %d" % [kind_label(k), db.list(k, show_drafts).size()]
 		tab.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		tab.pressed.connect(_select_kind.bind(k))
 		tab.button_pressed = k == _kind
@@ -1371,7 +1371,7 @@ func confirm_import(e: Dictionary) -> ConfirmationDialog:
 	list.name = "ImportList"
 	list.custom_minimum_size = Vector2(440, 220)
 	for item: Dictionary in import_list(e):
-		var line := "%s  (%s)" % [item.name, str(item.kind).capitalize().trim_suffix("s")]
+		var line := "%s  (%s)" % [item.name, kind_label(str(item.kind)).trim_suffix("s")]
 		if item.there:
 			line += "  - already there" if item.kind == "features" else "  - already there, imported again as a copy"
 		list.add_item(line)
@@ -1443,6 +1443,15 @@ func take_entry(e: Dictionary) -> Dictionary:
 		_stores.clear()
 		_reload()
 	return made
+
+
+## What a kind is called in the books (Nico, 2026-11-01: monsters are "Creatures", there
+## are bandits and animals too). The data keeps its kind ids.
+const KIND_LABELS := {"monsters": "Creatures"}
+
+
+static func kind_label(kind: String) -> String:
+	return str(KIND_LABELS.get(kind, kind.capitalize()))
 
 
 ## "core", "world" or "timeline" (see timeline_dir / world_dir).
@@ -1965,7 +1974,7 @@ func _new_entry_dialog() -> ConfirmationDialog:
 	var kind_pick := OptionButton.new()
 	kind_pick.name = "Kind"
 	for k in kinds:
-		kind_pick.add_item(k.capitalize())
+		kind_pick.add_item(kind_label(k))
 	kind_pick.selected = maxi(0, kinds.find(_kind))
 	box.add_child(kind_pick)
 	var targets := writable_stores()

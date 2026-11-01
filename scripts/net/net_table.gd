@@ -1022,12 +1022,10 @@ func change_reveal(ref: String, reveal: String, add: Array = [], remove: Array =
 # --- Sheets (TASK-10) ---------------------------------------------------------------------
 
 ## A click on a token opens its sheet (the party token: my own PC's).
-func _on_token_clicked(entity: String) -> void:
-	if entity == PARTY:
-		if my_pc != "":
-			open_sheet(my_pc)
-		return
-	open_sheet(entity)
+## A click on a token only selects it (Nico, 2026-11-01: no sheet popping up; the
+## character / creature sheet comes back in its own form later). open_sheet still works.
+func _on_token_clicked(_entity: String) -> void:
+	pass
 
 
 ## The DM sees every sheet, a player the sheet of their own PC; everyone else only gets

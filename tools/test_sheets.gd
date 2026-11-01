@@ -26,13 +26,16 @@ func _init() -> void:
 	ann.join(ADDRESS, "Ann")
 	await _until(func() -> bool: return ann.my_pc == "pcs/aria" and ann.grid.tokens.has("monsters/goblin-chief"))
 
-	# --- A click on a token opens the sheet -----------------------------------------------------
+	# --- A click on a token only selects it (Nico, 2026-11-01); the sheet is opened by hand ----
 	var token: Sprite2D = ann.grid.tokens["pcs/aria"]
 	var at := token.get_global_transform_with_canvas().origin
 	_click(ann.grid, at)
+	await process_frame
+	_check(ann.grid.selection() == ["pcs/aria"] and not ann.sheets.has("pcs/aria"), "a click selects my token, no sheet pops up")
+	ann.open_sheet("pcs/aria")
 	await _until(func() -> bool: return ann.sheets.has("pcs/aria"))
 	var mine: Dictionary = ann.sheets.get("pcs/aria", {})
-	_check(mine.get("_full") == true and int(mine.get("hp", 0)) == 27 and int(mine.get("ac", 0)) == 15 and mine.has("stats"), "a click on my token: my full sheet (%s)" % [mine.keys()])
+	_check(mine.get("_full") == true and int(mine.get("hp", 0)) == 27 and int(mine.get("ac", 0)) == 15 and mine.has("stats"), "my token: my full sheet (%s)" % [mine.keys()])
 	_check(mine.get("_class") == "Ranger 3" and int(mine.get("_hp_max", 0)) == 27, "class and max HP")
 	var panel: SheetPanel = ann._ui.sheet
 	_check(panel.visible and panel.ref == "pcs/aria" and panel._controls.visible, "the sheet panel shows it with HP controls")

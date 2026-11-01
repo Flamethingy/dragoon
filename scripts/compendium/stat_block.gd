@@ -15,7 +15,7 @@ const HIDDEN := ["id", "name", "source", "image", "description", "origin",
 const SINGULAR := {"classes": "Class", "subclasses": "Subclass", "races": "Race", "subraces": "Subrace",
 	"items": "Item", "feats": "Feat", "backgrounds": "Background", "invocations": "Invocation",
 	"infusions": "Infusion", "conditions": "Condition", "diseases": "Disease", "rules": "Rule",
-	"tables": "Table", "features": "Monster feature"}
+	"tables": "Table", "features": "Creature feature"}
 ## Set by the compendium (and tests): resolves feature ids and used_by monsters.
 static var db: PackageDB
 
@@ -250,7 +250,7 @@ static func _thousands(n: int) -> String:
 # --- Monster features ----------------------------------------------------------------
 
 static func feature(e: Dictionary) -> String:
-	var bb := _title(e, "Monster feature") + _rule()
+	var bb := _title(e, "Creature feature") + _rule()
 	bb += _features([e])
 	var atk: Variant = e.get("attack")
 	if atk is Dictionary:

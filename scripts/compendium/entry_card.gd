@@ -22,7 +22,7 @@ var draft_info := false  ## Drafts page: kind, last edit and missing fields inst
 ## "Monster · 11-01 14:30" for a draft card.
 static func draft_line(e: Dictionary) -> String:
 	var when := str(e.get("edited", ""))
-	var parts := PackedStringArray([str(e.get("_kind", "")).capitalize().trim_suffix("s")])
+	var parts := PackedStringArray([Compendium.kind_label(str(e.get("_kind", ""))).trim_suffix("s")])
 	if when.length() >= 16:
 		parts.append(when.substr(5, 5) + " " + when.substr(11, 5))  # 11-01 14:30
 	return " · ".join(parts)

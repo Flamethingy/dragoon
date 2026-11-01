@@ -43,7 +43,7 @@ static func badge_label(e: Dictionary) -> String:
 		"spells": return "Spell level (C = cantrip)"
 		"items": return "Rarity: " + str(e.get("rarity", ""))
 		"classes": return "Hit die"
-		"features": return "Monsters using it"
+		"features": return "Creatures using it"
 		"tables": return "Die to roll" + ("" if bool(e.get("complete", true)) else " (gaps in the table)")
 		"packages": return "World package" if str(e.get("kind", "")) == "world" else "Source package"
 	return ""

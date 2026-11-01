@@ -1,0 +1,145 @@
+[
+  {
+    "id": "aria",
+    "name": "Aria Windrunner",
+    "description": "Half-elf ranger from the northern woods, tracking the goblins that burned her village.\n\n%% Her brother is the goblin chief's prisoner, not a traitor. %%",
+    "image": "",
+    "tags": [],
+    "token": "assets/tokens/aria.png",
+    "size": "Medium",
+    "player": "ann",
+    "race": "races/half-elf",
+    "classes": [
+      {
+        "class": "classes/ranger",
+        "subclass": "",
+        "level": 3
+      }
+    ],
+    "background": "Outlander",
+    "alignment": "Chaotic Good",
+    "hp": 27,
+    "ac": 15,
+    "speed": {
+      "walk": 9,
+      "swim": 0,
+      "fly": 0,
+      "burrow": 0,
+      "climb": 0
+    },
+    "stats": {
+      "str": 10,
+      "dex": 17,
+      "con": 12,
+      "int": 11,
+      "wis": 15,
+      "cha": 10
+    },
+    "saves": {
+      "str": 2,
+      "dex": 5
+    },
+    "skills": {
+      "perception": 4,
+      "stealth": 5,
+      "survival": 4
+    },
+    "proficiency_bonus": 2,
+    "passive_perception": 14,
+    "senses": [
+      "Darkvision 18 m"
+    ],
+    "languages": [
+      "Common",
+      "Elvish",
+      "Goblin"
+    ],
+    "proficiencies": [
+      "Light armor",
+      "Medium armor",
+      "Shields",
+      "Martial weapons"
+    ],
+    "features": [
+      "longbow-aria"
+    ],
+    "spells": [
+      "spells/hunters-mark"
+    ],
+    "inventory": [
+      {
+        "item": "items/moonstone-amulet",
+        "qty": 1,
+        "equipped": true
+      }
+    ],
+    "factions": [],
+    "location": "places/thornwick"
+  },
+  {
+    "id": "borin",
+    "name": "Borin Stoneshield",
+    "description": "Dwarf cleric of the forge, guarding the caravan for the merchant guild.",
+    "image": "",
+    "tags": [],
+    "token": "assets/tokens/borin.png",
+    "size": "Medium",
+    "player": "bob",
+    "race": "races/dwarf",
+    "classes": [
+      {
+        "class": "classes/cleric",
+        "subclass": "",
+        "level": 3
+      }
+    ],
+    "background": "Guild Artisan",
+    "alignment": "Lawful Good",
+    "hp": 24,
+    "ac": 18,
+    "speed": {
+      "walk": 7.5,
+      "swim": 0,
+      "fly": 0,
+      "burrow": 0,
+      "climb": 0
+    },
+    "stats": {
+      "str": 14,
+      "dex": 8,
+      "con": 15,
+      "int": 10,
+      "wis": 16,
+      "cha": 12
+    },
+    "saves": {
+      "wis": 5,
+      "cha": 3
+    },
+    "skills": {
+      "insight": 5,
+      "religion": 2
+    },
+    "proficiency_bonus": 2,
+    "passive_perception": 13,
+    "senses": [
+      "Darkvision 18 m"
+    ],
+    "languages": [
+      "Common",
+      "Dwarvish"
+    ],
+    "proficiencies": [
+      "Heavy armor",
+      "Shields"
+    ],
+    "features": [],
+    "spells": [
+      "spells/cure-wounds",
+      "spells/bless"
+    ],
+    "inventory": [],
+    "factions": [],
+    "location": "places/thornwick"
+  }
+]

@@ -1,10 +1,11 @@
 ---
 id: TASK-1
 title: Define entity schema (JSON) for world and campaign
-status: In Progress
-assignee: []
+status: Done
+assignee:
+  - '@Mochi'
 created_date: '2026-11-01 11:17'
-updated_date: '2026-11-01 13:02'
+updated_date: '2026-11-01 13:07'
 labels:
   - decision
   - data
@@ -26,9 +27,9 @@ Nico decided on 2026-11-01: JSON everywhere, the VTT is the editor (see [[data-l
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Marking of DM-only secrets is decided and documented
-- [ ] #2 data-layout.md lists required and optional fields for PC, NPC, place, faction, map, lore and note
-- [ ] #3 Link fields (faction, location, owner) and token/size/map grid fields are defined
-- [ ] #4 Example campaign in JSON (replaces examples/campaign/*.md) with at least one entry per kind
+- [x] #2 data-layout.md lists required and optional fields for PC, NPC, place, faction, map, lore and note
+- [x] #3 Link fields (faction, location, owner) and token/size/map grid fields are defined
+- [x] #4 Example campaign in JSON (replaces examples/campaign/*.md) with at least one entry per kind
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -60,3 +61,19 @@ Proposal for AC3 (DM-only secrets), already implemented in scripts/net/secrets.g
 
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+data-layout.md now has an "Entry schema" section:
+- References: `kind/id` resolves campaign → world → core; qualified forms are `world:` and `core:<package>/`; event entity = plain ref.
+- Fields every entry has: id, name, description, image, tags, origin.
+- Token fields: token, size.
+- Kinds: PC (player, race, classes[], hp, ac, stats, saves, skills, features, spells, inventory, factions, location …), NPC (role, location, factions, stat_block + overrides, attitude), monster (the package schema + token), place (type, parent, map, factions, population, world_at), faction (type, leader, headquarters, allies, enemies, goals), lore (category, related), map (image, kind local/world, grid size/offset/cell_m/cell_label, party_start, party_token, place, starting tokens), note (id, text, real, session, day, time, by, about) and campaign.json (players with color, dm with color, world, calendar, next_session).
+
+Examples:
+- `examples/campaigns/red-fang/`: campaign.json plus pcs, npcs, monsters (the dire wolf sent from core with its features copied, the goblin chief made in the campaign), features, items (the reveal amulet), places, factions, lore, maps (two local, one world), notes, an empty events.jsonl and assets.
+- `examples/packages/westmarch/`: world package (kind: world).
+
+The old examples/campaign/*.md files are removed with TASK-20, when the code switches.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -1,0 +1,135 @@
+[
+  {
+    "id": "goblin-chief",
+    "name": "Goblin Chief",
+    "source": "The Red Fang Road",
+    "image": "",
+    "tags": [
+      "goblinoid",
+      "leader"
+    ],
+    "token": "assets/tokens/goblin-chief.png",
+    "size": "Medium",
+    "type": "Humanoid",
+    "subtype": "Goblinoid",
+    "group": "",
+    "alignment": "Neutral Evil",
+    "cr": 1,
+    "ac": 15,
+    "armor": "Chain Shirt, Shield",
+    "hp": 21,
+    "speed": {
+      "walk": 9,
+      "swim": 0,
+      "fly": 0,
+      "burrow": 0,
+      "climb": 0
+    },
+    "hover": false,
+    "stats": {
+      "str": 12,
+      "dex": 14,
+      "con": 12,
+      "int": 10,
+      "wis": 8,
+      "cha": 10
+    },
+    "saves": {},
+    "skills": {
+      "stealth": 6
+    },
+    "passive_perception": 9,
+    "senses": [
+      "Darkvision 18 m"
+    ],
+    "languages": [
+      "Common",
+      "Goblin"
+    ],
+    "vulnerabilities": [],
+    "resistances": [],
+    "immunities": [],
+    "condition_immunities": [],
+    "environments": [
+      "forest"
+    ],
+    "spells": [],
+    "description": "Leader of the [[Red Fang Clan]] war band on the forest road. Wears a wolf pelt and a dented crown he claims to have taken from a knight.\n\n<reveal id=\"r1\" for=\"dm\">Knows where the stolen caravan went. Will trade that for his life.</reveal>",
+    "actions": [
+      "scimitar-chief"
+    ],
+    "traits": [],
+    "bonus_actions": [],
+    "legendary_actions": [],
+    "reactions": [
+      "redirect-attack"
+    ],
+    "legendary_intro": ""
+  },
+  {
+    "id": "dire-wolf",
+    "name": "Dire Wolf",
+    "source": "5e Core Rules",
+    "image": "",
+    "size": "Large",
+    "type": "Beast",
+    "subtype": "",
+    "group": "Miscellaneous Creatures",
+    "alignment": "Unaligned",
+    "cr": 1,
+    "ac": 14,
+    "armor": "Natural Armor",
+    "hp": 37,
+    "speed": {
+      "walk": 15,
+      "swim": 0,
+      "fly": 0,
+      "burrow": 0,
+      "climb": 0
+    },
+    "hover": false,
+    "stats": {
+      "str": 17,
+      "dex": 15,
+      "con": 15,
+      "int": 3,
+      "wis": 12,
+      "cha": 7
+    },
+    "saves": {},
+    "skills": {
+      "perception": 3,
+      "stealth": 4
+    },
+    "passive_perception": 13,
+    "senses": [],
+    "languages": [],
+    "vulnerabilities": [],
+    "resistances": [],
+    "immunities": [],
+    "condition_immunities": [],
+    "environments": [],
+    "spells": [],
+    "description": "",
+    "actions": [
+      "bite-42"
+    ],
+    "traits": [
+      "keen-hearing-and-smell-2",
+      "pack-tactics-3"
+    ],
+    "bonus_actions": [],
+    "legendary_actions": [],
+    "reactions": [],
+    "legendary_intro": "",
+    "origin": {
+      "layer": "core",
+      "package": "5e-core-rules",
+      "kind": "monsters",
+      "id": "dire-wolf",
+      "version": "1.0.0"
+    },
+    "tags": [],
+    "token": "assets/tokens/dire-wolf.png"
+  }
+]

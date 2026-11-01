@@ -1,0 +1,16 @@
+[
+  {
+    "id": "moonstone-amulet",
+    "name": "Moonstone Amulet",
+    "source": "The Red Fang Road",
+    "image": "",
+    "tags": [],
+    "rarity": "Uncommon",
+    "type": [
+      "Wondrous Item"
+    ],
+    "gold": 0,
+    "weight": 0,
+    "description": "A silver amulet with a pale moonstone that feels cold to the touch.\n\n<reveal id=\"r7\" for=\"ann\">**Function:** Once per day the wearer can see in magical darkness for 1 minute.</reveal>\n\n<reveal id=\"r8\" for=\"dm\">**Curse:** The wearer slowly loses the warmth in their hands.</reveal>"
+  }
+]

@@ -1,0 +1,33 @@
+[
+  {
+    "id": "westmarch",
+    "name": "The Westmarch",
+    "description": "Forested borderland between the river and the Greyspire hills.",
+    "image": "",
+    "tags": [],
+    "type": "region",
+    "parent": "",
+    "map": "maps/westmarch",
+    "factions": [],
+    "population": 0,
+    "world_at": []
+  },
+  {
+    "id": "thornwick",
+    "name": "Thornwick",
+    "description": "A market town of timber houses at the western edge of the forest.",
+    "image": "",
+    "tags": [
+      "town"
+    ],
+    "type": "town",
+    "parent": "places/westmarch",
+    "map": "",
+    "factions": [],
+    "population": 900,
+    "world_at": [
+      4,
+      9
+    ]
+  }
+]

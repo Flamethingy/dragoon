@@ -1,0 +1,17 @@
+[
+  {
+    "id": "red-fang-clan",
+    "name": "Red Fang Clan",
+    "description": "A goblin war band that waylays caravans on the forest road.",
+    "image": "",
+    "tags": [
+      "goblins"
+    ],
+    "type": "clan",
+    "leader": "",
+    "headquarters": "places/westmarch",
+    "allies": [],
+    "enemies": [],
+    "goals": "Plunder enough iron to forge a war crown for their chief."
+  }
+]

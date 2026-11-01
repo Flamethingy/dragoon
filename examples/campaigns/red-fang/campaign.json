@@ -1,0 +1,27 @@
+{
+  "format": "dragoon-campaign",
+  "format_version": 1,
+  "id": "red-fang",
+  "name": "The Red Fang Road",
+  "description": "Example campaign: the party hunts the goblins that raid the Thornwick caravans.",
+  "world": "westmarch",
+  "calendar": "default",
+  "players": [
+    {
+      "id": "ann",
+      "name": "Ann",
+      "color": "#2e6e60"
+    },
+    {
+      "id": "bob",
+      "name": "Bob",
+      "color": "#b8783c"
+    }
+  ],
+  "dm": {
+    "name": "Nico",
+    "color": "#7a3b8f"
+  },
+  "next_session": 1,
+  "created": "2026-11-01T13:10:00"
+}

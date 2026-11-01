@@ -1,0 +1,20 @@
+[
+  {
+    "id": "the-iron-crown",
+    "name": "The Iron Crown",
+    "description": "Goblin stories tell of a crown of caravan iron that makes its wearer king of all clans.\n\n%% True: the crown exists, half-forged, in the old mill. %%",
+    "image": "",
+    "tags": [],
+    "category": "legend",
+    "related": [
+      "factions/red-fang-clan"
+    ],
+    "origin": {
+      "layer": "world",
+      "package": "westmarch",
+      "kind": "lore",
+      "id": "the-iron-crown",
+      "version": "1.0.0"
+    }
+  }
+]

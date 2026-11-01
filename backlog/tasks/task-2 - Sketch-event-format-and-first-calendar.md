@@ -1,11 +1,11 @@
 ---
 id: TASK-2
 title: Sketch event format and first calendar
-status: In Progress
+status: Done
 assignee:
   - '@Mochi'
 created_date: '2026-11-01 11:17'
-updated_date: '2026-11-01 12:50'
+updated_date: '2026-11-01 13:05'
 labels:
   - decision
   - events
@@ -43,3 +43,9 @@ Proposal in doc-1 "Event format": the record fields (id, type, entity, day, time
 
 2026-11-01: Nico approved the 13 MVP event types as a starting set ("we definitely need to extend later"). `entity.sent` source now names the package: `core:<package>/<kind>/<id>`. Follow-up for more event types: TASK-17.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Event format in doc-1 (record fields, examples, JSONL per campaign, 13 MVP types approved by Nico as the starting set; more in TASK-17). Calendar: calendars/default.json + WorldCalendar, test tools/test_calendar.gd. Implemented in EventLog/Replay (TASK-9).
+<!-- SECTION:FINAL_SUMMARY:END -->

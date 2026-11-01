@@ -266,3 +266,15 @@ See the "Open questions" section of the concept (secrets marking, event log form
   renamed with references, files under `imports/<job>/`, `origin.job`); the review screen (DraftReview) is
   gone, "Show drafts" opens the Drafts page. Tests: `tools/test_drafts.gd`, `tools/test_import_ui.gd`
   (reworked); screenshots via `tools/screenshot_import.gd`.
+
+- **TASK-27 Import agent** (`tools/import_agent.py`): the real tool behind the import window, same contract as
+  `tools/fake_import_agent.py`. PDF pages are rendered to `pages/<n>.png` (110 dpi) and sent 20 per request with
+  the art boxes from `extract_pdf_art.art_regions` drawn and numbered plus the text layer; an image is sent as is
+  (Claude gives a crop); a link is fetched as text plus its pictures (Homebrewery share links read `/source/`).
+  Claude (`claude-opus-5-5`, adaptive thinking, streaming, JSON schema output) returns monsters, spells and items
+  with page and art box; normalized with the importer's helpers (ids, features, rollable tables, feet to metres),
+  drafts with origin/source_page/crop, art cut to `art/<id>.jpg`. Refusals are skipped and logged, a cut-off
+  answer is retried in halves. Key only from `ANTHROPIC_API_KEY`, scrubbed from logs. Optional `--pages 60-70`.
+  Tests: Boggle screenshot (1 monster, 4 features, crop), MotM pages 60-70 (11 monsters with matching art, 66
+  features, 2 tables, ~31k in / 15k out tokens, 2 min), a wikidot spell page; `tools/check_real_import.gd`
+  merges a real job into a scratch package.

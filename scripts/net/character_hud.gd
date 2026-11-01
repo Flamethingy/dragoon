@@ -1,8 +1,8 @@
 class_name CharacterHud
 extends Control
 ## The active character (TASK-44, Nico 2026-11-01): a big portrait in the lower left corner
-## with HP and spell slots, and a hotbar of 10 slots next to it (empty for now; the player
-## fills them later, never automatically). Q / E go round robin through every token the
+## with HP and spell slots, and next to it panels with the ability, save and skill checks
+## (TASK-46, instead of the hotbar): a click rolls it for this character, into the chat. Q / E go round robin through every token the
 ## user controls: their own characters (owners), the DM everything on the map; with tokens
 ## selected only through the selected ones (Nico, 2026-11-01). Three marks on the map:
 ## none, selected (white ring), active (orange ring). Clicking or selecting a token does not
@@ -11,9 +11,7 @@ extends Control
 
 signal active_changed(ref: String)
 
-const SLOTS := 10
 const PORTRAIT := 132.0
-const SLOT := 52.0
 const SLIDE := 0.18  ## seconds of the change animation
 ## Spell slots per character level of a full caster (5e), level 1 slots first.
 const FULL_CASTER := [[2], [3], [4, 2], [4, 3], [4, 3, 2], [4, 3, 3], [4, 3, 3, 1], [4, 3, 3, 2],
@@ -35,7 +33,7 @@ var _name: Label
 var _hp_bar: ProgressBar
 var _hp_text: Label
 var _slots_row: VBoxContainer
-var _hotbar: HBoxContainer
+var _checks: HBoxContainer
 var _tween: Tween
 
 
@@ -108,33 +106,11 @@ func _init() -> void:
 	_slots_row.add_theme_constant_override("separation", 2)
 	col.add_child(_slots_row)
 
-	var bar := PanelContainer.new()
-	bar.name = "Hotbar"
-	bar.theme_type_variation = UISkin.V_PAGE
-	bar.size_flags_vertical = Control.SIZE_SHRINK_END
-	_box.add_child(bar)
-	_hotbar = HBoxContainer.new()
-	_hotbar.add_theme_constant_override("separation", 4)
-	bar.add_child(_hotbar)
-	for i in SLOTS:
-		var slot := Panel.new()
-		slot.name = "Slot%d" % (i + 1)
-		slot.custom_minimum_size = Vector2(SLOT, SLOT)
-		slot.pivot_offset = Vector2(SLOT, SLOT) * 0.5
-		var sb := StyleBoxFlat.new()
-		sb.bg_color = Color(UISkin.TAN, 0.55)
-		sb.border_color = UISkin.BROWN
-		sb.set_border_width_all(2)
-		sb.set_corner_radius_all(6)
-		slot.add_theme_stylebox_override("panel", sb)
-		slot.tooltip_text = "Slot %d (empty)" % (i + 1)
-		var key := Label.new()
-		key.text = str((i + 1) % 10)
-		key.position = Vector2(5, 2)
-		key.add_theme_color_override("font_color", UISkin.INK_SOFT)
-		key.add_theme_font_size_override("font_size", 12)
-		slot.add_child(key)
-		_hotbar.add_child(slot)
+	_checks = HBoxContainer.new()  # ability, save and skill checks (TASK-46); a click rolls
+	_checks.name = "Checks"
+	_checks.add_theme_constant_override("separation", 0)
+	_checks.size_flags_vertical = Control.SIZE_SHRINK_END
+	_box.add_child(_checks)
 	visible = false
 
 
@@ -300,6 +276,7 @@ func _fill() -> void:
 	_hp_bar.value = hp if known else 0
 	_hp_text.text = ("%d / %d" % [hp, hp_max] + (" +%d" % temp if temp > 0 else "")) if known else "HP ?"
 	_fill_slots(s)
+	_fill_checks(s)
 
 
 func _fill_slots(s: Dictionary) -> void:
@@ -342,6 +319,94 @@ func _fill_slots(s: Dictionary) -> void:
 			pip.pressed.connect(func() -> void: use_slots(level, to))
 			row.add_child(pip)
 		_slots_row.add_child(row)
+
+
+## Abilities (score, modifier: an ability check), saves and skills of the sheet, each a
+## button that rolls it for the active one (NetTable.roll: into the chat). Only with the
+## full sheet (owners, the DM).
+func _fill_checks(s: Dictionary) -> void:
+	for c in _checks.get_children():
+		_checks.remove_child(c)
+		c.queue_free()
+	if not bool(s.get("_full", false)) or not s.get("stats") is Dictionary:
+		return
+	var abilities := _panel("Abilities", 1)
+	var saves := _panel("Saves", 1)
+	for ab: String in ABILITIES:
+		var score := int((s.stats as Dictionary).get(ab, 10))
+		var mod := Dice.modifier(s, ab)
+		_check_button(abilities, "%s  %d  %s" % [ab.to_upper(), score, _signed(mod)], "%s check" % ab, false)
+		var save := Dice._bonus(s, "saves", ab, ab)
+		_check_button(saves, "%s  %s" % [ab.to_upper(), _signed(save)], "%s save" % ab, _lists(s, "saves", ab))
+	var skills := _panel("Skills", 2)
+	var names: Array = Dice.SKILLS.keys()
+	names.sort()
+	for skill: String in names:
+		var bonus := Dice._bonus(s, "skills", skill, str(Dice.SKILLS[skill]))
+		_check_button(skills, "%s %s" % [skill.replace("_", " ").capitalize(), _signed(bonus)], skill.replace("_", " "), _lists(s, "skills", skill))
+
+
+const ABILITIES := ["str", "dex", "con", "int", "wis", "cha"]
+
+
+func _panel(title: String, columns: int) -> GridContainer:
+	var panel := PanelContainer.new()
+	panel.name = title
+	panel.theme_type_variation = UISkin.V_PAGE
+	panel.size_flags_vertical = Control.SIZE_SHRINK_END
+	_checks.add_child(panel)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 2)
+	panel.add_child(col)
+	var head := Label.new()
+	head.text = title
+	head.theme_type_variation = UISkin.V_HEADING
+	head.add_theme_font_size_override("font_size", 14)
+	col.add_child(head)
+	var grid := GridContainer.new()
+	grid.columns = columns
+	grid.add_theme_constant_override("h_separation", 2)
+	grid.add_theme_constant_override("v_separation", 1)
+	col.add_child(grid)
+	return grid
+
+
+func _check_button(parent: Control, text: String, query: String, proficient: bool) -> void:
+	var b := Button.new()
+	b.text = text
+	b.name = query.replace(" ", "_")
+	b.flat = true
+	b.focus_mode = Control.FOCUS_NONE
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.add_theme_font_size_override("font_size", 12)
+	b.add_theme_constant_override("h_separation", 0)
+	var ink := UISkin.WINE if proficient else UISkin.INK
+	for st in ["font_color", "font_hover_color", "font_pressed_color"]:
+		b.add_theme_color_override(st, ink)
+	b.tooltip_text = "Roll %s%s (Shift: advantage, Ctrl: disadvantage)" % [query, " · proficient" if proficient else ""]
+	b.pressed.connect(func() -> void: roll_check(query))
+	parent.add_child(b)
+
+
+## Rolls a check for the active one (Shift held: advantage, Ctrl: disadvantage).
+func roll_check(query: String) -> void:
+	if active == "" or table == null:
+		return
+	var q := query
+	if Input.is_key_pressed(KEY_SHIFT):
+		q += " with advantage"
+	elif Input.is_key_pressed(KEY_CTRL):
+		q += " with disadvantage"
+	table.roll(q, active)
+
+
+static func _signed(n: int) -> String:
+	return "+%d" % n if n >= 0 else str(n)
+
+
+static func _lists(s: Dictionary, key: String, name: String) -> bool:
+	var list: Variant = s.get(key)
+	return (list is Dictionary and (list as Dictionary).has(name)) or (list is Array and name in list)
 
 
 ## Spent spell slots of a level, as a sheet.changed event (spell_slots_used.<level>).
@@ -420,7 +485,8 @@ func _picture(ref: String) -> Texture2D:
 	return TokenArt.compose(null, {}, ref.get_slice("/", 0))
 
 
-## Slide the new portrait in from the side it came from, the slots pop.
+## The new portrait pops in, turned a little the way it came from; the check panels fade in
+## one after the other.
 func _animate(direction: int) -> void:
 	if not is_inside_tree():
 		return
@@ -433,9 +499,5 @@ func _animate(direction: int) -> void:
 	_tween.tween_property(_card, "modulate:a", 1.0, SLIDE)
 	_tween.tween_property(_portrait, "scale", Vector2.ONE, SLIDE).set_trans(Tween.TRANS_BACK)
 	_tween.tween_property(_portrait, "rotation", 0.0, SLIDE)
-	var i := 0
-	for slot in _hotbar.get_children():
-		var c := slot as Control
-		c.scale = Vector2(1, 0.2)
-		_tween.tween_property(c, "scale", Vector2.ONE, SLIDE).set_delay(0.015 * i)
-		i += 1
+	_checks.modulate.a = 0.0
+	_tween.tween_property(_checks, "modulate:a", 1.0, SLIDE * 1.5).set_delay(0.06)

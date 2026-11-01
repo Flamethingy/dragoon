@@ -41,6 +41,7 @@ var _book_button: Button
 var _book: Compendium
 var sheet: SheetPanel
 var hud: CharacterHud  ## the active character, lower left (TASK-44)
+var chat: ChatBox  ## the chat on the right of the calm table (TASK-46)
 var minimal := false  ## the app's calm table: no bar at the top (App.minimal)
 var dock: Dock  ## the app's panels (TASK-37); null when the table runs on its own
 
@@ -77,6 +78,11 @@ func _ready() -> void:
 	hud = CharacterHud.new()
 	hud.table = table
 	root.add_child(hud)
+	chat = ChatBox.new()
+	chat.table = table
+	chat.active_ref = func() -> String: return hud.active
+	chat.visible = false
+	root.add_child(chat)
 	_build_picker(root)
 	_build_lobby(root)
 	table.status_changed.connect(_on_status)
@@ -104,6 +110,7 @@ func _refresh() -> void:
 	_lobby.visible = lobby and not online
 	_bar.visible = online and not minimal
 	_notes_panel.visible = online
+	chat.visible = online and minimal  # the app's calm table; otherwise the session panel has the rolls
 	if not online:
 		sheet.hide()
 	_next_session.visible = dm

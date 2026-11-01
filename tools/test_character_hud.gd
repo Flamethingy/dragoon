@@ -1,6 +1,6 @@
 extends SceneTree
 ## Headless check of the active character HUD (TASK-44): portrait with HP and spell slots in
-## the lower left, 10 empty hotbar slots, Q / E round robin through the tokens one controls,
+## the lower left, ability / save / skill check panels next to it (a click rolls into the chat), Q / E round robin through the tokens one controls,
 ## clicks don't change it, the HUD's sheet does not pop up the sheet panel.
 ## godot --headless --path . -s tools/test_character_hud.gd
 
@@ -43,7 +43,34 @@ func _init() -> void:
 	await process_frame
 	_check(hud._hp_text.text.begins_with("27 / 27"), "HP on the portrait (%s)" % hud._hp_text.text)
 	_check(hud._name.text == "Aria Windrunner", "name under the portrait")
-	_check(hud._hotbar.get_child_count() == 10 and hud.find_child("Slot10", true, false) != null, "10 hotbar slots")
+	_check(hud._checks.get_child_count() == 3 and hud.find_child("Abilities", true, false) != null and hud.find_child("Skills", true, false) != null, "ability, save and skill panels")
+	var stealth: Button = hud.find_child("stealth", true, false)
+	_check(stealth != null and stealth.text == "Stealth +5", "skills with the sheet's bonus (%s)" % (stealth.text if stealth else "none"))
+	var dex_save: Button = hud.find_child("dex_save", true, false)
+	_check(dex_save != null and dex_save.text == "DEX  +5", "saves (%s)" % (dex_save.text if dex_save else "none"))
+	var str_check: Button = hud.find_child("str_check", true, false)
+	_check(str_check != null and str_check.text == "STR  10  +0", "abilities with score and modifier (%s)" % (str_check.text if str_check else "none"))
+	stealth.pressed.emit()
+	await _until(func() -> bool: return ann.rolls.size() == 1)
+	_check(ann.rolls.size() == 1 and str(ann.rolls[0].who) == "Aria Windrunner" and str(ann.rolls[0].results[0].label) == "Stealth", "a click rolls it for the active one (%s)" % [ann.rolls])
+	# the chat: messages and rolls in one feed
+	ann._ui.minimal = true
+	ann._ui._refresh()
+	var chat: ChatBox = ann._ui.chat
+	_check(chat.visible, "the chat on the calm table")
+	chat.line.text = "Hello from Aria!"
+	chat.send()
+	await _until(func() -> bool: return dm.rolls.size() == 2 and ann.rolls.size() == 2)
+	_check(str(dm.rolls[1].get("text", "")) == "Hello from Aria!" and dm.rolls[1].by == "ann", "the DM gets the message")
+	await process_frame
+	_check(chat.log_text.get_parsed_text().contains("Hello from Aria!") and chat.log_text.get_parsed_text().contains("Stealth"), "the chat shows messages and rolls")
+	chat.line.text = "/r 2d6+3"
+	chat.send()
+	await _until(func() -> bool: return ann.rolls.size() == 3)
+	_check(ann.rolls.size() == 3 and str(ann.rolls[2].results[0].formula) == "2d6+3", "/r rolls")
+	dm.say("A goblin horn sounds.")
+	await _until(func() -> bool: return ann.rolls.size() == 4)
+	_check(ann.rolls.size() == 4 and ann.rolls[3].by == "dm", "the DM writes too")
 	_check(hud._slots_row.get_child_count() == 1 and hud._slots_row.get_child(0).get_child_count() == 3, "ranger 3: two level 1 slots")
 	_check(not ann._ui.sheet.visible, "the HUD's sheet does not open the sheet panel")
 	_check(Array(hud.controlled()) == ["characters/aria", "characters/borin"], "Ann controls Aria and Borin (%s)" % [hud.controlled()])

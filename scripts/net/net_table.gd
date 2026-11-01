@@ -1311,11 +1311,13 @@ func _handle_roll(sender: int, query: String, ref: String, hidden: bool) -> Dict
 	return entry
 
 
-## A dice.rolled event as the roll log shows it.
+## A dice.rolled (or chat.message) event as the roll log / chat shows it.
 static func _roll_entry(e: Dictionary) -> Dictionary:
 	var d: Dictionary = e.get("data", {})
 	var entry := {"id": e.get("id", 0), "by": e.get("by", ""), "who": d.get("who", ""), "results": d.get("results", []),
 		"hidden": bool(d.get("hidden", false)), "real": e.get("real", "")}
+	if e.get("type") == "chat.message":
+		entry["text"] = str(d.get("text", ""))
 	if d.has("table"):
 		entry["table"] = str(d.table).trim_prefix("tables/")
 		entry["value"] = int(d.get("value", 0))
@@ -1397,7 +1399,7 @@ func _add_roll(entry: Dictionary) -> void:
 func _load_rolls() -> void:
 	rolls = []
 	for e in event_log.events:
-		if e.type == "dice.rolled" and int(e.session) == event_log.session and not event_log.is_undone(e.id):
+		if e.type in ["dice.rolled", "chat.message"] and int(e.session) == event_log.session and not event_log.is_undone(e.id):
 			rolls.append(_roll_entry(e))
 	rolls = rolls.slice(maxi(0, rolls.size() - ROLL_LOG_SIZE))
 	rolls_changed.emit()
@@ -1420,6 +1422,43 @@ func sync_rolls(list: Array) -> void:
 	rolls_changed.emit()
 
 
+# --- Chat (TASK-46) ----------------------------------------------------------------------------
+
+## Says something in the chat (with the rolls, one feed). "/r 1d20+3" or "/roll perception"
+## rolls instead (for `ref`, else one's own character, or a plain formula).
+func say(text: String, ref := "") -> void:
+	var t := text.strip_edges()
+	if t == "":
+		return
+	for prefix in ["/roll ", "/r "]:
+		if t.to_lower().begins_with(prefix):
+			roll(t.substr(prefix.length()), ref)
+			return
+	if is_dm():
+		_handle_chat(1, t)
+	elif is_online():
+		request_chat.rpc_id(1, t)
+
+
+## Player -> DM.
+@rpc("any_peer", "call_remote", "reliable")
+func request_chat(text: String) -> void:
+	if is_dm():
+		_handle_chat(multiplayer.get_remote_sender_id(), text)
+
+
+func _handle_chat(sender: int, text: String) -> Dictionary:
+	var player := _sender_player(sender)
+	if player == "" or text.strip_edges() == "":
+		return {}
+	var e := event_log.append("chat.message", "", {"text": text.strip_edges().left(2000)}, player)
+	var entry := _roll_entry(e)
+	_add_roll(entry)
+	for peer_id: int in peers:
+		roll_added.rpc_id(peer_id, entry)
+	return entry
+
+
 func _deny_roll(sender: int, reason: String) -> void:
 	if sender == 1:
 		_set_status("Can't roll: " + reason)
@@ -1435,6 +1474,9 @@ func roll_denied(reason: String) -> void:
 
 ## One roll as BBCode for the log: "Aria · Perception: [14] + 4 = 18".
 static func roll_bbcode(entry: Dictionary, names := {}) -> String:
+	if entry.has("text"):  # a chat message
+		var from := str(names.get(entry.get("by", ""), entry.get("by", "")))
+		return "[font_size=12]%s[/font_size]\n%s" % [Markdown.escape(from), Markdown.escape(str(entry.text))]
 	var lines := PackedStringArray()
 	for r: Dictionary in entry.get("results", []):
 		var total := "[b]%d[/b]" % int(r.get("total", 0))

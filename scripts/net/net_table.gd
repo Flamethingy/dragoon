@@ -8,6 +8,8 @@ extends Node
 ## DM-only keys), and they only *request* changes: the host checks them (players may move
 ## only their own PC), writes events to the campaign's EventLog and broadcasts the result.
 ## Images go once per content hash and are cached on the clients (AssetCache).
+## On world maps (`kind: world`) the PCs travel as one party token (TASK-13): moving it logs
+## one token.moved per member (data.group = "party"); local maps show them one by one.
 ## Who plays which PC and the current map are kept in `table.json` next to the event log,
 ## so players can drop out and rejoin (by name) without restarting the host.
 ##
@@ -21,6 +23,7 @@ signal pcs_changed  ## lobby: the PC list or my PC changed
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
 const DEFAULT_CAMPAIGN := "res://examples/campaign"
+const PARTY := "party"  ## id of the group token on world maps
 
 ## Host: the campaign folder (entity markdown files and images).
 @export var campaign_dir := DEFAULT_CAMPAIGN
@@ -145,10 +148,17 @@ func view_for(player: String) -> Dictionary:
 	var ids: Array = on_map.keys()
 	var start: Vector2i = map.party_start
 	var newcomers := 0
-	for pc: String in owners:
-		if pc not in ids:
+	var members: Array = owners.keys()  # the party: every PC someone plays
+	members.sort()
+	var world: bool = map.kind == "world" and not members.is_empty()
+	for pc: String in members:
+		if world:
+			ids.erase(pc)
+		elif pc not in ids:
 			ids.append(pc)
 	var tokens := []
+	if world:
+		tokens.append(_party_token(members, placed, start, map.party_token))
 	for id: String in ids:
 		var owner: String = owners.get(id, "")
 		var t := campaign.token_view(id, owner, player == "" or (owner != "" and owner == player))
@@ -163,6 +173,24 @@ func view_for(player: String) -> Dictionary:
 			newcomers += 1
 		tokens.append(t)
 	return {"map": map, "tokens": tokens}
+
+
+## The group token: where its members are (they always move together), named after them.
+func _party_token(members: Array, placed: Dictionary, start: Vector2i, image: String) -> Dictionary:
+	var cell := start
+	for pc: String in members:
+		if placed.has(pc):
+			cell = placed[pc]
+			break
+	var names := PackedStringArray()
+	var players := []
+	for pc: String in members:
+		names.append(campaign.name_of(pc))
+		players.append(owners[pc])
+	if image == "":
+		image = campaign.token_view(members[0]).get("image", "")
+	return {"id": PARTY, "image": image, "name": "Party: %s" % ", ".join(names), "size": "medium",
+		"type": "party", "members": members, "players": players, "cell": cell}
 
 
 ## DM: shows another map to everyone.
@@ -439,7 +467,8 @@ func _apply_state(view: Dictionary) -> void:
 		if not keep.has(id):
 			grid.tokens[id].queue_free()
 			grid.tokens.erase(id)
-	grid.set_info("%s · %d tokens · left drag: move, wheel: zoom, right drag: pan" % [map.get("name", map.id), grid.tokens.size()])
+	var count := grid.tokens.size()
+	grid.set_info("%s · %d token%s · left drag: move, wheel: zoom, right drag: pan" % [map.get("name", map.id), count, "" if count == 1 else "s"])
 	table_changed.emit()
 
 
@@ -449,7 +478,12 @@ func _may_drag(entity: String) -> bool:
 	if is_dm():
 		return true
 	var token: Sprite2D = grid.tokens.get(entity)
-	return token != null and player_name != "" and str(token.get_meta("info", {}).get("owner", "")) == player_name
+	if token == null or player_name == "":
+		return false
+	var info: Dictionary = token.get_meta("info", {})
+	if info.has("players"):  # the party token: anyone in the party
+		return player_name in info.players
+	return str(info.get("owner", "")) == player_name
 
 
 ## Dropped a token here: the DM decides directly, players ask the DM.
@@ -475,6 +509,9 @@ func _handle_move(sender: int, entity: String, cell: Vector2i) -> void:
 	if not grid.tokens.has(entity):
 		_deny(sender, entity, "unknown token")
 		return
+	if entity == PARTY:
+		_handle_party_move(sender, cell)
+		return
 	if sender != 1:
 		var player: String = peers.get(sender, "")
 		if player == "" or owners.get(entity, "") != player:
@@ -490,6 +527,27 @@ func _handle_move(sender: int, entity: String, cell: Vector2i) -> void:
 	for peer_id: int in peers:
 		token_moved.rpc_id(peer_id, entity, cell, int(e.get("id", 0)))
 	_set_status("%s moved to %s (event %d)" % [_name_of(entity), cell, int(e.get("id", 0))])
+
+
+## The party token travels: one token.moved per member (data.group = "party"), so
+## every character's own timeline stays complete.
+func _handle_party_move(sender: int, cell: Vector2i) -> void:
+	var info: Dictionary = grid.tokens[PARTY].get_meta("info")
+	if sender != 1 and peers.get(sender, "") not in info.players:
+		_deny(sender, PARTY, "you're not in this party")
+		return
+	if not grid.can_place(PARTY, cell):
+		_deny(sender, PARTY, "that square is blocked")
+		return
+	var from := grid.token_cell(PARTY)
+	var by := "dm" if sender == 1 else "player:%s" % peers[sender]
+	var last := {}
+	for pc: String in info.members:
+		last = event_log.move_token(pc, grid.map_id, from, cell, by, PARTY)
+	grid.set_token_cell(PARTY, cell)
+	for peer_id: int in peers:
+		token_moved.rpc_id(peer_id, PARTY, cell, int(last.get("id", 0)))
+	_set_status("The party travels to %s (%d events)" % [cell, info.members.size()])
 
 
 ## DM -> players: a move happened.

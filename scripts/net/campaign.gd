@@ -67,7 +67,8 @@ func image_hash(rel: String) -> String:
 
 # --- Player views ----------------------------------------------------------------------
 
-## A map for the table: {id, name, image, grid: {size, offset}, party_start, tokens: {id: [x, y]}}.
+## A map for the table: {id, name, image, grid: {size, offset}, kind ("world" or "local"),
+## party_token, party_start, tokens: {id: [x, y]}}.
 func map_view(id: String) -> Dictionary:
 	var fm := frontmatter(id)
 	if fm.is_empty():
@@ -81,6 +82,7 @@ func map_view(id: String) -> Dictionary:
 			tokens[str(t.get("entity", ""))] = _cell(at)
 	return {"id": id, "name": str(fm.get("name", id)), "image": image_hash(str(fm.get("image", ""))),
 		"grid": {"size": float(grid.get("size", 70)), "offset": _vec(off)},
+		"kind": str(fm.get("kind", "local")), "party_token": image_hash(str(fm.get("party_token", ""))),
 		"party_start": _cell(fm.get("party_start", [1, 1])), "tokens": tokens}
 
 

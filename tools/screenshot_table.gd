@@ -32,6 +32,15 @@ func _init() -> void:
 	dm.add_note("A goblin horn sounds from the trees.")
 	await _until(func() -> bool: return me.notes.entries.size() == 2)
 	await _shot("table_player.png")
+
+	dm.show_map_to_all("maps/world")
+	await _until(func() -> bool: return me.grid.tokens.has("party"))
+	me.grid.move_requested.emit("party", Vector2i(8, 6))
+	await _until(func() -> bool: return me.grid.token_cell("party") == Vector2i(8, 6))
+	await create_timer(1.5).timeout
+	for i in 2:
+		await process_frame
+	await _shot("table_world.png")
 	quit()
 
 

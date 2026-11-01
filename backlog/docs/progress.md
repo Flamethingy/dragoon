@@ -62,6 +62,11 @@
   callouts and "DM..."/"Secret..." sections are stripped. Examples: 2 PCs, second map "Old Mill".
   Test: `tools/test_net_table.gd`; screenshots: `tools/screenshot_table.gd`.
 
+- 2026-11-01: TASK-13 (Mochi): world maps (`kind: world`, provisional) show every claimed PC as one party
+  token (`party_token` image, named after its members). Any member or the DM can drag it; the host logs one
+  `token.moved` per member with `data.group = "party"`. Local maps show the PCs one by one at their own
+  positions. Example world map "The Westmarch" (`maps/world.md`). Splitting/merging groups: later.
+
 ## Open questions
 See the "Open questions" section of the concept (secrets marking, event log format, YAML parsing, hosting ...).
 

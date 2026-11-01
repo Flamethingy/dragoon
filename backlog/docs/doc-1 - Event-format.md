@@ -73,6 +73,7 @@ Revisit when the log passes about 50 MB or startup replay gets slow. The fix the
 | `sheet.changed` | creature | `path` (dotted, e.g. `stats.str`, `ac`), `from`, `to`, `reason`. Any other sheet field. |
 | `level.gained` | PC | `class`, `level` (new class level) |
 | `entity.sent` | the new campaign copy | `source` (e.g. `core:5e-core-rules/monsters/goblin` = package/kind/id, `world:npc/mira`), `layer` |
+| `reveal.changed` | the entity whose text it is | `reveal` (id, e.g. `r7`), `field` (e.g. `description`), `add` / `remove` (lists of player ids, `party`, `dm`). See reveal-visibility.md. |
 | `time.advanced` | `""` | `from_day`, `from_time`, `reason`. The event's own `day`/`time` are the new clock. |
 | `note.added` | entity or `""` | `note` (path of the session note), `text` (short summary) |
 | `session.started` / `session.ended` | `""` | `{}`. `session` holds the number. |

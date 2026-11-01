@@ -164,6 +164,28 @@ func _init() -> void:
 	dm.add_note("Session one begins.")
 	await _until(func() -> bool: return bob.notes.entries.size() == 1)
 	_check(bob.notes.entries.size() == 1 and bob.notes.entries[0].session == 1, "DM note in session 1")
+	dm.add_note("Mira lied. %% She works for the clan. %% <reveal id=\"rn\" for=\"bob\">Bob saw her.</reveal>")
+	await _until(func() -> bool: return bob.notes.entries.size() == 2 and ann2.notes.entries.size() == 2)
+	var bob_note: String = bob.notes.entries.back().text if bob.notes.entries.size() == 2 else ""
+	var ann_note: String = ann2.notes.entries.back().text if ann2.notes.entries.size() == 2 else ""
+	_check(bob_note.contains("Bob saw her") and not bob_note.contains("clan"), "notes filtered for Bob (%s)" % bob_note)
+	_check(ann_note.begins_with("Mira lied.") and not ann_note.contains("Bob saw") and not ann_note.contains("clan"), "notes filtered for Ann (%s)" % ann_note)
+	_check(dm.notes.entries.back().text.contains("clan"), "the DM keeps the whole note")
+
+	# --- Reveals: the host cuts each player's view, changes arrive live (TASK-18) -----------
+	const AMULET := "items/moonstone-amulet"
+	ann2.open_entry(AMULET)
+	bob.open_entry(AMULET)
+	await _until(func() -> bool: return ann2.entries.has(AMULET) and bob.entries.has(AMULET))
+	var ann_desc: String = ann2.entries.get(AMULET, {}).get("description", "")
+	var bob_desc: String = bob.entries.get(AMULET, {}).get("description", "")
+	_check(ann_desc.contains("**Function:**") and not ann_desc.contains("Curse"), "Ann gets the function, not the curse")
+	_check(bob_desc.begins_with("A silver amulet") and not bob_desc.contains("Function") and not bob_desc.contains("Curse"), "Bob gets neither")
+	dm.change_reveal(AMULET, "r7", ["bob"])
+	await _until(func() -> bool: return str(bob.entries[AMULET].get("description", "")).contains("Function"))
+	_check(str(bob.entries[AMULET].description).contains("for=\"ann,bob\""), "Bob sees the function now, framed for both")
+	_check(dm.event_log.effective(AMULET).back().type == "reveal.changed", "logged as reveal.changed")
+	_check(not str(bob.entries[AMULET].description).contains("Curse"), "the curse stays hidden")
 
 	# --- A restarted host continues: positions, players and map ------------------------------
 	var dm2 := _table("DM2", "dm")

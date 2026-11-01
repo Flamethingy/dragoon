@@ -187,6 +187,18 @@ func token_view(ref: String, owner := "", for_owner := false) -> Dictionary:
 	return view
 
 
+## A whole entry as `viewer` (player id or "dm") may see it at a moment: <reveal> passages
+## and %% comments they may not see are cut out (Reveal), with the reveal.changed events
+## in `events` (e.g. EventLog.effective(ref, day, time)) applied. {} if there is none.
+func entry_view(ref: String, viewer: String, events: Array = []) -> Dictionary:
+	var e := entry(ref)
+	if e.is_empty():
+		return {}
+	var view := Reveal.filter_entry(e, viewer, Reveal.grants_from(events, ref))
+	view["ref"] = ref
+	return view
+
+
 ## "Ranger 3" or "Fighter 2 / Wizard 1" from a PC's classes.
 func class_text(pc: Dictionary) -> String:
 	var parts := PackedStringArray()

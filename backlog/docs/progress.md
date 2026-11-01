@@ -83,3 +83,12 @@ See the "Open questions" section of the concept (secrets marking, event log form
 ## Next steps
 - TASK-1 frontmatter schema, TASK-2 event format, TASK-3 Godot spike (markdown to token on grid).
 - TASK-4: ask the group what they use most in Foundry.
+
+- 2026-11-01: TASK-18 (Mochi): `Reveal` (`scripts/text/reveal.gd`) parses `<reveal id for>` tags (inline, block,
+  nested = intersection, unclosed = hidden, `for` missing = DM) and `%% %%` (DM-only). Visibility at a moment =
+  tag `for` + `reveal.changed` events up to then (`EventLog.change_reveal`, `Reveal.grants_from`), so rewinding
+  hides again. The host cuts every entry (`Campaign.entry_view`, RPC `request_entry`) and every note per
+  recipient; visible tags stay with the *current* `for` for the frames (TASK-19). `NetTable.change_reveal`
+  logs the event and pushes new views to players who have the entry open. `secrets.gd` removed.
+  Open question: players may currently request any entry by ref (they only see untagged text); whether an
+  entry's existence itself is secret is for TASK-6/21. Test: `tools/test_reveal.gd`, `tools/test_net_table.gd`.

@@ -20,6 +20,7 @@ signal status_changed(text: String)
 signal notes_changed
 signal table_changed  ## the map or tokens were (re)built
 signal pcs_changed  ## lobby: the PC list or my PC changed
+signal entry_received(ref: String)  ## player: an entry I asked for arrived or changed
 
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
@@ -49,12 +50,14 @@ var map_id := ""
 var owners := {}  ## pc ref -> player id (pcs.json `player`, plus picks of free PCs)
 var claims := {}  ## pc ref -> player id: free PCs picked in the lobby (table.json)
 var peers := {}  ## peer id -> player id (connected and greeted)
+var watching := {}  ## entity ref -> {peer id: true}: who has it open (gets reveal updates)
 
 # Player
 var pc_choices: Array = []  ## [{id, name, class, image, taken_by}]
 var my_pc := ""
 var my_player := ""  ## my player id, as the host knows me
 var assets_received := 0  ## images downloaded this run (tests check the cache with it)
+var entries := {}  ## ref -> the entry as the host let me see it (request_entry)
 var _state := {}  ## the last table view from the host
 var _requested := {}  ## sha -> true while downloading
 
@@ -263,6 +266,8 @@ func _on_peer_disconnected(id: int) -> void:
 	if is_dm() and peers.has(id):
 		_set_status("%s left (their PC stays at the table)" % campaign.player_name(peers[id]))
 		peers.erase(id)
+		for ref: String in watching:
+			watching[ref].erase(id)
 
 
 # --- Joining and the lobby -------------------------------------------------------------
@@ -301,7 +306,7 @@ func hello(name_given: String) -> void:
 		return
 	peers[sender] = player
 	pc_list.rpc_id(sender, campaign.pc_choices(owners), _pc_of(player), player)
-	sync_notes.rpc_id(sender, notes.session, notes.entries, notes.names)
+	sync_notes.rpc_id(sender, notes.session, _notes_for(player), notes.names)
 	receive_table.rpc_id(sender, view_for(player))
 	var who := campaign.player_name(player)
 	_set_status("%s joined as %s" % [who, campaign.name_of(_pc_of(player))] if _pc_of(player) != "" \
@@ -617,7 +622,18 @@ func _handle_note(sender: int, text: String) -> void:
 	var entry := notes.add(text.left(10000), by, event_log.day, event_log.time)
 	_show_notes()
 	for peer_id: int in peers:
-		note_added.rpc_id(peer_id, entry)
+		note_added.rpc_id(peer_id, _note_for(entry, peers[peer_id]))
+
+
+## A note as a player may see it (<reveal> and %% work in notes too).
+static func _note_for(entry: Dictionary, player: String) -> Dictionary:
+	var out := entry.duplicate()
+	out["text"] = Reveal.filter(str(entry.get("text", "")), player)
+	return out
+
+
+func _notes_for(player: String) -> Array:
+	return notes.entries.map(func(e: Dictionary) -> Dictionary: return _note_for(e, player))
 
 
 ## DM -> players: a new note.
@@ -646,7 +662,7 @@ func start_next_session() -> void:
 	event_log.start_session(event_log.session + 1)
 	_open_notes()
 	for peer_id: int in peers:
-		sync_notes.rpc_id(peer_id, notes.session, notes.entries, notes.names)
+		sync_notes.rpc_id(peer_id, notes.session, _notes_for(peers[peer_id]), notes.names)
 	_set_status("Session %d started" % event_log.session)
 
 
@@ -660,6 +676,56 @@ func _open_notes() -> void:
 
 func _show_notes() -> void:
 	notes_changed.emit()
+
+
+# --- Entries and reveals (TASK-18) -------------------------------------------------------
+
+## Opens an entry: the DM reads it whole, players ask the host, which cuts out what they
+## may not see (Campaign.entry_view) and keeps them updated when a reveal changes.
+func open_entry(ref: String) -> void:
+	if is_dm():
+		entries[ref] = campaign.entry_view(ref, "dm")
+		entry_received.emit(ref)
+	elif is_online():
+		request_entry.rpc_id(1, ref)
+
+
+## Player -> DM.
+@rpc("any_peer", "call_remote", "reliable")
+func request_entry(ref: String) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if not is_dm() or not peers.has(sender) or campaign.entry(ref).is_empty():
+		return
+	if not watching.has(ref):
+		watching[ref] = {}
+	watching[ref][sender] = true
+	receive_entry.rpc_id(sender, ref, entry_for(peers[sender], ref))
+
+
+## Host: an entry as `player` may see it now (the event log's clock).
+func entry_for(player: String, ref: String) -> Dictionary:
+	return campaign.entry_view(ref, player, event_log.effective(ref, event_log.day, event_log.time))
+
+
+## DM -> player.
+@rpc("authority", "call_remote", "reliable")
+func receive_entry(ref: String, entry: Dictionary) -> void:
+	entries[ref] = entry
+	entry_received.emit(ref)
+
+
+## DM: shows (add) or hides (remove) a <reveal> passage for players during play. Logged as
+## reveal.changed; players who have the entry open get the new view at once.
+func change_reveal(ref: String, reveal: String, add: Array = [], remove: Array = [], field := "description") -> Dictionary:
+	if not is_dm():
+		return {}
+	var e := event_log.change_reveal(ref, reveal, field, add, remove)
+	for peer_id: int in watching.get(ref, {}):
+		if peers.has(peer_id):
+			receive_entry.rpc_id(peer_id, ref, entry_for(peers[peer_id], ref))
+	if entries.has(ref):
+		open_entry(ref)
+	return e
 
 
 func _set_status(text: String) -> void:

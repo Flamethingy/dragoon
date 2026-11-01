@@ -145,6 +145,11 @@ func lose_item(entity: String, item: String, qty := 1, to := "", by := "dm") -> 
 	return append("item.lost", entity, data, by)
 
 
+## Who may see a <reveal> passage of an entity's text (reveal-visibility.md).
+func change_reveal(entity: String, reveal: String, field := "description", add: Array = [], remove: Array = [], by := "dm") -> Dictionary:
+	return append("reveal.changed", entity, {"reveal": reveal, "field": field, "add": add, "remove": remove}, by)
+
+
 ## Moves the world clock (an event, so it can be rewound too).
 func advance_time(to_day: int, to_time: int, reason := "", by := "dm") -> Dictionary:
 	return append("time.advanced", "", {"from_day": day, "from_time": time, "reason": reason}, by, -1, to_day, to_time)

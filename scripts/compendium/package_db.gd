@@ -4,9 +4,11 @@ extends RefCounted
 ## thread so the UI keeps running. Every entry gets a few bookkeeping keys:
 ## `_kind`, `_package` (id), `_package_name`, `_dir` (package folder, for images) and
 ## `_key` (lower-case name, for search and wikilinks).
-## Unified index (TASK-6): with `campaign_dir` set, the campaign's entries are loaded too, and
-## every entry gets `_layer` (campaign, world or core). Names and refs resolve campaign ->
-## world (the campaign's own world first) -> core, so a campaign copy hides the original.
+## Worlds (timelines.md) are packages too: those in data/worlds next to the packages folder are
+## loaded along (and world packages still in the packages folder).
+## Unified index (TASK-6, TASK-32): with `timeline_dir` set, the entries made in that timeline
+## are loaded too, and every entry gets `_layer` (timeline, world or core). Names and refs
+## resolve timeline -> world (the timeline's own world first) -> core.
 
 signal loaded
 
@@ -21,12 +23,12 @@ const LINK_PRIORITY := ["classes", "spells", "monsters", "items", "races", "subc
 const FEATURE_LISTS := ["traits", "actions", "bonus_actions", "reactions", "legendary_actions"]
 
 var root := ""
-## A campaign folder to include ("" = packages only).
-var campaign_dir := ""
-var campaign_world := ""  ## the campaign's world package id (campaign.json `world`)
-## Kinds of a campaign folder that aren't entries for the book.
-const CAMPAIGN_SKIP := ["campaign", "notes", "table"]
-const LAYERS := ["campaign", "world", "core"]
+## A timeline folder to include ("" = packages only).
+var timeline_dir := ""
+var timeline_world := ""  ## the timeline's world package id
+## Worlds folder ("" = data/worlds next to the packages folder).
+var worlds_root := ""
+const LAYERS := ["timeline", "world", "core"]
 var packages: Array[Dictionary] = []  ## manifests, sorted by name
 var entries := {}  ## kind -> Array[Dictionary], sorted by name (published entries only)
 var drafts := {}  ## kind -> Array[Dictionary] of drafts (TASK-30): kept out of lists, search, links
@@ -66,64 +68,66 @@ func _load_all() -> void:
 	var found_packages: Array[Dictionary] = []
 	var found := {}
 	var problems := PackedStringArray()
-	var dir := DirAccess.open(root)
-	if dir == null:
+	var folders := PackedStringArray()
+	if DirAccess.dir_exists_absolute(root):
+		for id in DirAccess.get_directories_at(root):
+			folders.append(root.path_join(id))
+	var worlds := worlds_root if worlds_root != "" else root.get_base_dir().path_join("worlds")
+	if DirAccess.dir_exists_absolute(worlds) and worlds.simplify_path() != root.simplify_path():
+		for id in DirAccess.get_directories_at(worlds):
+			folders.append(worlds.path_join(id))
+	if folders.is_empty() and not DirAccess.dir_exists_absolute(root):
 		problems.append("Packages folder not found: %s" % root)
-	else:
-		var disabled := PackageManager.new(root)._disabled()
-		for id in dir.get_directories():
-			if id.begins_with(".") or id in disabled:
-				continue  # being installed, or switched off in the Packages window
-			var folder := root.path_join(id)
-			var manifest: Variant = _read_json(folder.path_join("package.json"), problems)
-			if not manifest is Dictionary:
+	var disabled := PackageManager.new(root)._disabled()
+	for folder in folders:
+		var id := folder.get_file()
+		if id.begins_with(".") or id in disabled:
+			continue  # being installed, or switched off in the Packages window
+		var manifest: Variant = _read_json(folder.path_join("package.json"), problems)
+		if not manifest is Dictionary:
+			continue
+		manifest["_dir"] = folder
+		found_packages.append(manifest)
+		for file in DirAccess.get_files_at(folder):
+			if not file.ends_with(".json") or file == "package.json":
 				continue
-			manifest["_dir"] = folder
-			found_packages.append(manifest)
-			for file in DirAccess.get_files_at(folder):
-				if not file.ends_with(".json") or file == "package.json":
-					continue
-				var kind := file.get_basename()
-				var list: Variant = _read_json(folder.path_join(file), problems)
-				if not list is Array:
-					continue
-				var bucket: Array = found.get_or_add(kind, [])
-				var layer := "world" if str(manifest.get("kind", "")) == "world" else "core"
-				manifest["_layer"] = layer
-				for e: Variant in list:
-					if e is Dictionary:
-						e["_kind"] = kind
-						e["_package"] = str(manifest.get("id", id))
-						e["_package_name"] = str(manifest.get("name", id))
-						e["_dir"] = folder
-						e["_layer"] = layer
-						e["_key"] = str(e.get("name", "")).to_lower()
-						bucket.append(e)
+			var kind := file.get_basename()
+			var list: Variant = _read_json(folder.path_join(file), problems)
+			if not list is Array:
+				continue
+			var bucket: Array = found.get_or_add(kind, [])
+			var layer := "world" if str(manifest.get("kind", "")) == "world" else "core"
+			manifest["_layer"] = layer
+			for e: Variant in list:
+				if e is Dictionary:
+					e["_kind"] = kind
+					e["_package"] = str(manifest.get("id", id))
+					e["_package_name"] = str(manifest.get("name", id))
+					e["_dir"] = folder
+					e["_layer"] = layer
+					e["_key"] = str(e.get("name", "")).to_lower()
+					bucket.append(e)
 	var world := ""
-	if campaign_dir != "" and FileAccess.file_exists(campaign_dir.path_join("campaign.json")):
-		var info: Variant = _read_json(campaign_dir.path_join("campaign.json"), problems)
-		if info is Dictionary:
-			world = str(info.get("world", ""))
-			var cid := str(info.get("id", campaign_dir.get_file()))
-			var m := {"id": cid, "name": str(info.get("name", cid)), "kind": "campaign", "_dir": campaign_dir, "_layer": "campaign"}
-			found_packages.append(m)
-			for file in DirAccess.get_files_at(campaign_dir):
-				if not file.ends_with(".json") or file.get_basename() in CAMPAIGN_SKIP:
+	if timeline_dir != "" and Timeline.is_timeline(timeline_dir):
+		var tl := Timeline.new(timeline_dir)
+		world = tl.world_id()
+		var tid := tl.id()
+		var m := {"id": tid, "name": str(tl.info.get("name", tid)), "kind": "timeline", "_dir": timeline_dir, "_layer": "timeline"}
+		found_packages.append(m)
+		tl.created("")  # builds the timeline's entries
+		for kind: String in tl._created:
+			var bucket: Array = found.get_or_add(kind, [])
+			for raw: Dictionary in tl.created(kind).values():
+				if not raw.has("name"):
 					continue
-				var kind := file.get_basename()
-				var list: Variant = _read_json(campaign_dir.path_join(file), problems)
-				if not list is Array:
-					continue
-				var bucket: Array = found.get_or_add(kind, [])
-				for e: Variant in list:
-					if e is Dictionary and e.has("name"):
-						e["_kind"] = kind
-						e["_package"] = cid
-						e["_package_name"] = m.name
-						e["_dir"] = campaign_dir
-						e["_layer"] = "campaign"
-						e["_key"] = str(e.get("name", "")).to_lower()
-						bucket.append(e)
+				var e: Dictionary = raw.duplicate(true)
+				e["_kind"] = kind
+				e["_package"] = tid
+				e["_package_name"] = m.name
+				e["_dir"] = timeline_dir
+				e["_layer"] = "timeline"
+				e["_key"] = str(e.get("name", "")).to_lower()
+				bucket.append(e)
 	var by_name_key := func(a: Dictionary, b: Dictionary) -> bool: return a["_key"] < b["_key"]
 	var found_drafts := {}
 	for kind: String in found:
@@ -151,7 +155,7 @@ func _load_all() -> void:
 			ids["%s/%s/%s" % [e["_package"], kind, e.get("id", "")]] = e  # reachable by id, not by name
 	# Hand over in one go (the main thread only reads after `loaded`).
 	packages = found_packages
-	campaign_world = world
+	timeline_world = world
 	entries = found
 	drafts = found_drafts
 	_by_name = names
@@ -215,7 +219,7 @@ func kinds_with(with_drafts: bool) -> PackedStringArray:
 	return out
 
 
-## Every draft of every package and the campaign.
+## Every draft of every package and the timeline.
 func all_drafts() -> Array:
 	var out := []
 	for k: String in drafts:
@@ -258,17 +262,17 @@ func resolve(target: String, prefer_package := "") -> Dictionary:
 	return best
 
 
-## 0 campaign, 1 the campaign's world, 2 other worlds, 3 core.
+## 0 timeline, 1 the timeline's world, 2 other worlds, 3 core.
 func layer_rank(e: Dictionary) -> int:
 	match str(e.get("_layer", "core")):
-		"campaign":
+		"timeline":
 			return 0
 		"world":
-			return 1 if e.get("_package") == campaign_world else 2
+			return 1 if e.get("_package") == timeline_world else 2
 	return 3
 
 
-## A ref (data-layout.md): "kind/id" searches campaign -> world -> core; "world:kind/id" and
+## A ref (data-layout.md): "kind/id" searches timeline -> world -> core; "world:kind/id" and
 ## "core:<package>/kind/id" skip the search. {} if nothing matches.
 func resolve_ref(ref: String) -> Dictionary:
 	if ref.begins_with("core:"):
@@ -370,7 +374,7 @@ func put_entry(entry: Dictionary, kind: String, store: EntryStore, old_id := "")
 	e["_package"] = store.id
 	e["_package_name"] = store.name
 	e["_dir"] = store.folder
-	e["_layer"] = "campaign" if store.layer == EntryStore.CAMPAIGN else "world" if store.layer == EntryStore.WORLD else "core"
+	e["_layer"] = "timeline" if store.layer == EntryStore.TIMELINE else "world" if store.layer == EntryStore.WORLD else "core"
 	e["_key"] = str(e.get("name", "")).to_lower()
 	var draft := EntryStore.is_draft(e)
 	var bucket: Array = (drafts if draft else entries).get_or_add(kind, [])

@@ -8,14 +8,14 @@ extends SceneTree
 
 const PORT := 47831
 const DIR := "user://test_roll_tables"
-const CAMPAIGN := DIR + "/campaign"
+const TIMELINE := DIR + "/worlds/westmarch/timelines/red-fang"
 
 var _failed := 0
 
 
 func _init() -> void:
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
-	Campaign.install_example(CAMPAIGN)
+	Worlds.install_example(ProjectSettings.globalize_path(DIR + "/worlds"))
 	var db := PackageDB.new()
 	db.load_now()
 	StatBlock.db = db
@@ -138,7 +138,7 @@ func _table(branch: String, cache: String, ui := false) -> NetTable:
 	var t := NetTable.new()
 	t.name = "Table"
 	t.auto_ui = ui
-	t.campaign_dir = CAMPAIGN
+	t.timeline_dir = TIMELINE
 	t.cache_dir = DIR.path_join("cache_" + cache)
 	holder.add_child(t)
 	return t

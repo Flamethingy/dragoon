@@ -13,7 +13,7 @@ var _failed := 0
 func _init() -> void:
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
 	var root := ProjectSettings.globalize_path(DIR + "/packages")
-	Campaign._copy_tree("res://examples/packages/westmarch", root.path_join("westmarch"))
+	Worlds.copy_tree("res://examples/worlds/westmarch", root.path_join("westmarch"))
 	_mini_source(root.path_join("mini-source"))
 	var manager := PackageManager.new(root)
 	manager.set_enabled("westmarch", true)

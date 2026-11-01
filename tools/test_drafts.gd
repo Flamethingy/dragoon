@@ -1,7 +1,7 @@
 extends SceneTree
 ## Headless check of drafts (TASK-30): the flag (missing = published, always written), new
 ## entries saved as draft or published, Publish / Back to draft with their features and tables,
-## drafts hidden from lists, search, links, suggestions, Send and players; "Show drafts" in the
+## drafts hidden from lists, search, links, suggestions and players; "Show drafts" in the
 ## binder and a package's contents with marked cards; the Drafts page grouped by package and
 ## kind with last edit, missing fields and its count on the bookmark.
 ## godot --headless --path . -s tools/test_drafts.gd
@@ -16,8 +16,7 @@ func _init() -> void:
 	var root := ProjectSettings.globalize_path(DIR + "/packages")
 	var vale := root.path_join("vale")
 	_package(vale)
-	var camp := ProjectSettings.globalize_path(DIR + "/campaign")
-	_campaign(camp)
+	var camp := _timeline(vale)
 
 	# --- The flag -------------------------------------------------------------------------------------
 	var store := EntryStore.open(vale)
@@ -47,12 +46,9 @@ func _init() -> void:
 	_check(db.draft_count() == 2, "draft count (%d)" % db.draft_count())
 
 	# Players never get drafts.
-	var campaign := Campaign.new(camp, null)
+	var campaign := Timeline.new(camp)
 	_check(campaign.entry_view("npcs/spy", Reveal.DM).size() > 0 and campaign.entry_view("npcs/spy", "p1").is_empty(), "players don't get a draft entry")
 	_check(campaign.pc_choices({}).size() == 1 and campaign.pc_choices({})[0].id == "pcs/ash", "draft PCs are not offered")
-	var cstore := EntryStore.open(camp)
-	var sent := cstore.send_world(store)
-	_check("monsters/goblin" in sent.sent and not sent.sent.has("monsters/hag") and not sent.skipped.has("monsters/hag"), "Send world leaves drafts at home (%s)" % sent)
 
 	# --- In the binder --------------------------------------------------------------------------------
 	var screen := SubViewport.new()
@@ -167,12 +163,13 @@ func _package(folder: String) -> void:
 			"parent": "monsters/hag", "draft": true}])
 
 
-func _campaign(folder: String) -> void:
-	DirAccess.make_dir_recursive_absolute(folder)
-	EntryStore._write(folder.path_join("campaign.json"), {"id": "camp", "name": "Camp", "world": "vale"})
-	EntryStore._write(folder.path_join("npcs.json"), [{"id": "spy", "name": "Spy", "description": "Secret.", "draft": true}])
-	EntryStore._write(folder.path_join("pcs.json"), [
-		{"id": "ash", "name": "Ash"}, {"id": "wip", "name": "Not Ready", "draft": true}])
+func _timeline(world: String) -> String:
+	var dir := Timeline.create(world, "Camp")
+	var tl := Timeline.new(dir)
+	tl.add_entry("npcs", {"id": "spy", "name": "Spy", "description": "Secret.", "draft": true})
+	tl.add_entry("pcs", {"id": "ash", "name": "Ash"})
+	tl.add_entry("pcs", {"id": "wip", "name": "Not Ready", "draft": true})
+	return dir
 
 
 func _check(ok: bool, what: String) -> void:

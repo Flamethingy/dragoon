@@ -1,6 +1,6 @@
 extends SceneTree
 ## Headless check of SessionNotes (TASK-14, notes.json since TASK-20): entries with real
-## date, session number and in-world day, saved in the campaign's notes.json and read back.
+## date, session number and in-world day, saved in the timeline's notes.json and read back.
 ## godot --headless --path . -s tools/test_session_notes.gd
 
 const CAMPAIGN := "user://test_notes"
@@ -14,7 +14,7 @@ func _init() -> void:
 	var notes := SessionNotes.open(CAMPAIGN, 3, cal)
 	notes.names = {"dm": "Nico", "ann": "Ann"}
 	_check(notes.entries.is_empty(), "new session starts empty")
-	_check(notes.path.ends_with("notes.json"), "one notes.json per campaign (%s)" % notes.path)
+	_check(notes.path.ends_with("notes.json"), "one notes.json per timeline (%s)" % notes.path)
 
 	var a := notes.add("The party reached the **old mill**.", "dm", 400, 14 * 60 + 30, "2026-11-01T20:15")
 	notes.add("Ask the miller about [[Goblin Chief]].\nTwo lines.", "ann", 400, 15 * 60, "", "npcs/mira")

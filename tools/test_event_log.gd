@@ -1,7 +1,7 @@
 extends SceneTree
 ## Headless check of EventLog and Replay: godot --headless --path . -s tools/test_event_log.gd
 
-const FILE := "user://test_campaign/events.jsonl"
+const FILE := "user://test_event_log/events.jsonl"
 
 var _failed := 0
 

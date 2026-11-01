@@ -113,8 +113,8 @@ func _init() -> void:
 	_check(str(job3.get("target")) == "new:Swamp Finds", "new package target")
 	await _wait_done(jobs, str(job3.id))
 	panel.refresh_jobs()
-	var swamp := EntryStore.open(root.path_join("swamp-finds"))
-	_check(swamp != null and swamp.layer == EntryStore.WORLD and EntryStore.is_draft(swamp.find("monsters", "bog-hag")), "a new world package gets the drafts")
+	var swamp := EntryStore.open(PackageManager.new(root).folder_of("swamp-finds"))
+	_check(swamp != null and swamp.layer == EntryStore.WORLD and EntryStore.is_draft(swamp.find("monsters", "bog-hag")), "a new world package (in worlds/, with its Prologue) gets the drafts")
 	_check(str(jobs.status(str(job3.id)).target) == "swamp-finds", "the job now points at it")
 	var changed := [false]
 	panel.changed.connect(func() -> void: changed[0] = true)
@@ -168,7 +168,7 @@ func _init() -> void:
 	_check(form != null and form.find_child("SourcePage", true, false) is CropView and form.crop.texture != null, "the editor shows the source page")
 	form.crop.selection = Rect2i(10, 10, 60, 80)
 	form.apply_crop()
-	_check(str(EntryStore.open(root.path_join("swamp-finds")).find("monsters", "bog-hag").get("image")) == "art/bog-hag.jpg", "and crops the picture")
+	_check(str(EntryStore.open(PackageManager.new(root).folder_of("swamp-finds")).find("monsters", "bog-hag").get("image")) == "art/bog-hag.jpg", "and crops the picture")
 	form.cancelled.emit()
 
 	# Publish all from one import job (no clashes in the new package for job3's own copies).
@@ -186,7 +186,7 @@ func _init() -> void:
 		await process_frame
 		q = book.find_child("DuplicateQuestion", false, false) as ConfirmationDialog
 		guard += 1
-	var swamp_after := EntryStore.open(root.path_join("swamp-finds"))
+	var swamp_after := EntryStore.open(PackageManager.new(root).folder_of("swamp-finds"))
 	var left := swamp_after.list("monsters").filter(func(e: Dictionary) -> bool: return EntryStore.is_draft(e) and e.origin.get("job") == str(job3.id))
 	_check(left.is_empty() and _published(swamp_after, "Ogre Cook") == 3, "every draft of that job is published (%s left)" % [left.map(func(e: Dictionary) -> String: return str(e.id))])
 	_check(swamp_after.list("monsters").any(func(e: Dictionary) -> bool: return EntryStore.is_draft(e) and e.origin.get("job") == str(job4.id)), "the other job's drafts stay drafts")

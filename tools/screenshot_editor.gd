@@ -28,8 +28,8 @@ func _init() -> void:
 	text.set_caret_column(text.get_line(0).length())
 	text.text_changed.emit()
 	await _shot(out.path_join("editor_npc.png"))
-	# Reveal frames (TASK-19): the example amulet from tools/test_reveal_ui.gd's campaign.
-	var camp := EntryStore.open(ProjectSettings.globalize_path("user://test_reveal_ui/campaign"))
+	# Reveal frames (TASK-19): the example amulet from tools/test_reveal_ui.gd's timeline.
+	var camp := EntryStore.open(ProjectSettings.globalize_path("user://test_reveal_ui/worlds/westmarch/timelines/red-fang"))
 	if camp:
 		var aform := book.edit_entry(camp, "items", "moonstone-amulet")
 		var t: CodeEdit = aform.find_child("Field_description", true, false).find_child("Text", true, false)

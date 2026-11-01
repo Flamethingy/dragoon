@@ -65,9 +65,9 @@ func _init() -> void:
 
 	# --- Editor: prep edits the text, a session logs events -----------------------------------
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
-	var campaign_dir := Campaign.install_example(ProjectSettings.globalize_path(DIR + "/campaign"))
+	var campaign_dir := Worlds.install_example(ProjectSettings.globalize_path(DIR + "/worlds"))
 	var store := EntryStore.open(campaign_dir)
-	var elog := EventLog.open(campaign_dir.path_join("events.jsonl"))
+	var elog := store.timeline.events_log
 	var form := EntryEditor.new()
 	form.event_log = elog
 	form.accounts = Markdown.reveal_accounts
@@ -89,14 +89,14 @@ func _init() -> void:
 	_check(ev.type == "reveal.changed" and ev.entity == "items/moonstone-amulet" and ev.data.reveal == "r7" \
 		and ev.data.add == ["bob"] and ev.data.remove == [], "session: reveal.changed for Bob (%s)" % ev.get("data"))
 	_check(text.text.contains("<reveal id=\"r7\" for=\"ann\">"), "the text keeps the starting viewers")
-	var camp := Campaign.new(campaign_dir, AssetCache.new(DIR + "/cache"))
+	var camp := Timeline.new(campaign_dir, AssetCache.new(DIR + "/cache"))
 	_check(camp.entry_view("items/moonstone-amulet", "bob", elog.effective("items/moonstone-amulet")).description.contains("Function"), "Bob now gets the function")
 	form.apply_reveal("description", text, r7, r7, PackedStringArray(["ann", "bob"]))
 	_check(elog.events.back().id == ev.id, "no event when nothing changes")
 
-	# --- Account colors in the campaign ----------------------------------------------------------
-	_check(camp.accounts().ann.color == "#2e6e60" and camp.accounts().dm.name == "Nico", "accounts from campaign.json")
-	_check(camp.set_color("ann", "#112233") and Campaign.new(campaign_dir, null).accounts().ann.color == "#112233", "color saved")
+	# --- Account colors in the timeline ----------------------------------------------------------
+	_check(camp.accounts().ann.color == "#2e6e60" and camp.accounts().dm.name == "Nico", "accounts from timeline.json")
+	_check(camp.set_color("ann", "#112233") and Timeline.new(campaign_dir, null).accounts().ann.color == "#112233", "color saved")
 	_check(not camp.set_color("carl", "#112233") and not camp.set_color("ann", "nope"), "unknown account / bad color refused")
 
 	print("reveal ui: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))

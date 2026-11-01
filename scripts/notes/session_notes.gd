@@ -1,7 +1,7 @@
 class_name SessionNotes
 extends RefCounted
-## Session notes (TASK-14, JSON since TASK-20): every note of a campaign is an entry in
-## `<campaign>/notes.json` (data-layout.md):
+## Session notes (TASK-14, JSON since TASK-20): every note of a timeline is an entry in
+## `<timeline>/notes.json` (data-layout.md):
 ##
 ##     {"id": "n3", "text": "Markdown", "real": "2026-11-01T20:15", "session": 3,
 ##      "day": 4211, "time": 870, "by": "ann", "about": ""}
@@ -19,12 +19,12 @@ var entries: Array[Dictionary] = []  ## this session's notes
 var names := {}
 
 
-## The notes of one session of the campaign in `campaign_folder`.
-static func open(campaign_folder: String, session_number: int, world_calendar: WorldCalendar) -> SessionNotes:
+## The notes of one session of the timeline in `timeline_folder`.
+static func open(timeline_folder: String, session_number: int, world_calendar: WorldCalendar) -> SessionNotes:
 	var notes := SessionNotes.new()
 	notes.session = session_number
 	notes.calendar = world_calendar
-	notes.path = campaign_folder.path_join(FILE)
+	notes.path = timeline_folder.path_join(FILE)
 	for e in read_all(notes.path):
 		if int(e.get("session", 0)) == session_number:
 			notes.entries.append(e)

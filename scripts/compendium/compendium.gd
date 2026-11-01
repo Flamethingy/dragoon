@@ -29,14 +29,14 @@ var db := PackageDB.new()
 var tabs_file := "user://compendium_tabs.json"
 ## The packages folder ("" = PackageDB.default_root()).
 var packages_root := ""
-## The campaign whose entries are in the book too (TASK-6); "" = none. Standalone the
-## cover has a picker (remembered in tabs_file); the table sets it to its campaign.
-var campaign_dir := ""
-## Shown over the table: a Close button and no campaign picker.
+## The timeline whose own entries are in the book too (TASK-6, TASK-32); "" = none.
+## Standalone the side bar has a picker (remembered in tabs_file); the table sets it to its
+## timeline.
+var timeline_dir := ""
+## Shown over the table: a Close button and no timeline picker.
 var closable := false
-var _campaign_pick: OptionButton
-var _send_world: Button
-var _campaigns: PackedStringArray = []
+var _timeline_pick: OptionButton
+var _timelines: PackedStringArray = []
 
 var _status: Label
 var _progress: ProgressBar
@@ -87,7 +87,7 @@ var _bg_from := ""  ## the tab that was current when background opening started
 var highlighted := {}  ## key -> msec when a tab was last highlighted (tests)
 var _tab_menu: PopupMenu
 var _hovered_meta := ""
-## The running campaign's log, if any: editor saves during a session become events.
+## The timeline's log, if any: editor saves during a session become events.
 var event_log: EventLog
 var _stores := {}  ## package id -> EntryStore
 ## Packages as cards (TASK-23): every installed package (on or off) as an entry of kind
@@ -108,13 +108,16 @@ func _ready() -> void:
 	_build()
 	db.loaded.connect(_on_loaded)
 	get_window().files_dropped.connect(_on_files_dropped)
-	if campaign_dir == "" and not closable and tabs_file != "" and FileAccess.file_exists(tabs_file):
+	if packages_root == "":  # the real data folder: old campaigns become timelines (TASK-32)
+		for line in Worlds.migrate_data(PackageDB.default_root().get_base_dir()):
+			print("Migrated: ", line)
+	if timeline_dir == "" and not closable and tabs_file != "" and FileAccess.file_exists(tabs_file):
 		var state: Variant = JSON.parse_string(FileAccess.get_file_as_string(tabs_file))
-		if state is Dictionary and Campaign.is_campaign(str(state.get("campaign", ""))):
-			campaign_dir = str(state.campaign)
-	_fill_campaigns()
-	db.campaign_dir = campaign_dir
-	_open_campaign_log()
+		if state is Dictionary and Timeline.is_timeline(str(state.get("timeline", ""))):
+			timeline_dir = str(state.timeline)
+	_fill_timelines()
+	db.timeline_dir = timeline_dir
+	_open_timeline_log()
 	for pkg in ImportJobs.new(packages_root).merge_finished():  # imports finished while the book was closed
 		PackageManager.new(packages_root).set_enabled(pkg, true)
 	db.load_async(packages_root)
@@ -160,16 +163,12 @@ func _build() -> void:
 	_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_tabs.add_theme_constant_override("separation", 6)
 	tabs_scroll.add_child(_tabs)
-	_campaign_pick = OptionButton.new()
-	_campaign_pick.tooltip_text = "A campaign whose entries are in the book too (they win over world and core)"
-	_campaign_pick.clip_text = true
-	_campaign_pick.item_selected.connect(func(i: int) -> void: set_campaign(_campaigns[i]))
-	side.add_child(_campaign_pick)
-	_send_world = Button.new()
-	_send_world.text = "Send world..."
-	_send_world.tooltip_text = "Copy a whole world package into the campaign (entries it doesn't have yet)"
-	_send_world.pressed.connect(_send_world_dialog)
-	side.add_child(_send_world)
+	_timeline_pick = OptionButton.new()
+	_timeline_pick.name = "TimelinePick"
+	_timeline_pick.tooltip_text = "A timeline whose own entries are in the book too (they win over world and core)"
+	_timeline_pick.clip_text = true
+	_timeline_pick.item_selected.connect(func(i: int) -> void: set_timeline(_timelines[i]))
+	side.add_child(_timeline_pick)
 	if closable:
 		var close := Button.new()
 		close.text = "Back to the table"
@@ -928,7 +927,7 @@ func open_tab(e: Dictionary, background := false) -> EntryView:
 	view.link_clicked.connect(func(link: String) -> void: _follow(link, view.entry, true))
 	view.link_background.connect(func(link: String) -> void: _follow(link, view.entry, true, true))
 	view.back_requested.connect(go_back_tab)
-	view.send_requested.connect(func(entry: Dictionary) -> void: send_to_campaign(entry))
+	view.send_requested.connect(func(entry: Dictionary) -> void: promote_to_world(entry))
 	view.edit_requested.connect(func(_e: Dictionary) -> void: start_edit(view))
 	_views.add_child(view)
 	_open_views[key] = view
@@ -1028,8 +1027,8 @@ func _on_tab_changed(_index: int) -> void:
 		_last_key = key
 	for k: String in _open_views:
 		_open_views[k].back_button.disabled = _back_target(k) == null
-		_open_views[k].send_button.visible = campaign_dir != "" and _open_views[k].entry.get("_layer") != "campaign" \
-			and _open_views[k].entry.get("_kind") not in [PACKAGES, DRAFTS] and not EntryStore.is_draft(_open_views[k].entry)
+		_open_views[k].send_button.visible = timeline_dir != "" and _open_views[k].entry.get("_layer") == "timeline" \
+			and _open_views[k].entry.get("_kind") not in [PACKAGES, DRAFTS]
 	_browse.visible = key == ""
 	_browse_button.set_pressed_no_signal(key == "")
 	for k: String in _open_views:
@@ -1142,7 +1141,7 @@ func _tabs_state() -> Dictionary:
 	var list := []
 	for key in tab_keys():
 		list.append({"key": key, "scroll": _open_views[key].scroll_vertical})
-	return {"tabs": list, "current": current_tab_key(), "back_closes_tab": back_closes_tab, "campaign": campaign_dir}
+	return {"tabs": list, "current": current_tab_key(), "back_closes_tab": back_closes_tab, "timeline": timeline_dir}
 
 
 func _save_tabs() -> void:
@@ -1186,121 +1185,80 @@ func _restore_tabs(state: Variant) -> void:
 	tabs_restored.emit()
 
 
-# --- Campaign (TASK-6) ---------------------------------------------------------------------
+# --- Timeline (TASK-6, TASK-32) ---------------------------------------------------------------
 
-func _fill_campaigns() -> void:
-	_campaigns = PackedStringArray([""])
-	var root := Campaign.default_root()
-	for d in DirAccess.get_directories_at(root):
-		if Campaign.is_campaign(root.path_join(d)):
-			_campaigns.append(root.path_join(d))
-	if campaign_dir != "" and campaign_dir not in _campaigns:
-		_campaigns.append(campaign_dir)
-	_campaign_pick.clear()
-	for c in _campaigns:
-		_campaign_pick.add_item("No campaign" if c == "" else "Campaign: " + str(Campaign.new(c, null).info.get("name", c.get_file())))
-	_campaign_pick.selected = _campaigns.find(campaign_dir)
-	_campaign_pick.visible = not closable
-	_send_world.visible = campaign_dir != ""
+func _fill_timelines() -> void:
+	_timelines = PackedStringArray([""])
+	var labels := PackedStringArray(["No timeline"])
+	for w in Worlds.list(PackageManager.new(packages_root).worlds_root):
+		for t in Timeline.list(str(w._dir)):
+			_timelines.append(str(t._dir))
+			labels.append("%s: %s" % [w.get("name", w.get("id", "")), t.get("name", t.get("id", ""))])
+	if timeline_dir != "" and timeline_dir not in _timelines:
+		_timelines.append(timeline_dir)
+		labels.append("Timeline: " + timeline_dir.get_file())
+	_timeline_pick.clear()
+	for l in labels:
+		_timeline_pick.add_item(l)
+	_timeline_pick.selected = _timelines.find(timeline_dir)
+	_timeline_pick.visible = not closable
 
 
-## Shows another campaign's entries (or none) together with the packages.
-func set_campaign(path: String) -> void:
-	if path == campaign_dir and db.is_loaded:
+## Shows another timeline's entries (or none) together with the packages.
+func set_timeline(path: String) -> void:
+	if path == timeline_dir and db.is_loaded:
 		return
-	campaign_dir = path
-	db.campaign_dir = path
+	timeline_dir = path
+	db.timeline_dir = path
 	if not closable:
 		event_log = null
-	_open_campaign_log()
+	_open_timeline_log()
 	_save_tabs()
 	_reload()
 
 
-func campaign_store() -> EntryStore:
-	if campaign_dir == "":
+func timeline_store() -> EntryStore:
+	if timeline_dir == "":
 		return null
 	for p in db.packages:
-		if p.get("_layer") == "campaign":
-			return store_for({"_package": p.get("id", ""), "_dir": campaign_dir})
-	return EntryStore.open(campaign_dir)
+		if p.get("_layer") == "timeline":
+			return store_for({"_package": p.get("id", ""), "_dir": timeline_dir})
+	return EntryStore.open(timeline_dir)
 
 
-## Sends a core/world entry into the campaign (TASK-11) and opens the copy.
-func send_to_campaign(e: Dictionary) -> Dictionary:
-	var target := campaign_store()
-	var from := store_for(e)
-	if target == null or from == null:
+## Merges an entry made in the timeline into its world (timelines.md "Promote"): same ref
+## and id, so every timeline can use it. Re-reads the book and opens the world entry.
+func promote_to_world(e: Dictionary) -> Dictionary:
+	var store := timeline_store()
+	if store == null or str(e.get("_layer", "")) != "timeline":
 		return {}
-	var kind := str(e.get("_kind", ""))
-	var copy := target.send(from, kind, str(e.get("id", "")), event_log)
-	if copy.is_empty():
-		_status.text = "Couldn't send %s" % e.get("name", "?")
-		return {}
-	if kind == "monsters":  # its features came along
-		for list_key in PackageDB.FEATURE_LISTS:
-			for fid: Variant in copy.get(list_key, []):
-				var f := target.find("features", str(fid))
-				if not f.is_empty():
-					db.put_entry(f, "features", target)
-	var held := db.put_entry(copy, kind, target)
-	_after_db_change(kind)
-	open_tab(held)
-	_status.text = "Sent %s into %s" % [held.get("name", "?"), target.name]
-	return held
-
-
-## Sends a whole world package into the campaign, then re-reads the book.
-func send_world_to_campaign(world: EntryStore) -> Dictionary:
-	var target := campaign_store()
-	if target == null or world == null:
-		return {}
-	var r := target.send_world(world, event_log)
-	_status.text = "Sent %d entries from %s (%d already there)" % [r.sent.size(), world.name, r.skipped.size()]
+	var ref := "%s/%s" % [e.get("_kind", ""), e.get("id", "")]
+	var r := store.timeline.promote(ref)
+	if r.has("error"):
+		_status.text = "Couldn't promote %s: %s" % [e.get("name", "?"), r.error]
+		return r
+	_status.text = "%s is in the world now" % e.get("name", "?")
+	_stores.clear()
 	_reload()
 	return r
 
 
-func _send_world_dialog() -> void:
-	var worlds := []
-	for p in db.packages:
-		if p.get("_layer") == "world":
-			worlds.append(store_for({"_package": p.get("id", ""), "_dir": p.get("_dir", "")}))
-	var dialog := ConfirmationDialog.new()
-	dialog.title = "Send a world into the campaign"
-	dialog.ok_button_text = "Send"
-	var pick := OptionButton.new()
-	for w: EntryStore in worlds:
-		pick.add_item(w.name)
-		if w.id == db.campaign_world:
-			pick.selected = pick.item_count - 1
-	dialog.add_child(pick)
-	dialog.get_ok_button().disabled = worlds.is_empty()
-	dialog.confirmed.connect(func() -> void:
-		send_world_to_campaign(worlds[pick.selected])
-		dialog.queue_free())
-	dialog.canceled.connect(dialog.queue_free)
-	add_child(dialog)
-	dialog.popup_centered(Vector2i(380, 0))
-
-
-## Standalone, the campaign's own log, so edits during a running session become events.
-func _open_campaign_log() -> void:
-	if event_log == null and campaign_dir != "" and FileAccess.file_exists(campaign_dir.path_join("events.jsonl")):
-		event_log = EventLog.open(campaign_dir.path_join("events.jsonl"))
+## Standalone, the timeline's own log, so edits during a running session become events.
+func _open_timeline_log() -> void:
+	if event_log == null and timeline_dir != "" and Timeline.is_timeline(timeline_dir):
+		event_log = Timeline.new(timeline_dir).events_log
 
 
 # --- Editing (TASK-21) -------------------------------------------------------------------
 
-## Accounts for "Visible for" and the frame colors: the players of all campaigns in
-## data/campaigns (by id) and the DM. The book is the DM's view.
+## Accounts for "Visible for" and the frame colors: the players of every timeline of every
+## world (by id) and the DM. The book is the DM's view.
 func accounts() -> Dictionary:
 	if Markdown.reveal_accounts.is_empty():
 		var out := {}
-		var root := Campaign.default_root()
-		for d in DirAccess.get_directories_at(root):
-			if Campaign.is_campaign(root.path_join(d)):
-				out.merge(Campaign.new(root.path_join(d), null).accounts())
+		for w in Worlds.list(PackageManager.new(packages_root).worlds_root):
+			for t in Timeline.list(str(w._dir)):
+				out.merge(Timeline.new(str(t._dir)).accounts())
 		Markdown.reveal_accounts = out
 		Markdown.reveal_viewer = Reveal.DM
 	return Markdown.reveal_accounts
@@ -1445,7 +1403,7 @@ func _build_package_cards() -> void:
 		e["_kind"] = PACKAGES
 		e["_package"] = id
 		e["_package_name"] = str(m.get("name", id))
-		e["_dir"] = db.root.path_join(id)
+		e["_dir"] = manager.folder_of(id)
 		e["_key"] = str(m.get("name", id)).to_lower()
 		e["_text"] = (str(m.get("name", id)) + "\n" + str(m.get("description", ""))).to_lower()
 		e["_layer"] = "world" if str(m.get("kind", "")) == "world" else "core"
@@ -1601,7 +1559,7 @@ func browse_package(package_id: String, kind: String) -> void:
 
 
 func _doc_path(package_id: String, file: String) -> String:
-	return db.root.path_join(package_id).path_join(file)
+	return PackageManager.new(db.root).folder_of(package_id).path_join(file)
 
 
 ## Opens a package's PDF in the system's viewer.
@@ -1668,8 +1626,8 @@ func export_package_dialog(package_id: String) -> void:
 
 # --- Rollable tables (TASK-25) -------------------------------------------------------------
 
-## Tables resolve in this book (campaign > world > core). Standalone, rolls happen here and
-## go into the campaign's event log; over the table the table rolls (TableUI sets the roller).
+## Tables resolve in this book (timeline > world > core). Standalone, rolls happen here and
+## go into the timeline's event log; over the table the table rolls (TableUI sets the roller).
 func _hook_tables() -> void:
 	RollTables.resolver = func(id: String) -> Dictionary: return db.resolve_ref("tables/" + id)
 	if not closable:

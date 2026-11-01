@@ -1,14 +1,16 @@
 class_name EntryStore
 extends RefCounted
 ## One folder of entries the VTT can edit (TASK-21): a package (package.json, kind "source" or
-## "world") or a campaign (campaign.json). Both keep one JSON array per kind (data-layout.md).
+## "world"; one JSON array per kind, data-layout.md) or a timeline of a world (timeline.json,
+## timelines.md), whose own entries live as entity events in its log: saving one there appends
+## `entity.created` / `entity.edited`, deleting `entity.deleted`; the world files stay as they are.
 ##
 ## - Source packages are read-only unless unlocked (`unlock()`; remembered as
 ##   `"editable": true` in package.json). The usual way is "edit a copy": copy_entry() into a
-##   world package or campaign.
+##   world package or timeline.
 ## - Writes are atomic (temp file, then rename); bookkeeping keys starting with "_" (added by
 ##   PackageDB) are never written.
-## - commit() is the editor's save: in a campaign during a running session, changes to
+## - commit() is the editor's save: in a timeline during a running session, changes to
 ##   creatures' sheet fields become `sheet.changed` events (doc-1: play state never goes back
 ##   into the files); everything else is saved to JSON.
 ## - Drafts (TASK-30, package-format.md "Drafts"): every saved entry has `draft` (bool, missing =
@@ -17,7 +19,7 @@ extends RefCounted
 
 const SOURCE := "source"
 const WORLD := "world"
-const CAMPAIGN := "campaign"
+const TIMELINE := "timeline"
 const CREATURES := ["pcs", "npcs", "monsters"]
 ## Creature fields that stay entity edits even during a session (what something *is*).
 const TEXT_FIELDS := ["id", "name", "description", "image", "token", "tags", "origin", "source", "draft", "edited"]
@@ -28,23 +30,25 @@ const KEEP_BOTH := "keep"
 const SKIP := "skip"
 
 var folder := ""
-var layer := ""  ## source, world or campaign
+var layer := ""  ## source, world or timeline
 var id := ""
 var name := ""
-var manifest := {}  ## package.json or campaign.json
+var manifest := {}  ## package.json or timeline.json
+var timeline: Timeline  ## for the timeline layer
 var _kinds := {}  ## kind -> Array (file order)
 
 
-## The store for a package or campaign folder; null if it is neither.
+## The store for a package or timeline folder; null if it is neither.
 static func open(path: String) -> EntryStore:
 	var s := EntryStore.new()
 	s.folder = path
 	if FileAccess.file_exists(path.path_join("package.json")):
 		s.manifest = _read(path.path_join("package.json"), {})
 		s.layer = str(s.manifest.get("kind", SOURCE))
-	elif FileAccess.file_exists(path.path_join("campaign.json")):
-		s.manifest = _read(path.path_join("campaign.json"), {})
-		s.layer = CAMPAIGN
+	elif Timeline.is_timeline(path):
+		s.timeline = Timeline.new(path)
+		s.manifest = s.timeline.info
+		s.layer = TIMELINE
 	else:
 		return null
 	s.id = str(s.manifest.get("id", path.get_file()))
@@ -80,6 +84,8 @@ func unlock() -> void:
 # --- Reading ---------------------------------------------------------------------------
 
 func list(kind: String) -> Array:
+	if layer == TIMELINE:
+		return timeline.created(kind).values()
 	if not _kinds.has(kind):
 		var data: Variant = _read(folder.path_join(kind + ".json"), [])
 		_kinds[kind] = data if data is Array else []
@@ -127,7 +133,7 @@ func create(kind: String, entry_name: String) -> Dictionary:
 	e["id"] = free_id(kind, entry_name)
 	e["name"] = entry_name
 	e["draft"] = true  # unfinished until saved as published (TASK-30)
-	if layer != CAMPAIGN and e.has("source"):
+	if layer != TIMELINE and e.has("source"):
 		e["source"] = name
 	save(kind, e)
 	return e
@@ -142,6 +148,8 @@ func save(kind: String, entry: Dictionary, old_id := "") -> Error:
 	clean["draft"] = is_draft(clean)  # always written (TASK-30)
 	if clean.draft:
 		clean["edited"] = Time.get_datetime_string_from_system()
+	if layer == TIMELINE:
+		return _save_event(kind, clean, old_id)
 	var items := list(kind)
 	var look := old_id if old_id != "" else str(clean.get("id", ""))
 	var at := -1
@@ -159,6 +167,8 @@ func save(kind: String, entry: Dictionary, old_id := "") -> Error:
 func delete(kind: String, entry_id: String) -> Error:
 	if is_read_only():
 		return ERR_FILE_NO_PERMISSION
+	if layer == TIMELINE:
+		return OK if not timeline.delete_entry(kind, entry_id).is_empty() else ERR_DOES_NOT_EXIST
 	var items := list(kind)
 	for i in items.size():
 		if items[i] is Dictionary and str(items[i].get("id", "")) == entry_id:
@@ -313,46 +323,18 @@ func copy_entry(from: EntryStore, kind: String, entry_id: String) -> Dictionary:
 	return copy
 
 
-## "Send into the campaign" (TASK-11): a campaign copy of one core/world entry that keeps its
-## origin and drifts freely from then on; logged as entity.sent if a log is given.
-func send(from: EntryStore, kind: String, entry_id: String, events_log: EventLog = null) -> Dictionary:
-	if layer != CAMPAIGN:
-		return {}
-	var copy := copy_entry(from, kind, entry_id)
-	if not copy.is_empty() and events_log != null:
-		events_log.append("entity.sent", "%s/%s" % [kind, copy.id], {"source": source_ref(from, kind, entry_id),
-			"layer": "core" if from.layer == SOURCE else from.layer})
-	return copy
-
-
-## Sends a whole world package: every entry the campaign doesn't have yet (same id) is
-## copied. Returns {sent: ["kind/id"], skipped: ["kind/id"]}.
-func send_world(world: EntryStore, events_log: EventLog = null) -> Dictionary:
-	var out := {"sent": [], "skipped": []}
-	if layer != CAMPAIGN:
-		return out
-	for file in DirAccess.get_files_at(world.folder):
-		var kind := file.get_basename()
-		if not file.ends_with(".json") or kind == "package":
-			continue
-		for e: Variant in world.list(kind):
-			if not e is Dictionary or not e.has("id") or is_draft(e):
-				continue  # drafts stay home (TASK-30)
-			var ref := "%s/%s" % [kind, e.id]
-			if has(kind, str(e.id)):
-				out.skipped.append(ref)
-				continue
-			var copy := send(world, kind, str(e.id), events_log)
-			if not copy.is_empty():
-				out.sent.append("%s/%s" % [kind, copy.id])
-	return out
-
-
-## The qualified ref of an entry in a package (entity.sent `source`).
-static func source_ref(from: EntryStore, kind: String, entry_id: String) -> String:
-	if from.layer == SOURCE:
-		return "core:%s/%s/%s" % [from.id, kind, entry_id]
-	return "%s:%s/%s" % [from.layer, kind, entry_id]
+## A timeline entry saved as an event: new ids are created, known ones edited; a rename is
+## the old one deleted and the new one created.
+func _save_event(kind: String, clean: Dictionary, old_id: String) -> Error:
+	var eid := str(clean.get("id", ""))
+	var mine := timeline.created(kind)
+	if old_id != "" and old_id != eid and mine.has(old_id):
+		timeline.delete_entry(kind, old_id)
+	if mine.has(eid) or timeline.world_entries(kind).has(eid):
+		timeline.edit_entry(kind, clean)
+	else:
+		timeline.events_log.append("entity.created", "%s/%s" % [kind, eid], {"entry": clean})
+	return OK
 
 
 func _copy_feature(from: EntryStore, feature_id: String) -> String:
@@ -391,8 +373,8 @@ func import_image(file: String, kind: String) -> String:
 
 
 ## The editor's save. `before`: the entry as it was opened; `after`: as edited. In a
-## campaign during a session (log.in_session()), sheet fields of creatures are logged as
-## sheet.changed events and the file keeps its values; all other changes are saved.
+## timeline during a session (log.in_session()), sheet fields of creatures are logged as
+## sheet.changed events and the entry keeps its values; all other changes are saved.
 ## Returns {saved: bool, events: [ ... ], error}.
 func commit(kind: String, before: Dictionary, after: Dictionary, events_log: EventLog = null, by := "dm") -> Dictionary:
 	var out := {"saved": false, "events": [], "error": OK}
@@ -400,7 +382,9 @@ func commit(kind: String, before: Dictionary, after: Dictionary, events_log: Eve
 		out.error = ERR_FILE_NO_PERMISSION
 		return out
 	var file_version := strip(after)
-	if layer == CAMPAIGN and events_log != null and events_log.in_session() and kind in CREATURES and not before.is_empty():
+	if layer == TIMELINE and events_log == null:
+		events_log = timeline.events_log
+	if layer == TIMELINE and events_log.in_session() and kind in CREATURES and not before.is_empty():
 		var old := strip(before)
 		var ref := "%s/%s" % [kind, old.get("id", "")]
 		for change: Array in diff(old, file_version):
@@ -464,7 +448,7 @@ static func strip(e: Dictionary) -> Dictionary:
 
 func _save_kind(kind: String) -> Error:
 	var err := _write(folder.path_join(kind + ".json"), list(kind))
-	if err == OK and layer != CAMPAIGN:
+	if err == OK and layer != TIMELINE:
 		var counts: Dictionary = manifest.get("counts", {}) if manifest.get("counts") is Dictionary else {}
 		counts[kind] = list(kind).size()
 		manifest["counts"] = counts
@@ -473,7 +457,7 @@ func _save_kind(kind: String) -> Error:
 
 
 func _save_manifest() -> void:
-	_write(folder.path_join("campaign.json" if layer == CAMPAIGN else "package.json"), manifest)
+	_write(folder.path_join("timeline.json" if layer == TIMELINE else "package.json"), manifest)
 
 
 static func _read(path: String, fallback: Variant) -> Variant:

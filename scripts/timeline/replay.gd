@@ -1,6 +1,6 @@
 class_name Replay
 ## Rebuilds state from events (doc-1 - Event-format.md): the state of an entity at a
-## moment = its campaign copy (frontmatter) + all its effective events up to then.
+## moment = its entry (world or timeline) + all its effective events up to then.
 ## Sheets are never overwritten; this is how the VTT gets "current" values.
 
 

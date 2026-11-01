@@ -3,7 +3,7 @@ extends PanelContainer
 ## A creature's sheet at the table (TASK-10), opened by clicking its token. Our fixed layout:
 ## HP, AC, speed, the six abilities, saves, skills, senses, then the info page (description).
 ## Owners and the DM get the whole sheet with HP and AC controls; everything goes through
-## NetTable (change_hp / change_field) and becomes an event, the campaign file stays as it is.
+## NetTable (change_hp / change_field) and becomes an event, the entry stays as it is.
 ## Others only see the info page.
 
 var table: NetTable

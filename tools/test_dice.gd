@@ -7,7 +7,7 @@ extends SceneTree
 const PORT := 47821
 const ADDRESS := "127.0.0.1:47821"
 const DIR := "user://test_dice"
-const CAMPAIGN := DIR + "/campaign"
+const TIMELINE := DIR + "/worlds/westmarch/timelines/red-fang"
 
 var _failed := 0
 
@@ -37,8 +37,8 @@ func _init() -> void:
 
 	# --- By name, from a sheet ------------------------------------------------------------------
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
-	Campaign.install_example(CAMPAIGN)
-	var camp := Campaign.new(ProjectSettings.globalize_path(CAMPAIGN), null)
+	Worlds.install_example(ProjectSettings.globalize_path(DIR + "/worlds"))
+	var camp := Timeline.new(ProjectSettings.globalize_path(TIMELINE), null)
 	var aria := camp.entry("pcs/aria")
 	var feats := camp.entries("features")
 	_check(_f(aria, "Perception", feats) == ["1d20+4"], "Perception: the sheet's +4")
@@ -133,7 +133,7 @@ func _table(branch: String, cache: String, ui := false) -> NetTable:
 	var t := NetTable.new()
 	t.name = "Table"
 	t.auto_ui = ui
-	t.campaign_dir = CAMPAIGN
+	t.timeline_dir = TIMELINE
 	t.cache_dir = DIR.path_join("cache_" + cache)
 	holder.add_child(t)
 	return t

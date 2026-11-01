@@ -12,7 +12,7 @@ func _init() -> void:
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
 	var base := ProjectSettings.globalize_path(DIR)
 	var pkg_root := base.path_join("data/packages")
-	Campaign._copy_tree("res://examples/packages/westmarch", pkg_root.path_join("westmarch"))
+	Worlds.copy_tree("res://examples/worlds/westmarch", pkg_root.path_join("westmarch"))
 	ImportJobs.settings_file = DIR + "/settings.cfg"
 	ImportJobs.set_setting("agent", ProjectSettings.globalize_path("res://tools/fake_import_agent.py"))
 	var input := base.path_join("Swamp Bestiary.pdf")

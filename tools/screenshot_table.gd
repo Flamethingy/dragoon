@@ -9,7 +9,7 @@ var _out := "user://"
 
 func _init() -> void:
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
-	Campaign.install_example(DIR + "/campaign")
+	Worlds.install_example(ProjectSettings.globalize_path(DIR + "/worlds"))
 	_free_borin()
 	var args := OS.get_cmdline_user_args()
 	_out = args[0] if args.size() > 0 else "user://"
@@ -66,7 +66,7 @@ func _table(branch: String, ui: bool) -> NetTable:
 	var t := NetTable.new()
 	t.name = "Table"
 	t.auto_ui = ui
-	t.campaign_dir = DIR + "/campaign"
+	t.timeline_dir = DIR + "/worlds/westmarch/timelines/red-fang"
 	t.cache_dir = DIR.path_join("cache_" + branch)
 	holder.add_child(t)
 	return t
@@ -88,9 +88,7 @@ func _until(done: Callable, frames := 600) -> void:
 
 ## Borin without a player, so the picker has something to offer.
 func _free_borin() -> void:
-	var file := DIR + "/campaign/pcs.json"
-	var pcs: Array = JSON.parse_string(FileAccess.get_file_as_string(file))
-	for e: Dictionary in pcs:
-		if e.id == "borin":
-			e.player = ""
-	FileAccess.open(file, FileAccess.WRITE).store_string(JSON.stringify(pcs, "  "))
+	var tl := Timeline.new(ProjectSettings.globalize_path(DIR + "/worlds/westmarch/timelines/red-fang"))
+	var e := tl.entry("pcs/borin").duplicate(true)
+	e["player"] = ""
+	tl.edit_entry("pcs", e)

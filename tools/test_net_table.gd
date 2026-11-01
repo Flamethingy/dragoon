@@ -1,31 +1,31 @@
 extends SceneTree
 ## Headless check of the shared table (TASK-5/7/8/13/14/20): a DM and players in one
 ## process (each table with its own MultiplayerAPI) talk over ENet on localhost. The DM hosts
-## a copy of the example JSON campaign; in the copy Borin has no player, so Bob picks him.
+## a copy of the example timeline; in the copy Borin has no player, so Bob picks him.
 ## godot --headless --path . -s tools/test_net_table.gd
 
 const PORT := 47777
 const ADDRESS := "127.0.0.1:47777"
 const DIR := "user://test_net"
-const CAMPAIGN := DIR + "/campaign"
+const TIMELINE := DIR + "/worlds/westmarch/timelines/red-fang"
 
 var _failed := 0
 
 
 func _init() -> void:
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
-	Campaign.install_example(CAMPAIGN)
-	_set_player(CAMPAIGN, "borin", "")  # a free PC to pick in the lobby
+	Worlds.install_example(ProjectSettings.globalize_path(DIR + "/worlds"))
+	_set_player(TIMELINE, "borin", "")  # a free PC to pick in the lobby
 	await process_frame  # the tree is ready from the first frame on
 	var dm := _table("DM", "dm")
 	var ann := _table("Ann", "ann")
 	var bob := _table("Bob", "bob", true)  # with the UI, so the screens get built too
 	await process_frame
 
-	# --- Lobby: host, join with a player name, own PC from pcs.json ---------------------
+	# --- Lobby: host, join with a player name, own PC from the timeline ---------------------
 	_check(dm.host(PORT) == OK, "DM hosts")
 	_check(dm.grid.map_id == "maps/forest-road", "DM shows the first map (%s)" % dm.grid.map_id)
-	_check(dm.owners == {"pcs/aria": "ann"}, "owners from pcs.json (%s)" % [dm.owners])
+	_check(dm.owners == {"pcs/aria": "ann"}, "owners from the PCs (%s)" % [dm.owners])
 	_check(ann.join(ADDRESS, "Ann") == OK, "Ann joins")
 	await _until(func() -> bool: return ann.my_pc == "pcs/aria" and ann.grid.tokens.has("pcs/aria"))
 	_check(ann.my_pc == "pcs/aria" and ann.my_player == "ann", "Ann (player ann) plays Aria right away")
@@ -47,7 +47,7 @@ func _init() -> void:
 	for secret in ["reveal", "stolen caravan", "brother", "Leader of the", "Half-elf ranger", "[[Red Fang", "Chain Shirt"]:
 		_check(not seen.contains(secret), "player data has no '%s'" % secret)
 
-	# --- Logins: only campaign players, once; free PCs can be picked --------------------
+	# --- Logins: only the timeline's players, once; free PCs can be picked --------------------
 	bob.join(ADDRESS, "Carl")
 	await _until(func() -> bool: return bob.status.begins_with("Can't join"))
 	_check(bob.status.contains("isn't a player"), "an unknown name is refused (%s)" % bob.status)
@@ -148,7 +148,7 @@ func _init() -> void:
 	_check(ann2.assets_received == 0, "everything from the disk cache (%d downloads)" % ann2.assets_received)
 
 	# --- Notes (TASK-14) ----------------------------------------------------------------
-	var prep := dm.notes.entries.size()  # the example campaign has a prep note
+	var prep := dm.notes.entries.size()  # the example timeline has a prep note
 	_check(ann2.notes.entries.size() == prep, "joining players get the session's notes (%d)" % prep)
 	bob.add_note("We hide in the **barn**.")
 	await _until(func() -> bool: return ann2.notes.entries.size() == prep + 1 and dm.notes.entries.size() == prep + 1)
@@ -157,7 +157,7 @@ func _init() -> void:
 		var n: Dictionary = ann2.notes.entries.back()
 		_check(n.by == "bob" and n.session == dm.event_log.session, "note stamped by the DM (%s)" % n)
 		_check(ann2.notes.heading(n).contains(" · Prep · ") and ann2.notes.heading(n).ends_with(" · Bob"), "player formats the heading (%s)" % ann2.notes.heading(n))
-	_check(FileAccess.get_file_as_string(CAMPAIGN.path_join("notes.json")).contains("We hide in the **barn**."), "note saved in notes.json")
+	_check(FileAccess.get_file_as_string(TIMELINE.path_join("notes.json")).contains("We hide in the **barn**."), "note saved in notes.json")
 	dm.start_next_session()
 	await _until(func() -> bool: return bob.notes.session == 1)
 	_check(bob.notes.session == 1 and bob.notes.entries.is_empty(), "next session: new empty notes for everyone")
@@ -192,7 +192,7 @@ func _init() -> void:
 	ann2.set_my_color(Color.html("#ff8800"))
 	await _until(func() -> bool: return bob.accounts.get("ann", {}).get("color") == "#ff8800")
 	_check(bob.accounts.ann.color == "#ff8800", "Ann's new color reaches Bob")
-	_check(FileAccess.get_file_as_string(CAMPAIGN.path_join("campaign.json")).contains("#ff8800"), "saved in campaign.json")
+	_check(FileAccess.get_file_as_string(ProjectSettings.globalize_path(TIMELINE).path_join("timeline.json")).contains("#ff8800"), "saved in timeline.json")
 	dm.set_my_color(Color.html("#334455"))
 	await _until(func() -> bool: return ann2.accounts.get("dm", {}).get("color") == "#334455")
 	_check(ann2.accounts.dm.color == "#334455", "the DM's color too")
@@ -219,7 +219,7 @@ func _table(branch: String, cache: String, ui := false) -> NetTable:
 	var t := NetTable.new()
 	t.name = "Table"
 	t.auto_ui = ui
-	t.campaign_dir = CAMPAIGN
+	t.timeline_dir = TIMELINE
 	t.cache_dir = DIR.path_join("cache_" + cache)
 	holder.add_child(t)
 	return t
@@ -239,12 +239,9 @@ func _check(ok: bool, what: String) -> void:
 		printerr("FAIL: ", what)
 
 
-## Sets a PC's player in a campaign's pcs.json.
-func _set_player(campaign: String, pc: String, player: String) -> void:
-	var file := campaign.path_join("pcs.json")
-	var pcs: Array = JSON.parse_string(FileAccess.get_file_as_string(file))
-	for e: Dictionary in pcs:
-		if e.id == pc:
-			e.player = player
-	var f := FileAccess.open(file, FileAccess.WRITE)
-	f.store_string(JSON.stringify(pcs, "  "))
+## Sets a PC's player in the timeline (an entity.edited event, as the editor would).
+func _set_player(timeline_dir: String, pc: String, player: String) -> void:
+	var tl := Timeline.new(ProjectSettings.globalize_path(timeline_dir))
+	var e := tl.entry("pcs/" + pc).duplicate(true)
+	e["player"] = player
+	tl.edit_entry("pcs", e)

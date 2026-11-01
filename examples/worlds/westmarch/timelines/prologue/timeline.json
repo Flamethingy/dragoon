@@ -1,0 +1,16 @@
+{
+ "format": "dragoon-timeline",
+ "format_version": 1,
+ "id": "prologue",
+ "name": "Prologue",
+ "description": "",
+ "parent": "",
+ "fork_at": 0,
+ "players": [],
+ "dm": {
+  "name": "DM",
+  "color": "#7a3b8f"
+ },
+ "next_session": 1,
+ "created": "2026-11-01T16:02:58"
+}

@@ -13,17 +13,26 @@ const FORMAT_VERSION := 1  ## newest version this VTT understands
 const SETTINGS := "user://packages.cfg"
 
 var root := ""  ## the packages folder
+var worlds_root := ""  ## the worlds folder (timelines.md): data/worlds next to the packages
 
 
 func _init(packages_root := "") -> void:
 	root = packages_root if packages_root != "" else PackageDB.default_root()
+	worlds_root = root.get_base_dir().path_join("worlds")
+
+
+## The folder of package `id`: in the packages folder, else in the worlds folder.
+func folder_of(id: String) -> String:
+	if id != "" and not DirAccess.dir_exists_absolute(root.path_join(id)) and DirAccess.dir_exists_absolute(worlds_root.path_join(id)):
+		return worlds_root.path_join(id)
+	return root.path_join(id)
 
 
 # --- Export --------------------------------------------------------------------------
 
 ## Writes the package folder `id` into one file. Returns OK or an error.
 func export_package(id: String, file: String) -> Error:
-	var folder := root.path_join(id)
+	var folder := folder_of(id)
 	if not DirAccess.dir_exists_absolute(folder):
 		return ERR_FILE_NOT_FOUND
 	var zip := ZIPPacker.new()
@@ -92,7 +101,7 @@ func inspect(file: String) -> Dictionary:
 		return result
 	result.manifest = manifest
 	result.top = manifest_path.get_base_dir()
-	result.exists = DirAccess.dir_exists_absolute(root.path_join(id))
+	result.exists = DirAccess.dir_exists_absolute(folder_of(id))
 	result.ok = true
 	return result
 
@@ -112,13 +121,15 @@ func install(file: String, conflict := Conflict.CANCEL) -> Dictionary:
 				return {"ok": false, "error": "A package with the id \"%s\" is already installed" % id, "id": id}
 			Conflict.KEEP_BOTH:
 				var n := 2
-				while DirAccess.dir_exists_absolute(root.path_join("%s-%d" % [id, n])):
+				while DirAccess.dir_exists_absolute(folder_of("%s-%d" % [id, n])):
 					n += 1
 				manifest["id"] = "%s-%d" % [id, n]
 				manifest["name"] = "%s (%d)" % [manifest.get("name", id), n]
 				id = manifest.id
 	# Unpack into a temporary folder first, so a broken file never leaves half a package.
-	var temp := root.path_join(".installing-" + id)
+	var home := worlds_root if str(manifest.get("kind", "")) == "world" else root
+	DirAccess.make_dir_recursive_absolute(home)
+	var temp := home.path_join(".installing-" + id)
 	_delete_tree(temp)
 	DirAccess.make_dir_recursive_absolute(temp)
 	var zip := ZIPReader.new()
@@ -144,8 +155,8 @@ func install(file: String, conflict := Conflict.CANCEL) -> Dictionary:
 	var mf := FileAccess.open(temp.path_join("package.json"), FileAccess.WRITE)
 	mf.store_string(JSON.stringify(manifest, "  "))
 	mf.close()
-	var target := root.path_join(id)
-	if DirAccess.dir_exists_absolute(target):
+	var target := home.path_join(id)
+	if DirAccess.dir_exists_absolute(folder_of(id)):
 		var moved := remove(id)  # replace: the old one goes to removed/
 		if moved != OK:
 			_delete_tree(temp)
@@ -189,7 +200,7 @@ func _key() -> String:
 
 ## Moves the package folder to `<root>/../removed/<id>-<timestamp>`.
 func remove(id: String) -> Error:
-	var folder := root.path_join(id)
+	var folder := folder_of(id)
 	if not DirAccess.dir_exists_absolute(folder):
 		return ERR_FILE_NOT_FOUND
 	var trash := root.get_base_dir().path_join("removed")
@@ -201,10 +212,14 @@ func remove(id: String) -> Error:
 ## Manifests of every installed package, enabled or not: [{manifest..., "_enabled"}].
 func list() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
-	for id in DirAccess.get_directories_at(root):
+	var folders := Array(DirAccess.get_directories_at(root)).map(func(d: String) -> String: return root.path_join(d))
+	if DirAccess.dir_exists_absolute(worlds_root) and worlds_root.simplify_path() != root.simplify_path():
+		folders.append_array(Array(DirAccess.get_directories_at(worlds_root)).map(func(d: String) -> String: return worlds_root.path_join(d)))
+	for folder: String in folders:
+		var id := folder.get_file()
 		if id.begins_with("."):
 			continue
-		var m: Variant = JSON.parse_string(FileAccess.get_file_as_string(root.path_join(id).path_join("package.json")))
+		var m: Variant = JSON.parse_string(FileAccess.get_file_as_string(folder.path_join("package.json")))
 		if m is Dictionary:
 			m["_folder"] = id
 			m["_enabled"] = is_enabled(id)
@@ -216,13 +231,13 @@ func list() -> Array[Dictionary]:
 # --- Manifest, size, documents (TASK-23) ------------------------------------------------
 
 func manifest(id: String) -> Dictionary:
-	var m: Variant = JSON.parse_string(FileAccess.get_file_as_string(root.path_join(id).path_join("package.json")))
+	var m: Variant = JSON.parse_string(FileAccess.get_file_as_string(folder_of(id).path_join("package.json")))
 	return m if m is Dictionary else {}
 
 
 ## Bytes of everything in the package folder (what an export packs, PDFs included).
 func package_size(id: String) -> int:
-	var folder := root.path_join(id)
+	var folder := folder_of(id)
 	var total := 0
 	for rel in _files_under(folder, ""):
 		var f := FileAccess.open(folder.path_join(rel), FileAccess.READ)
@@ -237,7 +252,7 @@ func documents(id: String) -> Array:
 	for d: Variant in manifest(id).get("documents", []):
 		if d is Dictionary and str(d.get("file", "")) != "":
 			var doc: Dictionary = d.duplicate()
-			doc["exists"] = FileAccess.file_exists(root.path_join(id).path_join(str(d.file)))
+			doc["exists"] = FileAccess.file_exists(folder_of(id).path_join(str(d.file)))
 			out.append(doc)
 	return out
 
@@ -245,7 +260,7 @@ func documents(id: String) -> Array:
 ## Copies a PDF (or any document) into the package's docs/ folder and lists it in the
 ## manifest. Returns the new document entry, or {"error": text}.
 func add_document(id: String, path: String, title := "") -> Dictionary:
-	var folder := root.path_join(id)
+	var folder := folder_of(id)
 	if not FileAccess.file_exists(folder.path_join("package.json")):
 		return {"error": "No package \"%s\"" % id}
 	if not FileAccess.file_exists(path):

@@ -1,7 +1,7 @@
 extends SceneTree
 ## Headless check of EntryStore and Schema (TASK-21, data side): create / edit / rename /
 ## duplicate / delete in a world package, read-only source packages and "edit a copy",
-## campaign edits during a session as sheet.changed events.
+## timeline edits during a session as sheet.changed events.
 ## godot --headless --path . -s tools/test_entry_store.gd
 
 const DIR := "user://test_store"
@@ -64,19 +64,21 @@ func _init() -> void:
 	mini.unlock()
 	_check(not EntryStore.open(src_dir).is_read_only(), "unlocked explicitly (kept in package.json)")
 
-	# --- Campaign: prep edits save, session edits become events ------------------------------
-	var campaign_dir := Campaign.install_example(ProjectSettings.globalize_path(DIR + "/campaign"))
-	var camp := EntryStore.open(campaign_dir)
-	_check(camp.layer == "campaign", "campaign folder opens as a store")
-	var elog := EventLog.open(campaign_dir.path_join("events.jsonl"))
+	# --- Timeline: prep edits are entity events, session edits sheet.changed ------------------
+	var tl_dir := Worlds.install_example(ProjectSettings.globalize_path(DIR + "/worlds"))
+	var camp := EntryStore.open(tl_dir)
+	_check(camp.layer == EntryStore.TIMELINE, "a timeline folder opens as a store")
+	var world_file := tl_dir.get_base_dir().get_base_dir().path_join("monsters.json")
+	var elog := camp.timeline.events_log
 	var chief_before := camp.find("monsters", "goblin-chief").duplicate(true)
 	var chief := chief_before.duplicate(true)
 	chief["hp"] = 30
 	var r := camp.commit("monsters", chief_before, chief, elog)
-	_check(r.saved and r.events.is_empty() and EntryStore.open(campaign_dir).find("monsters", "goblin-chief").hp == 30, "prep edit saved to JSON")
+	_check(r.saved and r.events.is_empty() and EntryStore.open(tl_dir).find("monsters", "goblin-chief").hp == 30, "prep edit saved (entity.edited)")
+	_check(elog.events.back().type == "entity.edited" and not FileAccess.file_exists(world_file), "as an event, no world file written")
 	elog.start_session(1)
 	_check(elog.in_session(), "session running")
-	var before := EntryStore.open(campaign_dir).find("monsters", "goblin-chief").duplicate(true)
+	var before := EntryStore.open(tl_dir).find("monsters", "goblin-chief").duplicate(true)
 	var after := before.duplicate(true)
 	after["hp"] = 12
 	after["stats"]["str"] = 16
@@ -85,8 +87,8 @@ func _init() -> void:
 	var types: Array = r.events.map(func(e: Dictionary) -> String: return "%s %s %d>%d" % [e.type, e.data.path, e.data.from, e.data.to])
 	_check(r.events.size() == 2, "two sheet.changed events (%s)" % [types])
 	_check(types.has("sheet.changed hp 30>12") and types.has("sheet.changed stats.str %d>16" % before.stats.str), "hp and stats.str logged")
-	var on_disk := EntryStore.open(campaign_dir).find("monsters", "goblin-chief")
-	_check(on_disk.hp == 30 and on_disk.stats.str == before.stats.str, "play state not written into the file")
+	var on_disk := EntryStore.open(tl_dir).find("monsters", "goblin-chief")
+	_check(on_disk.hp == 30 and on_disk.stats.str == before.stats.str, "play state not written into the entry")
 	_check(on_disk.description == "Now missing an ear.", "the description is an entity edit: saved")
 	elog.end_session()
 	_check(not elog.in_session(), "session ended")

@@ -9,7 +9,7 @@ extends ScrollContainer
 signal link_clicked(meta: String)
 signal edit_requested(entry: Dictionary)
 signal back_requested  ## the back arrow next to the title (TASK-24)
-signal send_requested(entry: Dictionary)  ## "Send to campaign" (TASK-11)
+signal send_requested(entry: Dictionary)  ## "Promote to world": a timeline entry goes into the world (TASK-32)
 ## A link middle-clicked: open it in a background tab (TASK-24).
 signal link_background(meta: String)
 
@@ -256,13 +256,14 @@ func _header(e: Dictionary) -> Control:
 	if EntryStore.is_draft(e):
 		sub.text = "Draft  ·  " + sub.text
 	if e.get("_kind") == Compendium.DRAFTS:
-		sub.text = "Unfinished entries of every package and the campaign"
+		sub.text = "Unfinished entries of every package and the timeline"
 	sub.add_theme_color_override("font_color", UISkin.TAN)
 	sub.add_theme_font_size_override("font_size", 14)
 	col.add_child(sub)
 	send_button = Button.new()
-	send_button.text = "Send to campaign"
-	send_button.tooltip_text = "Make a campaign copy (keeps its origin, then drifts freely)"
+	send_button.text = "Promote to world"
+	send_button.name = "Promote"
+	send_button.tooltip_text = "Put this entry, made in the timeline, into the world package so every timeline can use it"
 	send_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	send_button.visible = false
 	send_button.pressed.connect(func() -> void: send_requested.emit(entry))

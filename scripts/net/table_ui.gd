@@ -9,7 +9,7 @@ const PC_CARD := Vector2(150, 190)
 var table: NetTable
 
 var _lobby: Control
-var _campaign: LineEdit
+var _timeline: LineEdit
 var _port: LineEdit
 var _name: LineEdit
 var _address: LineEdit
@@ -87,10 +87,10 @@ func _refresh() -> void:
 	_picker.visible = picking
 	if picking:
 		_fill_picker()
-	if dm and _maps.item_count != table.campaign.maps().size():
+	if dm and _maps.item_count != table.timeline.maps().size():
 		_maps.clear()
-		for id in table.campaign.maps():
-			_maps.add_item(table.campaign.name_of(id))
+		for id in table.timeline.maps():
+			_maps.add_item(table.timeline.name_of(id))
 			_maps.set_item_metadata(_maps.item_count - 1, id)
 	if dm:
 		for i in _maps.item_count:
@@ -149,13 +149,13 @@ func _build_lobby(root: Control) -> void:
 	col.add_child(row)
 
 	var host := _form(row, "Host a session (DM)")
-	_campaign = _field(host, "Campaign folder", table.campaign_dir)
-	_campaign.placeholder_text = "empty = the example campaign"
+	_timeline = _field(host, "Timeline folder", table.timeline_dir)
+	_timeline.placeholder_text = "empty = the example timeline (Westmarch: Red Fang)"
 	_port = _field(host, "Port", str(NetTable.DEFAULT_PORT))
 	var host_button := Button.new()
 	host_button.text = "Host as DM"
 	host_button.pressed.connect(func() -> void:
-		table.campaign_dir = _campaign.text.strip_edges()
+		table.timeline_dir = _timeline.text.strip_edges()
 		table.host(int(_port.text) if _port.text.is_valid_int() else NetTable.DEFAULT_PORT))
 	host.add_child(host_button)
 
@@ -280,7 +280,7 @@ func _build_bar(root: Control) -> void:
 	row.add_child(_maps)
 	_book_button = Button.new()
 	_book_button.text = "Compendium"
-	_book_button.tooltip_text = "Core, world and this campaign's entries; edit them (session edits become events)"
+	_book_button.tooltip_text = "Core, world and this timeline's entries; edit them (session edits become events)"
 	_book_button.pressed.connect(open_compendium)
 	row.add_child(_book_button)
 	_color = ColorPickerButton.new()
@@ -295,14 +295,14 @@ func _build_bar(root: Control) -> void:
 	row.add_child(_status)
 
 
-## DM: the compendium over the table, with this campaign's entries and event log (TASK-6).
+## DM: the compendium over the table, with this timeline's entries and event log (TASK-6).
 func open_compendium() -> Compendium:
 	if _book != null:
 		_book.show()
 		return _book
 	_book = Compendium.new()
 	_book.closable = true
-	_book.campaign_dir = table.campaign_dir
+	_book.timeline_dir = table.timeline_dir
 	_book.event_log = table.event_log
 	_book.close_requested.connect(func() -> void: _book.hide())
 	_bar.get_parent().add_child(_book)

@@ -5,7 +5,7 @@ extends RefCounted
 ## row and shows the result; clicking a row's range picks it by hand. Formulas in the cells
 ## ("2d10 acid damage") are roll links too.
 ## Who resolves and who rolls is set by whoever owns the screen: the compendium (local rolls,
-## logged in the campaign's event log if one is open) or the table (the host rolls, everyone
+## logged in the timeline's event log if one is open) or the table (the host rolls, everyone
 ## sees it in the roll log, the DM can roll hidden with Shift).
 
 signal changed(table_id: String)  ## a table got a result: views showing it re-render
@@ -25,7 +25,7 @@ static var resolver: Callable
 static var roller: Callable
 ## (formula) -> void: roll a formula somewhere else. Unset = roll here.
 static var formula_roller: Callable
-## Local rolls are logged here when set (the compendium's campaign log).
+## Local rolls are logged here when set (the compendium's timeline log).
 static var event_log: EventLog
 static var results := {}  ## id -> {value, row, manual}
 

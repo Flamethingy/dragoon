@@ -158,8 +158,8 @@ func drafts(job_id: String) -> EntryStore:
 ## The target package for a job: an existing package or a new world package ("new:<name>").
 func target_store(target: String) -> EntryStore:
 	if target.begins_with("new:"):
-		return EntryStore.create_world(packages_root, target.substr(4).strip_edges())
-	return EntryStore.open(packages_root.path_join(target))
+		return EntryStore.open(Worlds.create(target.substr(4).strip_edges(), "default", PackageManager.new(packages_root).worlds_root))
+	return EntryStore.open(PackageManager.new(packages_root).folder_of(target))
 
 
 ## Merges every finished job that is not merged yet; returns the ids of the packages that got drafts.

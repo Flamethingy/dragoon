@@ -1,20 +1,20 @@
 class_name NetTable
 extends Node
-## The shared table (TASK-5 spike, grown for TASK-7/8/14/20). The DM hosts a campaign folder
-## (JSON, data-layout.md) over ENet; players join by address with their player name from
-## campaign.json and get their PC (pcs.json `player`), or pick a free one in the lobby.
+## The shared table (TASK-5 spike, grown for TASK-7/8/14/20). The DM hosts a timeline of a
+## world (timelines.md) over ENet; players join by address with their player name from
+## timeline.json and get their PC (its `player`), or pick a free one in the lobby.
 ##
 ## The DM instance owns all state. Players only ever receive a compact, whitelisted view
-## of the current map and its tokens (Campaign.map_view / token_view, no bodies, no
+## of the current map and its tokens (Timeline.map_view / token_view, no bodies, no
 ## DM-only keys), and they only *request* changes: the host checks them (players may move
-## only their own PC), writes events to the campaign's EventLog and broadcasts the result.
+## only their own PC), writes events to the timeline's EventLog and broadcasts the result.
 ## Images go once per content hash and are cached on the clients (AssetCache).
 ## On world maps (`kind: world`) the PCs travel as one party token (TASK-13): moving it logs
 ## one token.moved per member (data.group = "party"); local maps show them one by one.
-## The current map and picks of free PCs are kept in `table.json` in the campaign folder,
+## The current map and picks of free PCs are kept in `table.json` in the timeline folder,
 ## so players can drop out and rejoin (by name) without restarting the host.
 ##
-## Command line: `-- --host[=port] [--campaign=path]` or `-- --join=ip:port --name=Aria`.
+## Command line: `-- --host[=port] [--timeline=path]` or `-- --join=ip:port --name=Aria`.
 
 signal status_changed(text: String)
 signal notes_changed
@@ -33,14 +33,14 @@ const INFO_FIELDS := ["name", "size", "type", "subtype", "race", "alignment", "d
 ## Sheet fields nobody changes from the table.
 const LOCKED_FIELDS := ["id", "player", "ref", "origin"]
 
-## Host: the campaign folder; empty = data/campaigns/red-fang (the example is copied
-## there on first use).
-@export var campaign_dir := ""
-## Host: the campaign's event log; empty = events.jsonl in the campaign folder.
+## Host: the timeline folder; empty = the example timeline data/worlds/westmarch/timelines/red-fang
+## (the example world is copied there on first use).
+@export var timeline_dir := ""
+## Host: the event log; empty = the timeline's events.jsonl (with its fork's inherited events).
 @export var log_path := ""
 @export var auto_ui := true
 @export var calendar_path := "res://calendars/default.json"
-## The login: a player's id or name from campaign.json (they are recognised by it when
+## The login: a player's id or name from timeline.json (they are recognised by it when
 ## they rejoin).
 @export var player_name := ""
 @export var cache_dir := "user://cache/assets"
@@ -51,7 +51,7 @@ var notes: SessionNotes
 var status := "Offline"
 
 # Host
-var campaign: Campaign
+var timeline: Timeline
 var event_log: EventLog
 var map_id := ""
 var owners := {}  ## pc ref -> player id (pcs.json `player`, plus picks of free PCs)
@@ -69,7 +69,7 @@ var accounts := {}  ## id -> {name, color "#rrggbb"}; "dm" = the DM (both sides)
 var sheets := {}  ## ref -> the sheet as the host let me see it (open_sheet)
 var rolls: Array = []  ## the roll log as I may see it (this session), oldest first
 var rng := RandomNumberGenerator.new()  ## host: rolls the dice
-var tables := {}  ## id -> rollable table (packages' tables.json, the campaign's win) (TASK-25)
+var tables := {}  ## id -> rollable table (packages' tables.json, the timeline's win) (TASK-25)
 const ROLL_LOG_SIZE := 100
 var sheet_watchers := {}  ## host: ref -> {peer id: true} who has the sheet open
 var _state := {}  ## the last table view from the host
@@ -112,8 +112,8 @@ func _ready() -> void:
 			join_to = arg.get_slice("=", 1)
 		elif arg.begins_with("--name="):
 			player_name = arg.get_slice("=", 1)
-		elif arg.begins_with("--campaign="):
-			campaign_dir = arg.get_slice("=", 1)
+		elif arg.begins_with("--timeline="):
+			timeline_dir = arg.get_slice("=", 1)
 	if host_port > 0:
 		host(host_port)
 	elif join_to != "":
@@ -131,21 +131,24 @@ func is_dm() -> bool:
 
 # --- Hosting -------------------------------------------------------------------------
 
-## The DM: opens the campaign and its event log (so the table continues where it
+## The DM: opens the timeline and its event log (so the table continues where it
 ## stopped) and listens on `port`.
 func host(port := DEFAULT_PORT) -> Error:
-	if campaign_dir == "":
-		campaign_dir = Campaign.install_example(Campaign.default_root().path_join("red-fang"))
-	if not Campaign.is_campaign(campaign_dir):
-		_set_status("No campaign (campaign.json) in %s" % campaign_dir)
+	if timeline_dir == "":
+		Worlds.migrate_data(PackageDB.default_root().get_base_dir())  # old campaigns (TASK-32)
+		timeline_dir = Worlds.install_example()
+	if not Timeline.is_timeline(timeline_dir):
+		_set_status("No timeline (timeline.json) in %s" % timeline_dir)
 		return ERR_FILE_NOT_FOUND
-	campaign = Campaign.new(campaign_dir, assets)
-	if log_path == "":
-		log_path = campaign.events_path()
-	event_log = EventLog.open(log_path)
+	timeline = Timeline.new(timeline_dir, assets)
+	if log_path == "" or log_path == timeline.events_path():
+		log_path = timeline.events_path()
+		event_log = timeline.events_log
+	else:
+		event_log = EventLog.open(log_path)
 	_load_table_file()
 	_update_owners()
-	var maps := campaign.maps()
+	var maps := timeline.maps()
 	if map_id not in maps:
 		map_id = maps[0] if not maps.is_empty() else ""
 	var peer := ENetMultiplayerPeer.new()
@@ -156,26 +159,29 @@ func host(port := DEFAULT_PORT) -> Error:
 	multiplayer.multiplayer_peer = peer
 	player_name = "DM"
 	_open_notes()
-	accounts = campaign.accounts()
+	accounts = timeline.accounts()
 	_apply_accounts()
 	rng.randomize()
 	load_tables()
 	_load_rolls()
 	_apply_state(view_for(""))
-	_set_status("Hosting %s on port %d (%d events in the log)" % [campaign.info.get("name", campaign.id()), port, event_log.events.size()])
+	_set_status("Hosting %s on port %d (%d events in the log)" % [timeline.info.get("name", timeline.id()), port, event_log.events.size()])
 	return OK
 
 
 ## What one player sees of the table: {map: map_view, tokens: [token_view + cell]}.
 ## `player` "" = the DM (sees the private fields of every token).
 func view_for(player: String) -> Dictionary:
-	var map := campaign.map_view(map_id)
+	var map := timeline.map_view(map_id)
 	if map.is_empty():
 		return {}
 	var on_map: Dictionary = map.tokens
 	map.erase("tokens")
 	var placed := Replay.tokens_on(map_id, event_log.effective())
 	var ids: Array = on_map.keys()
+	for id: String in placed:  # tokens placed in this timeline (token.placed events)
+		if id not in ids:
+			ids.append(id)
 	var start: Vector2i = map.party_start
 	var newcomers := 0
 	var members: Array = owners.keys()  # the party: every PC someone plays
@@ -191,7 +197,7 @@ func view_for(player: String) -> Dictionary:
 		tokens.append(_party_token(members, placed, start, map.party_token))
 	for id: String in ids:
 		var owner: String = owners.get(id, "")
-		var t := campaign.token_view(id, owner, player == "" or (owner != "" and owner == player))
+		var t := timeline.token_view(id, owner, player == "" or (owner != "" and owner == player))
 		if t.is_empty():
 			continue
 		_current_values(t)
@@ -209,7 +215,7 @@ func view_for(player: String) -> Dictionary:
 ## HP and AC on a token as they are now (the events), not as in the file.
 func _current_values(t: Dictionary) -> void:
 	var base := {}
-	for key: String in Campaign.OWNER_FIELDS:
+	for key: String in Timeline.OWNER_FIELDS:
 		if t.has(key):
 			base[key] = t[key]
 	if base.is_empty():
@@ -229,23 +235,23 @@ func _party_token(members: Array, placed: Dictionary, start: Vector2i, image: St
 	var names := PackedStringArray()
 	var players := []
 	for pc: String in members:
-		names.append(campaign.name_of(pc))
+		names.append(timeline.name_of(pc))
 		players.append(owners[pc])
 	if image == "":
-		image = campaign.token_view(members[0]).get("image", "")
+		image = timeline.token_view(members[0]).get("image", "")
 	return {"id": PARTY, "image": image, "name": "Party: %s" % ", ".join(names), "size": "medium",
 		"kind": "party", "members": members, "players": players, "cell": cell}
 
 
 ## DM: shows another map to everyone.
 func show_map_to_all(id: String) -> void:
-	if not is_dm() or id not in campaign.maps():
+	if not is_dm() or id not in timeline.maps():
 		return
 	map_id = id
 	_save_table_file()
 	_apply_state(view_for(""))
 	_send_tables()
-	_set_status("Showing %s" % campaign.name_of(id))
+	_set_status("Showing %s" % timeline.name_of(id))
 
 
 func _send_tables() -> void:
@@ -254,7 +260,7 @@ func _send_tables() -> void:
 
 
 func _send_pc_lists() -> void:
-	var choices := campaign.pc_choices(owners)
+	var choices := timeline.pc_choices(owners)
 	for peer_id: int in peers:
 		pc_list.rpc_id(peer_id, choices, _pc_of(peers[peer_id]), peers[peer_id])
 
@@ -268,14 +274,14 @@ func _pc_of(player: String) -> String:
 
 ## PCs with a `player` in pcs.json belong to them; free ones to whoever picked them.
 func _update_owners() -> void:
-	owners = campaign.owners()
+	owners = timeline.owners()
 	for pc: String in claims:
-		if not owners.has(pc) and pc in campaign.pcs():
+		if not owners.has(pc) and pc in timeline.pcs():
 			owners[pc] = claims[pc]
 
 
 func _table_file() -> String:
-	return campaign_dir.path_join("table.json")
+	return timeline_dir.path_join("table.json")
 
 
 func _load_table_file() -> void:
@@ -299,7 +305,7 @@ func _on_peer_connected(id: int) -> void:
 
 func _on_peer_disconnected(id: int) -> void:
 	if is_dm() and peers.has(id):
-		_set_status("%s left (their PC stays at the table)" % campaign.player_name(peers[id]))
+		_set_status("%s left (their PC stays at the table)" % timeline.player_name(peers[id]))
 		peers.erase(id)
 		for ref: String in watching:
 			watching[ref].erase(id)
@@ -333,21 +339,21 @@ func hello(name_given: String) -> void:
 	if not is_dm():
 		return
 	var sender := multiplayer.get_remote_sender_id()
-	var player := campaign.player_id(name_given.left(64))
+	var player := timeline.player_id(name_given.left(64))
 	if player == "":
-		join_denied.rpc_id(sender, "\"%s\" isn't a player in this campaign" % name_given.strip_edges().left(64))
+		join_denied.rpc_id(sender, "\"%s\" isn't a player in this timeline" % name_given.strip_edges().left(64))
 		return
 	if player in peers.values():
-		join_denied.rpc_id(sender, "%s is already at the table" % campaign.player_name(player))
+		join_denied.rpc_id(sender, "%s is already at the table" % timeline.player_name(player))
 		return
 	peers[sender] = player
-	pc_list.rpc_id(sender, campaign.pc_choices(owners), _pc_of(player), player)
+	pc_list.rpc_id(sender, timeline.pc_choices(owners), _pc_of(player), player)
 	receive_accounts.rpc_id(sender, accounts)
 	sync_rolls.rpc_id(sender, _rolls_for(player))
 	sync_notes.rpc_id(sender, notes.session, _notes_for(player), notes.names)
 	receive_table.rpc_id(sender, view_for(player))
-	var who := campaign.player_name(player)
-	_set_status("%s joined as %s" % [who, campaign.name_of(_pc_of(player))] if _pc_of(player) != "" \
+	var who := timeline.player_name(player)
+	_set_status("%s joined as %s" % [who, timeline.name_of(_pc_of(player))] if _pc_of(player) != "" \
 		else "%s joined, picking a character" % who)
 
 
@@ -389,23 +395,23 @@ func request_pc(pc: String) -> void:
 		return
 	var sender := multiplayer.get_remote_sender_id()
 	var player: String = peers.get(sender, "")
-	if player == "" or pc not in campaign.pcs():
+	if player == "" or pc not in timeline.pcs():
 		return
 	var taken_by: String = owners.get(pc, "")
 	if taken_by != "" and taken_by != player:
-		pc_denied.rpc_id(sender, "%s already plays %s" % [campaign.player_name(taken_by), campaign.name_of(pc)])
+		pc_denied.rpc_id(sender, "%s already plays %s" % [timeline.player_name(taken_by), timeline.name_of(pc)])
 		return
 	for other: String in claims.keys():  # one picked PC per player
 		if claims[other] == player:
 			claims.erase(other)
-	if not campaign.owners().has(pc):
+	if not timeline.owners().has(pc):
 		claims[pc] = player
 	_update_owners()
 	_save_table_file()
 	_send_pc_lists()
 	_apply_state(view_for(""))
 	_send_tables()
-	_set_status("%s plays %s" % [campaign.player_name(player), campaign.name_of(pc)])
+	_set_status("%s plays %s" % [timeline.player_name(player), timeline.name_of(pc)])
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -459,7 +465,7 @@ func request_assets(hashes: Array) -> void:
 		return
 	# Only images this player may see: their table view and the PC portraits.
 	var allowed := _hashes(view_for(peers[sender]))
-	for c: Dictionary in campaign.pc_choices(owners):
+	for c: Dictionary in timeline.pc_choices(owners):
 		allowed.append(c.image)
 	for sha: String in hashes:
 		if sha not in allowed:
@@ -707,9 +713,9 @@ func start_next_session() -> void:
 
 
 func _open_notes() -> void:
-	notes = SessionNotes.open(campaign_dir, event_log.session, notes.calendar)
-	notes.names = {"dm": str(campaign.info.get("dm", {}).get("name", "DM"))}
-	for p: Dictionary in campaign.players():
+	notes = SessionNotes.open(timeline_dir, event_log.session, notes.calendar)
+	notes.names = {"dm": str(timeline.info.get("dm", {}).get("name", "DM"))}
+	for p: Dictionary in timeline.players():
 		notes.names[str(p.id)] = str(p.get("name", p.id))
 	_show_notes()
 
@@ -742,9 +748,9 @@ func request_color(hex: String) -> void:
 
 
 func _handle_color(account: String, hex: String) -> void:
-	if not campaign.set_color(account, hex):
+	if not timeline.set_color(account, hex):
 		return
-	accounts = campaign.accounts()
+	accounts = timeline.accounts()
 	_apply_accounts()
 	for peer_id: int in peers:
 		receive_accounts.rpc_id(peer_id, accounts)
@@ -768,10 +774,10 @@ func _apply_accounts() -> void:
 # --- Entries and reveals (TASK-18) -------------------------------------------------------
 
 ## Opens an entry: the DM reads it whole, players ask the host, which cuts out what they
-## may not see (Campaign.entry_view) and keeps them updated when a reveal changes.
+## may not see (Timeline.entry_view) and keeps them updated when a reveal changes.
 func open_entry(ref: String) -> void:
 	if is_dm():
-		entries[ref] = campaign.entry_view(ref, "dm")
+		entries[ref] = timeline.entry_view(ref, "dm")
 		entry_received.emit(ref)
 	elif is_online():
 		request_entry.rpc_id(1, ref)
@@ -781,7 +787,7 @@ func open_entry(ref: String) -> void:
 @rpc("any_peer", "call_remote", "reliable")
 func request_entry(ref: String) -> void:
 	var sender := multiplayer.get_remote_sender_id()
-	if not is_dm() or not peers.has(sender) or campaign.entry(ref).is_empty():
+	if not is_dm() or not peers.has(sender) or timeline.entry(ref).is_empty():
 		return
 	if not watching.has(ref):
 		watching[ref] = {}
@@ -791,7 +797,7 @@ func request_entry(ref: String) -> void:
 
 ## Host: an entry as `player` may see it now (the event log's clock).
 func entry_for(player: String, ref: String) -> Dictionary:
-	return campaign.entry_view(ref, player, event_log.effective(ref, event_log.day, event_log.time))
+	return timeline.entry_view(ref, player, event_log.effective(ref, event_log.day, event_log.time))
 
 
 ## DM -> player.
@@ -832,24 +838,24 @@ func may_see_sheet(player: String, ref: String) -> bool:
 	return player == Reveal.DM or (player != "" and owners.get(ref, "") == player)
 
 
-## Host: a creature's sheet as `player` may see it now: its campaign copy plus its events
+## Host: a creature's sheet as `player` may see it now: its entry plus its events
 ## (Replay), never the file alone. Adds `_full`, `_editable`, `_hp_max` and `_class`.
 func sheet_for(player: String, ref: String) -> Dictionary:
-	if ref.get_slice("/", 0) not in Campaign.CREATURES:
+	if ref.get_slice("/", 0) not in Timeline.CREATURES:
 		return {}
 	var events := event_log.effective(ref, event_log.day, event_log.time)
-	var view := campaign.entry_view(ref, player, events)
+	var view := timeline.entry_view(ref, player, events)
 	if view.is_empty():
 		return {}
 	var full := may_see_sheet(player, ref)
 	var sheet := {}
 	if full:
 		sheet = Replay.entity_state(view, events)
-		sheet["_hp_max"] = int(campaign.entry(ref).get("hp", 0))
+		sheet["_hp_max"] = int(timeline.entry(ref).get("hp", 0))
 		if sheet.has("classes"):
-			sheet["_class"] = campaign.class_text(sheet)
+			sheet["_class"] = timeline.class_text(sheet)
 		var attacks := []
-		var features := campaign.entries("features")
+		var features := timeline.entries("features")
 		for key in ["features", "actions", "bonus_actions", "reactions"]:
 			for fid: Variant in sheet.get(key, []):
 				var f: Variant = features.get(str(fid), {})
@@ -864,7 +870,7 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 	sheet["_kind"] = ref.get_slice("/", 0)
 	sheet["_full"] = full
 	sheet["_editable"] = full
-	sheet["_owner"] = campaign.player_name(owners.get(ref, "")) if owners.get(ref, "") != "" else ""
+	sheet["_owner"] = timeline.player_name(owners.get(ref, "")) if owners.get(ref, "") != "" else ""
 	return sheet
 
 
@@ -969,7 +975,7 @@ func _handle_hp(sender: int, ref: String, delta: int, reason: String) -> Diction
 	data["hp"] = after
 	var e := event_log.append("hp.changed", ref, data, player)
 	_sheet_changed(ref)
-	_set_status("%s: HP %d -> %d (event %d)" % [campaign.name_of(ref), hp, after, int(e.get("id", 0))])
+	_set_status("%s: HP %d -> %d (event %d)" % [timeline.name_of(ref), hp, after, int(e.get("id", 0))])
 	return e
 
 
@@ -989,7 +995,7 @@ func _handle_field(sender: int, ref: String, path: String, value: Variant) -> Di
 		return {}
 	var e := event_log.change_sheet(ref, path, from, value, "", player)
 	_sheet_changed(ref)
-	_set_status("%s: %s -> %s (event %d)" % [campaign.name_of(ref), path, value, int(e.get("id", 0))])
+	_set_status("%s: %s -> %s (event %d)" % [timeline.name_of(ref), path, value, int(e.get("id", 0))])
 	return e
 
 
@@ -1059,7 +1065,7 @@ func _handle_roll(sender: int, query: String, ref: String, hidden: bool) -> Dict
 		_deny_roll(sender, "that's not your sheet")
 		return {}
 	var sheet := sheet_for(Reveal.DM, ref) if ref != "" else {}
-	var asked := Dice.resolve(sheet, query, campaign.entries("features")) if not sheet.is_empty() else []
+	var asked := Dice.resolve(sheet, query, timeline.entries("features")) if not sheet.is_empty() else []
 	if asked.is_empty():
 		if not Dice.is_formula(query):
 			_deny_roll(sender, "I don't know how to roll \"%s\"" % query.strip_edges())
@@ -1070,7 +1076,7 @@ func _handle_roll(sender: int, query: String, ref: String, hidden: bool) -> Dict
 		var r := Dice.roll(str(a.formula), rng)
 		r["label"] = a.label
 		results.append(r)
-	var who := str(sheet.get("name", "")) if not sheet.is_empty() else campaign.player_name(player)
+	var who := str(sheet.get("name", "")) if not sheet.is_empty() else timeline.player_name(player)
 	var data := {"roll": str(asked[0].label) if str(asked[0].label) != "" else str(asked[0].formula),
 		"formula": results[0].formula, "result": results[0].total, "dice": results[0].dice,
 		"results": results, "who": who, "hidden": hidden and player == Reveal.DM}
@@ -1095,7 +1101,7 @@ static func _roll_entry(e: Dictionary) -> Dictionary:
 	return entry
 
 
-## The rollable tables everyone may roll: every package's tables.json, the campaign's own
+## The rollable tables everyone may roll: every package's tables.json, the world's and the timeline's own
 ## (host) on top. Players load them from their own packages folder.
 func load_tables(packages_root := "") -> void:
 	tables = {}
@@ -1103,8 +1109,8 @@ func load_tables(packages_root := "") -> void:
 	var files := []
 	for d in DirAccess.get_directories_at(root):
 		files.append(root.path_join(d).path_join("tables.json"))
-	if campaign != null:
-		files.append(campaign.folder.path_join("tables.json"))
+	if timeline != null:
+		files.append(timeline.world_dir.path_join("tables.json"))
 	for file: String in files:
 		if not FileAccess.file_exists(file):
 			continue
@@ -1113,6 +1119,10 @@ func load_tables(packages_root := "") -> void:
 			for t: Variant in list:
 				if t is Dictionary and t.has("id") and not EntryStore.is_draft(t):  # drafts stay out of play (TASK-30)
 					tables[str(t.id)] = t
+	if timeline != null:
+		for t: Dictionary in timeline.created("tables").values():
+			if not EntryStore.is_draft(t):
+				tables[str(t.id)] = t
 
 
 ## Rolls a rollable table (TASK-25): the host rolls, logs dice.rolled with table, value and
@@ -1142,7 +1152,7 @@ func _handle_table_roll(sender: int, id: String, hidden: bool) -> Dictionary:
 		_deny_roll(sender, "the table's die \"%s\" isn't a formula" % t.get("dice", ""))
 		return {}
 	var row := RollTables.row_for(t, int(r.total))
-	var data := RollTables.event_data(id, t, r, row, hidden and player == Reveal.DM, campaign.player_name(player))
+	var data := RollTables.event_data(id, t, r, row, hidden and player == Reveal.DM, timeline.player_name(player))
 	var e := event_log.append("dice.rolled", "", data, player)
 	var entry := _roll_entry(e)
 	_add_roll(entry)

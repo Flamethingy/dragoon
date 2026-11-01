@@ -1,22 +1,23 @@
 extends SceneTree
 ## Headless check of character sheets at the table (TASK-10): clicking a token opens its
 ## sheet; players get their own PC's full sheet, other creatures only the info page; the DM
-## sees all; HP / AC edits become events (hp.changed, sheet.changed), pcs.json stays as it is.
+## sees all; HP / AC edits become events (hp.changed, sheet.changed), the entries stay as they are.
 ## godot --headless --path . -s tools/test_sheets.gd
 
 const PORT := 47811
 const ADDRESS := "127.0.0.1:47811"
 const DIR := "user://test_sheets"
-const CAMPAIGN := DIR + "/campaign"
+const TIMELINE := DIR + "/worlds/westmarch/timelines/red-fang"
 
 var _failed := 0
 
 
 func _init() -> void:
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
-	Campaign.install_example(CAMPAIGN)
-	var pcs_file := ProjectSettings.globalize_path(CAMPAIGN).path_join("pcs.json")
-	var pcs_before := FileAccess.get_file_as_string(pcs_file)
+	Worlds.install_example(ProjectSettings.globalize_path(DIR + "/worlds"))
+	var world_file := ProjectSettings.globalize_path(DIR + "/worlds/westmarch/npcs.json")
+	var world_before := FileAccess.get_file_as_string(world_file)
+	var pc_before: Dictionary = Timeline.new(ProjectSettings.globalize_path(TIMELINE)).created("pcs").get("aria", {}).duplicate(true)
 	await process_frame
 	var dm := _table("DM", "dm", true)
 	var ann := _table("Ann", "ann", true)
@@ -89,7 +90,8 @@ func _init() -> void:
 	_check(int(dm.sheets["monsters/goblin-chief"].hp) == 0, "the DM damages the chief (HP not below 0)")
 
 	# --- The file never changes; a restart replays ----------------------------------------------
-	_check(FileAccess.get_file_as_string(pcs_file) == pcs_before, "pcs.json untouched")
+	_check(FileAccess.get_file_as_string(world_file) == world_before, "world files untouched")
+	_check(Timeline.new(ProjectSettings.globalize_path(TIMELINE)).created("pcs").get("aria", {}) == pc_before, "the PC entry itself is untouched (play is events)")
 	_check(dm.event_log.events.size() > events_before, "all of it is in events.jsonl")
 	var dm2 := _table("DM2", "dm2")
 	await process_frame
@@ -121,7 +123,7 @@ func _table(branch: String, cache: String, ui := false) -> NetTable:
 	var t := NetTable.new()
 	t.name = "Table"
 	t.auto_ui = ui
-	t.campaign_dir = CAMPAIGN
+	t.timeline_dir = TIMELINE
 	t.cache_dir = DIR.path_join("cache_" + cache)
 	holder.add_child(t)
 	return t

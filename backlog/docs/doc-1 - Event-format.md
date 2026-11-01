@@ -48,16 +48,19 @@ One JSON object per event.
 {"id": 44, "type": "time.advanced", "entity": "", "day": 153, "time": 480, "real": "2026-11-07T21:30:00Z", "session": 3, "by": "dm", "data": {"from_day": 152, "from_time": 900, "reason": "long rest"}}
 ```
 
-## Storage: one JSONL file per campaign
+## Storage: one JSONL file per timeline
 
-`<campaign folder>/events.jsonl`: one event per line, appended, never rewritten.
+`data/worlds/<world>/timelines/<timeline>/events.jsonl` (timelines.md, since TASK-32; it was one
+file per campaign before): one event per line, appended, never rewritten. A forked timeline
+starts with its parent's events up to the fork point (`fork_at`), which stay in the parent's
+file; its own ids go on after them.
 
 Why JSONL over SQLite:
 - **No dependency.** Godot reads it with `FileAccess` + `JSON`. SQLite would need a GDExtension addon for every build.
 - **Append-only by nature.** Writing an event is one appended line, and a crash loses at most that line.
 - **Readable and diffable.** You can open it in an editor, back it up with git, and the MCP server (Python/TS) reads it in two lines of code.
 - **Small.** Even a few thousand events per session stay a few MB over a whole campaign. The DM host loads the whole log into memory at start and keeps an index per entity and per day.
-- **One log per campaign**, because each campaign has its own timeline. Worlds and core have no log; they change only through the vault.
+- **One log per timeline.** Worlds and core have no log; play never changes them.
 
 Revisit when the log passes about 50 MB or startup replay gets slow. The fix then is snapshot files (state at day N) next to the log, not a switch to a database.
 
@@ -72,7 +75,10 @@ Revisit when the log passes about 50 MB or startup replay gets slow. The fix the
 | `item.gained` / `item.lost` | holder | `item` (entity id, `core:` prefix for core data), `qty`, `from` / `to` (optional) |
 | `sheet.changed` | creature | `path` (dotted, e.g. `stats.str`, `ac`), `from`, `to`, `reason`. Any other sheet field. |
 | `level.gained` | PC | `class`, `level` (new class level) |
-| `entity.sent` | the new campaign copy | `source` (e.g. `core:5e-core-rules/monsters/goblin` = package/kind/id, `world:npc/mira`), `layer` |
+| `entity.created` | `<kind>/<id>` of the new entry | `entry` (the full entry). Something made during the timeline (a PC, an item given out, a new NPC); it exists in this timeline and its later forks (TASK-32). |
+| `entity.edited` | the entry | `entry` (the full entry as it is now). A prep edit of a timeline entry, or a timeline's own version of a world entry. |
+| `entity.deleted` | the entry | `{}`. A timeline entry removed. |
+| `entity.promoted` | the entry | `world` (package id). The entry went into the world package; from then on the world's version counts. |
 | `reveal.changed` | the entity whose text it is | `reveal` (id, e.g. `r7`), `field` (e.g. `description`), `add` / `remove` (lists of player ids, `party`, `dm`). See reveal-visibility.md. |
 | `time.advanced` | `""` | `from_day`, `from_time`, `reason`. The event's own `day`/`time` are the new clock. |
 | `note.added` | entity or `""` | `note` (path of the session note), `text` (short summary) |

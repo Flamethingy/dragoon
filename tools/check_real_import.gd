@@ -12,7 +12,7 @@ func _init() -> void:
 	PackageManager._delete_tree(base)
 	var pkg_root := base.path_join("data/packages")
 	DirAccess.make_dir_recursive_absolute(pkg_root)
-	Campaign._copy_tree(src, base.path_join("data/imports/job1"))
+	Worlds.copy_tree(src, base.path_join("data/imports/job1"))
 	var jobs := ImportJobs.new(pkg_root)
 	var r := jobs.merge("job1")
 	print("merge: ", r)

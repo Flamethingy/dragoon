@@ -1,9 +1,12 @@
 class_name EventLog
 extends RefCounted
-## A campaign's append-only event log (backlog/docs/doc-1 - Event-format.md):
-## `<campaign>/events.jsonl`, one JSON event per line, never rewritten. Mistakes are
+## A timeline's append-only event log (backlog/docs/doc-1 - Event-format.md, timelines.md):
+## `<timeline>/events.jsonl`, one JSON event per line, never rewritten. Mistakes are
 ## undone by a new event with `undoes`. Keeps the world clock (in-world day and minute,
 ## session number), which every new event is stamped with.
+## A forked timeline starts with its parent's events up to the fork (`inherited`, read-only,
+## never written to its file); its own ids continue after them. Several EventLog objects on
+## one file stay in step: append() reloads first if the file grew behind its back.
 
 signal appended(event: Dictionary)
 
@@ -16,15 +19,18 @@ var day := 0  ## world clock: in-world day number
 var time := -1  ## minutes since in-world midnight, -1 = unknown
 var session := 0  ## 0 = prep between sessions
 
+var inherited: Array[Dictionary] = []  ## the parent timeline's events up to the fork
 var _next_id := 1
 var _undone := {}  ## id -> id of the event that undid it
+var _file_len := 0
 
 
 ## Opens (or creates) the log at `file` and loads it. Bad lines are skipped with a
 ## warning, so one damaged line never loses the rest of the campaign.
-static func open(file: String) -> EventLog:
+static func open(file: String, from_parent: Array[Dictionary] = []) -> EventLog:
 	var elog := EventLog.new()
 	elog.path = file
+	elog.inherited = from_parent
 	elog._load()
 	return elog
 
@@ -33,6 +39,12 @@ func _load() -> void:
 	events.clear()
 	_undone.clear()
 	_next_id = 1
+	day = 0
+	time = -1
+	session = 0
+	for e in inherited:
+		_add(e)
+	_file_len = 0
 	if not FileAccess.file_exists(path):
 		DirAccess.make_dir_recursive_absolute(path.get_base_dir())
 		var f := FileAccess.open(path, FileAccess.WRITE)
@@ -97,17 +109,37 @@ func append(type: String, entity: String, data := {}, by := "dm", undoes := -1,
 	}
 	if undoes >= 0:
 		e["undoes"] = undoes
+	if _file_size() != _file_len:  # another EventLog on this file wrote meanwhile
+		_load()
+		e.id = _next_id
 	var f := FileAccess.open(path, FileAccess.READ_WRITE)
 	if f == null:
 		push_error("Can't write event log %s: %s" % [path, error_string(FileAccess.get_open_error())])
 		return {}
 	f.seek_end()
 	f.store_line(JSON.stringify(e))
+	_file_len = f.get_position()
 	f.close()
 	_add(e)
 	_advance_clock(e)
 	appended.emit(e)
 	return e
+
+
+func _file_size() -> int:
+	var f := FileAccess.open(path, FileAccess.READ)
+	return f.get_length() if f != null else 0
+
+
+## Reloads if another EventLog on the same file appended meanwhile.
+func refresh() -> void:
+	if _file_size() != _file_len:
+		_load()
+
+
+## Events written to this timeline's own file (not the inherited ones).
+func own_events() -> Array[Dictionary]:
+	return events.slice(inherited.size())
 
 
 # --- Convenience writers for the MVP event types -------------------------------------

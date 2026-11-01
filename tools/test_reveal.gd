@@ -35,9 +35,9 @@ func _init() -> void:
 	# --- Visibility from events at a moment -------------------------------------------------
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
 	DirAccess.make_dir_recursive_absolute(DIR)
-	var campaign_dir := Campaign.install_example(DIR + "/campaign")
-	var campaign := Campaign.new(campaign_dir, AssetCache.new(DIR + "/cache"))
-	var elog := EventLog.open(campaign_dir.path_join("events.jsonl"))
+	var campaign_dir := Worlds.install_example(ProjectSettings.globalize_path(DIR + "/worlds"))
+	var campaign := Timeline.new(campaign_dir, AssetCache.new(DIR + "/cache"))
+	var elog := campaign.events_log
 	const AMULET := "items/moonstone-amulet"
 	var start := campaign.entry_view(AMULET, "ann")
 	_check(start.description.contains("**Function:**") and not start.description.contains("Curse"), "Ann: function yes, curse no")
@@ -69,7 +69,7 @@ func _init() -> void:
 
 	# --- No leftovers of the old markers -------------------------------------------------
 	_check(not FileAccess.file_exists("res://scripts/net/secrets.gd"), "secrets.gd is gone")
-	_check(not FileAccess.get_file_as_string(campaign_dir.path_join("pcs.json")).contains("dm_"), "no dm_ keys in the example")
+	_check(not FileAccess.get_file_as_string(campaign_dir.path_join("events.jsonl")).contains("dm_"), "no dm_ keys in the example")
 
 	print("reveal: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))
 	quit(1 if _failed > 0 else 0)

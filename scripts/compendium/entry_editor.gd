@@ -5,8 +5,8 @@ extends VBoxContainer
 ## (copied into the store's assets/), ability scores, speeds, bonuses, JSON for the rest,
 ## and Markdown fields with a live preview and [[wikilink]] suggestions (name_source).
 ## Monsters edit their feature lists (add, reorder, remove; "Edit" opens the feature as its
-## own entry). Save goes through EntryStore.commit (session edits in a campaign become
-## events). Source packages are read-only: edit a copy in a world/campaign, or unlock.
+## own entry). Save goes through EntryStore.commit (session edits in a timeline become
+## events). Source packages are read-only: edit a copy in a world/timeline, or unlock.
 
 signal saved(entry: Dictionary)
 signal cancelled
@@ -27,7 +27,7 @@ var publish_button: Button
 var crop: CropView  ## the source page of imported entries (source_page)
 var kind := ""
 var original := {}  ## the entry as opened (file version)
-var event_log: EventLog  ## campaign log, for edits during a session (optional)
+var event_log: EventLog  ## timeline log, for edits during a session (optional)
 ## prefix -> PackedStringArray of entry names, for [[ suggestions.
 var name_source: Callable = func(_p: String) -> PackedStringArray: return PackedStringArray()
 ## Writable stores to "edit a copy" in (read-only stores only).
@@ -432,7 +432,7 @@ func _markdown(key: String, value: String) -> Control:
 
 
 ## "Visible for" on a selection of a Markdown field. Normally the text gets (or changes) a
-## <reveal> tag; in a campaign during a session, changing an existing passage is a
+## <reveal> tag; in a timeline during a session, changing an existing passage is a
 ## reveal.changed event instead (the text keeps its starting `for`).
 func apply_reveal(key: String, edit: TextEdit, from: int, to: int, who: PackedStringArray) -> void:
 	var span := Reveal.span_at(edit.text, from, to)
@@ -457,7 +457,7 @@ func apply_reveal(key: String, edit: TextEdit, from: int, to: int, who: PackedSt
 
 
 func _live_session() -> bool:
-	return store.layer == EntryStore.CAMPAIGN and event_log != null and event_log.in_session()
+	return store.layer == EntryStore.TIMELINE and event_log != null and event_log.in_session()
 
 
 ## The text after an open [[ before the caret ("" = not in a link).

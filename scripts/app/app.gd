@@ -95,6 +95,7 @@ func _ready() -> void:
 	table.status_changed.connect(func(text: String) -> void: start.status.text = text)
 	table.table_changed.connect(_on_table_changed)
 	table.pcs_changed.connect(_on_table_changed)
+	EntryDrag.hub.dropped_outside.connect(drop_outside)
 	table.entry_imported.connect(func(_e: Dictionary) -> void:
 		for v: String in ["world", "timeline"]:
 			if books.has(v):
@@ -309,6 +310,30 @@ func _drop_views() -> void:
 	notes_view = null
 	timeline_view = null
 	encounters_view = null
+
+
+## A card let go outside its own window (EntryDrag): the book window under the mouse
+## imports it, else the map in the main window takes it. True if something took it.
+func drop_outside(e: Dictionary, screen: Vector2i, from: Viewport = null) -> bool:
+	var data := EntryDrag.data(e)
+	for id: String in dock.panels:
+		var w: Window = dock.panels[id].window
+		if w == null or w == from or dock.place_of(id) != "window" or not Rect2i(w.position, w.size).has_point(screen):
+			continue
+		var b := books.get(id) as Compendium
+		if b != null and b._can_drop_data(Vector2.ZERO, data):
+			b._drop_data(Vector2.ZERO, data)
+			return true
+		return false
+	var main := get_window()
+	if main == from or not table.is_online() or not Rect2i(main.position, main.size).has_point(screen):
+		return false
+	var at: Vector2 = main.get_final_transform().affine_inverse() * Vector2(screen - main.position)
+	var drop := table_ui.map_drop
+	if drop != null and drop._can_drop_data(at, data):
+		drop._drop_data(at, data)
+		return true
+	return false
 
 
 ## After hosting or joining: the panels that were open last time (the session log at first).

@@ -1280,6 +1280,9 @@ func _restore_tabs(state: Variant) -> void:
 		show_browse()
 	# Scroll once the views have their size (texts lay out over a frame or two).
 	for i in 3:
+		if not is_inside_tree():  # the book was put away meanwhile (its window closed)
+			_restoring = false
+			return
 		await get_tree().process_frame
 	for view: Variant in scrolls:  # a quick second reload may have closed them already
 		if is_instance_valid(view):

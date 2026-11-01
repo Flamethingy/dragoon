@@ -5,6 +5,35 @@ extends RefCounted
 ## spell or feature, a note gets a [[link]], a timeline's book makes it a timeline entry.
 
 const TYPE := "dragoon_entry"
+
+## Between OS windows Godot ends a drag as "not dropped" when the mouse is let go over
+## another window (Nico tried it, 2026-11-01). The card being dragged is remembered here;
+## when its drag ends without a drop, `hub.dropped_outside` tells the app the entry and
+## the mouse position on the screen, and the app hands it to the window under the mouse.
+class Hub:
+	extends RefCounted
+	signal dropped_outside(entry: Dictionary, screen_position: Vector2i, from: Viewport)
+
+static var hub := Hub.new()
+static var carrying := {}  ## the entry of the card being dragged
+static var source: Viewport  ## the window it was dragged in
+
+
+## A card started a drag.
+static func start(e: Dictionary, from: Viewport) -> void:
+	carrying = e
+	source = from
+
+
+## The drag of a card in `from` ended (`dropped`: something in that window took it).
+static func end(from: Viewport, dropped: bool) -> void:
+	if carrying.is_empty() or from != source:
+		return
+	var e := carrying
+	carrying = {}
+	source = null
+	if not dropped:
+		hub.dropped_outside.emit(e, DisplayServer.mouse_get_position(), from)
 ## Sheet list per dropped kind (a sheet.changed on that list).
 const SHEET_LISTS := {"items": "inventory", "spells": "spells", "features": "features"}
 

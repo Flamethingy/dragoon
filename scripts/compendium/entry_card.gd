@@ -126,7 +126,14 @@ func _get_drag_data(_at: Vector2) -> Variant:
 		return null
 	if is_inside_tree() and get_viewport().gui_is_dragging():
 		set_drag_preview(EntryDrag.preview(entry))
+	if is_inside_tree():
+		EntryDrag.start(entry, get_viewport())
 	return EntryDrag.data(entry)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_DRAG_END and EntryDrag.carrying == entry and is_inside_tree():
+		EntryDrag.end(get_viewport(), get_viewport().gui_is_drag_successful())
 
 
 func _gui_input(event: InputEvent) -> void:

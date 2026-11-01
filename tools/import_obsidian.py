@@ -85,9 +85,12 @@ def snake(key: str) -> str:
 def read_text(path: Path) -> str:
     raw = path.read_bytes()
     try:
-        return raw.decode("utf-8")
+        text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        return raw.decode("cp1252", errors="replace")
+        text = raw.decode("cp1252", errors="replace")
+    # C1 control chars are cp1252 smart quotes that slipped in ("\x93urk\x94")
+    text = re.sub(r"[\x80-\x9f]", lambda m: bytes([ord(m.group())]).decode("cp1252", "replace"), text)
+    return text.replace("\xa0", " ")
 
 
 def split_frontmatter(text: str) -> tuple[dict, str]:
@@ -96,7 +99,7 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
     if not m:
         return {}, text
     raw = re.sub(r"&amp;", "&", m.group(1), flags=re.I)
-    raw = re.sub(r"^(\s*-\s+)&", r"and", raw, flags=re.M)  # "- &Slashing" is a YAML anchor
+    raw = re.sub(r"^(\s*-\s+)&", r"\1and", raw, flags=re.M)  # "- &Slashing" is a YAML anchor
     try:
         fm = yaml.safe_load(raw) or {}
     except yaml.YAMLError:
@@ -161,7 +164,7 @@ def strip_dataview(body: str) -> str:
     """Remove Obsidian-only render parts: %% comments %%, dataview code blocks and
     blockquote/callout blocks that contain inline dataview (`=this...`)."""
     body = re.sub(r"%%.*?%%", "", body, flags=re.S)
-    body = re.sub(r"^>?\s*`{3,}dataview.*?`{3,}\s*$", "", body, flags=re.S | re.M)
+    body = re.sub(r"^>?\s*`{3,}\s*dataview.*?`{3,}\s*$", "", body, flags=re.S | re.M)
     lines = body.split("\n")
     out, block = [], []
 
@@ -186,7 +189,17 @@ def strip_dataview(body: str) -> str:
             flush()
             out.append(line)
     flush()
-    md = "\n".join(out)
+    # plain Markdown tables with inline dataview cells (class proficiency tables): drop the table
+    cleaned, table = [], []
+    for line in out + [""]:
+        if line.lstrip().startswith("|"):
+            table.append(line)
+            continue
+        if table and not any("`=" in l for l in table):
+            cleaned.extend(table)
+        table = []
+        cleaned.append(line)
+    md = "\n".join(cleaned[:-1])
     md = re.sub(r"\n{3,}", "\n\n", md)
     return md.strip()
 
@@ -272,10 +285,12 @@ DAMAGE_RE = re.compile(r"(\d+)\s*\((\d+d\d+(?:\s*[+-]\s*\d+)?)\)\s*([A-Za-z]+)")
 
 
 def parse_feature(name: str, text: str) -> dict:
+    if name.count("(") > name.count(")"):  # vault cut names: "Entomb (While Bloodied"
+        name += ")"
     feat: dict = {"name": name, "text": text}
-    m = re.search(r"\((Recharge [\d–\-]+|\d+/Day|\d+/Turn|Costs \d+ Actions?)\)", name, re.I)
+    m = re.search(r"\((Recharge [\d–\-]+|\d+/Day(?: each)?|\d+/Turn|Costs \d+ Actions?)\)", name, re.I)
     if m:
-        feat["uses"] = m.group(1)
+        feat["uses"] = m.group(1).replace("–", "-")
     elif re.search(r"\((\d)\)\s*$", name):  # legendary cost "Fling (2)"
         feat["cost"] = int(re.search(r"\((\d)\)\s*$", name).group(1))
     a = re.search(r"(Melee|Ranged|Melee or Ranged) (Weapon|Spell) Attack:\s*([+-]\d+) to hit", text, re.I)
@@ -298,9 +313,11 @@ def parse_feature(name: str, text: str) -> dict:
     return feat
 
 
-def parse_features(section: str, images: set[str]) -> list[dict]:
+def parse_features(section: str, images: set[str], lore: list[str]) -> list[dict]:
+    """Blockquotes starting with >**Name**. Fixes for the Level Up import in the vault:
+    a bold line without text is a list item of the previous feature (potions, HP thresholds);
+    a long bold sentence followed by text is flavour text and goes to `lore`."""
     feats = []
-    # entries are blockquotes starting with >**Name**
     for block in re.split(r"\n\s*\n", section.strip()):
         block = block.strip()
         if not block:
@@ -308,8 +325,18 @@ def parse_features(section: str, images: set[str]) -> list[dict]:
         text = unquote(block)
         m = re.match(r"\*\*(.+?)\*\*\s*\n?(.*)", text, re.S)
         if m:
-            feats.append(parse_feature(fix_units(m.group(1).strip()),
-                                       convert_embeds(m.group(2).strip(), images)))
+            name = fix_units(m.group(1).strip())
+            body = convert_embeds(m.group(2).strip(), images)
+            if name.lower().startswith("zztitle"):  # layout junk from the source PDF
+                continue
+            if not body and feats:
+                sep = "\n" if feats[-1]["text"].rstrip().split("\n")[-1].startswith("- ") else "\n\n"
+                feats[-1]["text"] = feats[-1]["text"].rstrip() + f"{sep}- {name}"
+                continue
+            if len(name) > 60 and ":" not in name and "(" not in name and body:
+                lore.append(f"{name}. {body}" if not name.endswith(".") else f"{name} {body}")
+                continue
+            feats.append(parse_feature(name, body))
         elif feats:  # continuation paragraph
             feats[-1]["text"] += "\n\n" + convert_embeds(text, images)
     return feats
@@ -365,24 +392,45 @@ def convert_monster(fm: dict, body: str, images: set[str]) -> dict:
         "spells": clean_list(fm.get("Spells")),
         "description": convert_embeds(strip_dataview(sections.get("Description", "")), images),
     }
+    lore: list[str] = []
     for heading, field in MONSTER_SECTIONS.items():
         if heading in sections:
-            entry.setdefault(field, []).extend(parse_features(sections[heading], images))
+            entry.setdefault(field, []).extend(parse_features(sections[heading], images, lore))
     for field in set(MONSTER_SECTIONS.values()):
         entry.setdefault(field, [])
+    # "The dragon can take 3 legendary actions..." is the rules intro, not an action
+    entry["legendary_intro"] = ""
+    for f in list(entry["legendary_actions"]):
+        if re.search(r"can take \d+ legendary actions", f["name"], re.I):
+            entry["legendary_intro"] = f"{f['name']}. {f['text']}".strip()
+            entry["legendary_actions"].remove(f)
+    if lore:
+        entry["description"] = "\n\n".join([entry["description"]] * bool(entry["description"]) + lore)
     return entry
 
 
 # ---------------------------------------------------------------- spells
 
+def sentence_case(s: str) -> str:
+    """'1 bonus Action' / '1 Minute' -> '1 bonus action' / '1 minute'."""
+    return s[:1] + s[1:].lower() if s else s
+
+
 def convert_spell(fm: dict, body: str, images: set[str]) -> dict:
     level = num(fm.get("Level", fm.get("SpellLevel")))
+    school = clean_str(fm.get("School"))
+    m = re.match(r"(\w[\w ]*?)\s*\((.+)\)$", school)  # "Evocation (Dunamancy: Graviturgy)"
+    subschool = ""
+    if m:
+        school, subschool = m.group(1), m.group(2)
+    rng = re.match(r"[\d.,]+", clean_str(fm.get("Range")))
     return {
         "level": level,
-        "school": clean_str(fm.get("School")),
-        "casting_time": clean_str(fm.get("CastingTime")),
-        "range_m": num(fm.get("Range")),  # 0 = touch / self
-        "duration": clean_str(fm.get("Duration")),
+        "school": school,
+        "subschool": subschool,
+        "casting_time": sentence_case(clean_str(fm.get("CastingTime"))),
+        "range_m": num(rng.group()) if rng else 0,  # 0 = touch / self (the vault does not say which)
+        "duration": sentence_case(clean_str(fm.get("Duration"))),
         "concentration": to_bool(fm.get("Concentration", False)),
         "ritual": to_bool(fm.get("Ritual", False)),
         "components": {
@@ -413,8 +461,30 @@ def convert_generic(fm: dict, body: str, images: set[str]) -> dict:
             entry[sk] = v
         else:
             entry[sk] = num(v) if re.fullmatch(r"-?\d+([.,]\d+)?", str(v).strip()) else clean_str(v)
-    entry["description"] = convert_embeds(strip_dataview(body), images)
+    desc = convert_embeds(strip_dataview(body), images)
+    # leading parent link ("[[Fighter]]") of subclasses/subraces and Obsidian tag lines ("#Ark")
+    desc = re.sub(r"\A(\s*(\[\[[^\]]+\]\]|#[\w/-]+)\s*\n)+", "", desc).strip()
+    entry["description"] = desc
     return entry
+
+
+def normalize_types(entries: list[dict]) -> None:
+    """Give every key one type per kind: None -> [] / "" / 0 depending on what other entries use,
+    and missing keys get the same empty value."""
+    kinds: dict[str, set] = defaultdict(set)
+    for e in entries:
+        for k, v in e.items():
+            if v is not None:
+                kinds[k].add(list if isinstance(v, list) else str if isinstance(v, str)
+                              else bool if isinstance(v, bool) else dict if isinstance(v, dict) else float)
+    empty = {list: [], str: "", bool: False, float: 0, dict: {}}
+    for e in entries:
+        for k, types in kinds.items():
+            if e.get(k) is None:
+                t = list if list in types else str if str in types else next(iter(types))
+                e[k] = empty[t] if not isinstance(empty[t], (list, dict)) else type(empty[t])()
+            elif list in kinds[k] and isinstance(e[k], str):  # "Cleric" where others have lists
+                e[k] = [e[k]] if e[k] else []
 
 
 CONVERTERS = {"monsters": convert_monster, "spells": convert_spell}
@@ -448,6 +518,9 @@ def main() -> int:
             files = files[: args.limit]
         for path in files:
             fm, body = split_frontmatter(read_text(path))
+            if not fm and not body.strip():
+                report["skipped (empty file)"] += 1
+                continue
             if not fm:
                 guess = "Fools Gold" if path.stem.startswith("Chaos Surges") else (
                     "5e Core Rules" if folder == "Rules" else "Unknown")
@@ -472,11 +545,22 @@ def main() -> int:
                 images.add(img)
                 entry["image"] = f"assets/{img}"
             entry.update(CONVERTERS.get(kind, convert_generic)(fm, body, images))
+            # subclasses/subraces live in a folder named after their class/race
+            for key, k in (("class", "subclasses"), ("parent", "subraces")):
+                if kind == k and not entry.get(key) and path.parent.name != folder:
+                    entry[key] = path.parent.name
             entry["origin"] = {"vault": vault.name, "path": path.relative_to(vault).as_posix()}
             packages[pid][kind].append(entry)
             package_images[pid] |= images
             package_vaults[pid].add(vault.name)
             report[kind] += 1
+
+    by_kind: dict[str, list] = defaultdict(list)
+    for kinds in packages.values():
+        for kind, entries in kinds.items():
+            by_kind[kind].extend(entries)
+    for entries in by_kind.values():
+        normalize_types(entries)
 
     out: Path = args.out
     out.mkdir(parents=True, exist_ok=True)

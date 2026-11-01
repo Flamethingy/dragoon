@@ -47,7 +47,8 @@ Every entry has `id` (slug, unique per kind in the package), `name`, `source`, `
 (metres), hover, stats{str..cha}, saves{ability: total bonus}, skills{skill: total bonus},
 passive_perception, senses[], languages[], vulnerabilities[], resistances[], immunities[],
 condition_immunities[], environments[], spells[]`, plus feature lists `traits, actions,
-bonus_actions, reactions, legendary_actions`.
+bonus_actions, reactions, legendary_actions` and `legendary_intro` (the "can take 3 legendary
+actions" rules text).
 
 A feature: `{name, text (Markdown), uses?, cost?, attack?{kind, to_hit, range, damage[{dice,
 average, type}]}, save?{dc, ability}, damage?[...]}`. The structured parts are parsed from the
@@ -55,13 +56,15 @@ text so the dice roller can roll them; `text` stays the source of truth.
 
 ### Spell
 
-`level (0 = cantrip), school, casting_time, range_m (0 = touch/self), duration, concentration,
-ritual, components{verbal, somatic, material, material_text}, classes[]`.
+`level (0 = cantrip), school, subschool (e.g. "Dunamancy: Graviturgy"), casting_time, range_m
+(0 = touch/self), duration, concentration, ritual, components{verbal, somatic, material,
+material_text}, classes[]`. `casting_time` and `duration` are in sentence case ("1 bonus action").
 
 ### Other kinds
 
 For now generic: the vault's frontmatter keys in `snake_case` plus `description`. Dedicated
-schemas follow when the VTT needs them.
+schemas follow when the VTT needs them. Within a kind every key has one type in all packages
+(empty values are `[]`, `""` or `0`, never `null`). Subclasses always have `class`, subraces `parent`.
 
 ## Importer
 
@@ -72,3 +75,13 @@ Known gaps: most monster `Image` fields point to files that are not in the vault
 ~5% of attack texts don't match the attack parser (text still complete).
 Units: the vault's incomplete ft->m conversion is repaired (`fix_units`): half-converted ranges
 ("range 80/97.5 m" -> "24.4/97.5 m"), leftover `60'`, `30 feet`, `10 ft.` and "20 feet【6 m】".
+
+Audit: `python tools/audit_packages.py data/packages [--fields <kind>|all]` lists Obsidian
+leftovers (Dataview, callouts, `%%`) and a field inventory per kind. Expected result: no leftovers.
+
+Vault data the importer cannot repair:
+- Monster `ReligionBonus` does not exist in the vault, so no monster has a Religion skill.
+- Spell `Range: 0` means touch *or* self; the vault does not say which.
+- Level Up monsters sometimes split one feature into several bold sentences (e.g. Greater Sphinx
+  "First Roar: ..."); they stay separate features with complete text.
+- Magical Girl Beast has HP 0 in the vault.

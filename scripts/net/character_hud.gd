@@ -7,8 +7,9 @@ extends Control
 ## without showing the sheet panel) and changes go through it as events.
 ## What it shows is a layout (TASK-47): pieces (HudWidgets) on a grid over the screen, saved
 ## in the character (`hud`), for creatures in their template in the Book; without one the
-## portrait, health and spell slots. F2 edits it (LayoutEditor). Keys 1-9 open the sheet
-## pages (SheetPages), F3 edits them.
+## portrait, health and spell slots. Keys 1-9 open the sheet pages (SheetPages). F2 edits
+## (LayoutEditor): the open sheet page, else the HUD (Nico, 2026-11-01: one key for both).
+## Quick buttons cast a spell, use an item or roll a check (TASK-48).
 
 signal active_changed(ref: String)
 signal shown  ## the HUD was (re)built or hidden: the app checks whether it shows its buttons
@@ -183,17 +184,15 @@ func _input(event: InputEvent) -> void:
 	if k.ctrl_pressed or k.alt_pressed or _typing():
 		return
 	var code := k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode
-	if editor != null:  # the editor is open: F2 / F3 / Esc close it (saved)
-		if code in [KEY_F2, KEY_F3, KEY_ESCAPE]:
+	if editor != null:  # the editor is open: F2 / Esc close it (saved)
+		if code in [KEY_F2, KEY_ESCAPE]:
 			editor.finish(true)
 			get_viewport().set_input_as_handled()
 		return
 	if code == KEY_Q or code == KEY_E:
 		cycle(-1 if code == KEY_Q else 1)
 	elif code == KEY_F2:
-		edit_hud()
-	elif code == KEY_F3:
-		edit_pages()
+		edit()
 	elif code >= KEY_1 and code <= KEY_9 and pages != null and active != "":
 		pages.toggle(code - KEY_1)
 	elif code == KEY_ESCAPE and pages != null and pages.visible:
@@ -227,7 +226,7 @@ func _fill() -> void:
 	for it: Dictionary in layout():
 		var r: Array = it.r
 		var rect := Rect2(Vector2(float(r[0]), float(r[1])) * cell, Vector2(float(r[2]), float(r[3])) * cell).grow(-2)
-		var w := HudWidgets.build(str(it.w), s, self, rect.size)
+		var w := HudWidgets.build(str(it.w), s, self, rect.size, it)
 		w.position = rect.position
 		w.size = rect.size
 		_pieces.add_child(w)
@@ -272,7 +271,15 @@ func may_edit() -> bool:
 	return active != "" and bool((table.sheets.get(active, {}) as Dictionary).get("_editable", false))
 
 
-## F2: the HUD editor over the whole screen.
+## F2: edits the sheet page that is open, else the HUD.
+func edit() -> void:
+	if pages != null and pages.visible:
+		edit_pages()
+	else:
+		edit_hud()
+
+
+## The HUD editor: the screen, shown smaller, with the catalog around it.
 func edit_hud() -> void:
 	if not may_edit() or editor != null:
 		return
@@ -281,10 +288,12 @@ func edit_hud() -> void:
 	ed.sets = [{"name": "HUD", "items": layout()}]
 	ed.sheet = table.sheets.get(active, {})
 	ed.hud = self
+	ed.canvas = size if size.x > 0 and size.y > 0 else get_viewport_rect().size
+	ed.screen_backdrop = true
 	_open_editor(ed, "hud")
 
 
-## F3: the sheet page editor (the page shown, else the first).
+## The sheet page editor (the page shown, else the first).
 func edit_pages() -> void:
 	if not may_edit() or editor != null or pages == null:
 		return
@@ -297,7 +306,7 @@ func edit_pages() -> void:
 	ed.current = clampi(at, 0, ed.sets.size() - 1)
 	ed.sheet = table.sheets.get(active, {})
 	ed.hud = self
-	ed.area = pages.grid_rect()
+	ed.canvas = pages.grid_rect().size
 	_open_editor(ed, "sheet_pages")
 
 
@@ -327,6 +336,17 @@ func roll_check(query: String) -> void:
 		q += " with disadvantage"
 	table.roll(q, active)
 
+
+
+## A quick button (TASK-48): a check rolls, a spell / an item is posted in the chat with its
+## rolls (NetTable.use_action; nothing is spent yet, TASK-49).
+func use_quick(kind: String, ref: String) -> void:
+	if active == "" or table == null or editor != null:
+		return
+	if kind == "check":
+		roll_check(ref)
+	else:
+		table.use_action(active, ref)
 
 
 ## Spent spell slots of a level, as a sheet.changed event (spell_slots_used.<level>).
@@ -393,6 +413,16 @@ func label(ref: String) -> String:
 		if c.get("id") == ref:
 			return str(c.get("name", ref))
 	return ref.get_file().capitalize()
+
+
+## The token's art as it is (no frame): the "full picture" portrait. Else the token.
+func art(ref: String) -> Texture2D:
+	var sha := str(token_info(ref).get("image", ""))
+	if sha != "" and table.assets != null:
+		var tex := table.assets.texture(sha)
+		if tex != null:
+			return tex
+	return picture(ref)
 
 
 ## The token's composed picture; on world maps the party token stands in for its members.

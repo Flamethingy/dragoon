@@ -1,7 +1,7 @@
 class_name SheetPages
 extends Control
 ## The character sheet as pages (TASK-47, Nico 2026-11-01): keys 1-9 open page 1-9 of the
-## active character (the same key again, or Esc, closes it); F3 edits them like home screens
+## active character (the same key again, or Esc, closes it); F2 edits the open one like home screens
 ## (LayoutEditor). A page is a grid (HudWidgets.PAGE_GRID) of the same pieces as the HUD,
 ## saved in the character (`sheet_pages`), for creatures in their template in the Book.
 
@@ -102,7 +102,7 @@ func refresh() -> void:
 		t.pressed.connect(open.bind(i))
 		_tabs.add_child(t)
 	var hint := Label.new()
-	hint.text = "F3: edit"
+	hint.text = "F2: edit"
 	hint.add_theme_font_size_override("font_size", 12)
 	hint.add_theme_color_override("font_color", UISkin.INK_SOFT)
 	_tabs.add_child(hint)
@@ -117,7 +117,7 @@ func refresh() -> void:
 	for it: Dictionary in list[current].items:
 		var r: Array = it.r
 		var rect := Rect2(g.position + Vector2(float(r[0]), float(r[1])) * cell, Vector2(float(r[2]), float(r[3])) * cell).grow(-3)
-		var w := HudWidgets.build(str(it.w), s, hud, rect.size)
+		var w := HudWidgets.build(str(it.w), s, hud, rect.size, it)
 		w.position = rect.position
 		w.size = rect.size
 		_pieces.add_child(w)

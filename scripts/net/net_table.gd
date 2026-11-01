@@ -81,6 +81,7 @@ var _show_sheet := {}  ## refs whose sheet should show in the sheet panel when i
 var _state := {}  ## the last table view from the host
 var _status: ServerStatus.Responder  ## host: answers the start screens' heartbeat (TASK-38)
 var _requested := {}  ## sha -> true while downloading
+var _catalog := {}  ## kind -> id -> entry of the packages (spells, items), read once (TASK-48)
 
 var _ui: TableUI
 
@@ -1075,6 +1076,14 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 				if f is Dictionary and f.get("attack") is Dictionary:
 					attacks.append(str(f.get("name", fid)))
 		sheet["_attacks"] = attacks
+		var refs := {}  # spells and items: name (and level) for the HUD's quick buttons (TASK-48)
+		for v: Variant in sheet.get("spells", []):
+			var e := catalog_entry(str(v))
+			refs[str(v)] = {"name": str(e.get("name", HudWidgets._name_of(v))), "level": int(e.get("level", 0))}
+		for it: Variant in sheet.get("inventory", []):
+			var r := str(it.get("item", "")) if it is Dictionary else str(it)
+			refs[r] = {"name": str(catalog_entry(r).get("name", HudWidgets._name_of(r)))}
+		sheet["_refs"] = refs
 		# the HUD and the sheet pages (TASK-47): its own, a creature copy its template's
 		var tpl := layout_template(ref)
 		var source: Dictionary = timeline.world_entries(tpl.get_slice("/", 0)).get(tpl.get_slice("/", 1), {}) if tpl != "" else sheet
@@ -1318,13 +1327,89 @@ func _handle_roll(sender: int, query: String, ref: String, hidden: bool) -> Dict
 	return entry
 
 
+# --- Quick buttons (TASK-48) ------------------------------------------------------------------
+
+## A spell or item from the timeline, the world, else the packages ("spells/fire-bolt").
+func catalog_entry(ref: String) -> Dictionary:
+	var kind := ref.get_slice("/", 0)
+	var id := ref.get_slice("/", 1)
+	if kind == "" or id == "":
+		return {}
+	if timeline != null:
+		var own: Dictionary = timeline.entries(kind)
+		if own.has(id):
+			return own[id]
+	if not _catalog.has(kind):
+		var by_id := {}
+		var root := PackageDB.default_root()
+		if DirAccess.dir_exists_absolute(root):
+			for d in DirAccess.get_directories_at(root):
+				var file := root.path_join(d).path_join(kind + ".json")
+				if FileAccess.file_exists(file):
+					var list: Variant = JSON.parse_string(FileAccess.get_file_as_string(file))
+					if list is Array:
+						for e: Variant in list:
+							if e is Dictionary and e.has("id") and not by_id.has(str(e.id)):
+								by_id[str(e.id)] = e
+		_catalog[kind] = by_id
+	return (_catalog[kind] as Dictionary).get(id, {})
+
+
+## Casts a spell / uses an item of `ref` (a quick button): for now it is posted in the chat
+## with what it rolls (HudActions); nothing is spent yet (TASK-49).
+func use_action(ref: String, what: String) -> void:
+	if is_dm():
+		_handle_use(1, ref, what)
+	elif is_online():
+		request_use.rpc_id(1, ref, what)
+
+
+## Player -> DM.
+@rpc("any_peer", "call_remote", "reliable")
+func request_use(ref: String, what: String) -> void:
+	if is_dm():
+		_handle_use(multiplayer.get_remote_sender_id(), ref.left(200), what.left(200))
+
+
+func _handle_use(sender: int, ref: String, what: String) -> Dictionary:
+	var player := _sender_player(sender)
+	if player == "" or ref == "" or not may_see_sheet(player, ref):
+		_deny_roll(sender, "that's not your sheet")
+		return {}
+	var sheet := sheet_for(Reveal.DM, ref)
+	var kind := what.get_slice("/", 0)
+	if sheet.is_empty() or kind not in ["spells", "items"]:
+		return {}
+	var use := HudActions.spell(sheet, catalog_entry(what), what) if kind == "spells" else HudActions.item(sheet, catalog_entry(what), what)
+	var results := []
+	for a: Dictionary in use.asked:
+		var r := Dice.roll(str(a.formula), rng)
+		r["label"] = a.label
+		results.append(r)
+	var data := {"text": use.text, "action": what, "who": str(sheet.get("name", "")), "results": results}
+	var e: Dictionary
+	if results.is_empty():
+		e = event_log.append("chat.message", ref, data, player)
+	else:
+		data.merge({"roll": str(results[0].label), "formula": results[0].formula, "result": results[0].total,
+			"dice": results[0].dice, "hidden": false})
+		e = event_log.append("dice.rolled", ref, data, player)
+	var entry := _roll_entry(e)
+	_add_roll(entry)
+	for peer_id: int in peers:
+		roll_added.rpc_id(peer_id, entry)
+	return entry
+
+
 ## A dice.rolled (or chat.message) event as the roll log / chat shows it.
 static func _roll_entry(e: Dictionary) -> Dictionary:
 	var d: Dictionary = e.get("data", {})
 	var entry := {"id": e.get("id", 0), "by": e.get("by", ""), "who": d.get("who", ""), "results": d.get("results", []),
 		"hidden": bool(d.get("hidden", false)), "real": e.get("real", "")}
-	if e.get("type") == "chat.message":
+	if e.get("type") == "chat.message" or d.has("text"):
 		entry["text"] = str(d.get("text", ""))
+	if d.has("action"):  # a quick button: a spell cast, an item used (TASK-48)
+		entry["action"] = str(d.action)
 	if d.has("table"):
 		entry["table"] = str(d.table).trim_prefix("tables/")
 		entry["value"] = int(d.get("value", 0))
@@ -1545,7 +1630,7 @@ func roll_denied(reason: String) -> void:
 
 ## One roll as BBCode for the log: "Aria · Perception: [14] + 4 = 18".
 static func roll_bbcode(entry: Dictionary, names := {}) -> String:
-	if entry.has("text"):  # a chat message
+	if entry.has("text") and not entry.has("action"):  # a chat message
 		var from := str(names.get(entry.get("by", ""), entry.get("by", "")))
 		return "[font_size=12]%s[/font_size]\n%s" % [Markdown.escape(from), Markdown.escape(str(entry.text))]
 	var lines := PackedStringArray()
@@ -1562,6 +1647,8 @@ static func roll_bbcode(entry: Dictionary, names := {}) -> String:
 		if r.has("row_text"):
 			line += " → " + (Markdown.inline(str(r.row_text)) if str(r.row_text) != "" else "no row")
 		lines.append(line)
+	if entry.has("action"):  # "casts Fire Bolt (cantrip · 1 action · 36 m)", then its rolls
+		lines.insert(0, "[i]%s[/i]" % Markdown.escape(str(entry.get("text", ""))))
 	var who := str(entry.get("who", ""))
 	var by := str(names.get(entry.get("by", ""), entry.get("by", "")))
 	var head := Markdown.escape(who if who != "" else by)

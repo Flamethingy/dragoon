@@ -22,6 +22,29 @@ func _init() -> void:
 	_check(CharacterHud.spell_slots({"spell_slots": [1, 1], "classes": [{"class": "classes/wizard", "level": 9}]}) == [1, 1], "own spell_slots win")
 	_check(CharacterHud.spell_slots({"classes": [{"class": "classes/fighter", "level": 9}]}) == [], "no caster, no slots")
 
+	# --- Builder 2 (TASK-48): variants, quick buttons, what a use posts --------------------------
+	var cleaned := HudWidgets.clean([{"w": "portrait", "v": "picture", "r": [0, 0, 4, 5]}, {"w": "portrait", "v": "nope", "r": [0, 0, 4, 5]},
+		{"w": "spell", "ref": "spells/fire-bolt", "v": "round", "r": [5, 5, 2, 2]}, {"w": "item", "r": [1, 1, 2, 2]}], HudWidgets.HUD_GRID)
+	_check(cleaned.size() == 3 and cleaned[0].v == "picture" and not cleaned[1].has("v") and cleaned[2].ref == "spells/fire-bolt" and cleaned[2].v == "round",
+		"layouts keep variants and refs, a quick button needs its ref (%s)" % [cleaned])
+	_check(HudActions.first_dice("takes 1d4 + 1 force damage") == "1d4+1" and HudActions.first_dice("1d8 + your modifier") == "1d8"
+		and HudActions.first_dice("no dice") == "", "dice found in a description")
+	var wiz := {"name": "Wiz", "stats": {"int": 16}, "proficiency_bonus": 2, "classes": [{"class": "classes/wizard", "level": 1}]}
+	var bolt := HudActions.spell(wiz, {"name": "Fire Bolt", "level": 0, "casting_time": "1 action", "range_m": 36,
+		"description": "Make a ranged spell attack against the target. On a hit, the target takes 1d10 fire damage."}, "spells/fire-bolt")
+	_check(bolt.text == "casts Fire Bolt (cantrip · 1 action · 36 m)" and bolt.asked.size() == 2 and bolt.asked[0].formula == "1d20+5"
+		and bolt.asked[1].formula == "1d10" and bolt.asked[1].label == "Fire Bolt damage", "a spell attack and its damage (%s)" % [bolt])
+	var sleep := HudActions.spell(wiz, {"name": "Burning Hands", "level": 1, "description": "Each creature must make a Dexterity saving throw. A creature takes 3d6 fire damage."}, "")
+	_check(str(sleep.text).ends_with("DC 13 DEX save") and sleep.asked.size() == 1, "a save spell says its DC (%s)" % sleep.text)
+	var cat := HudWidgets.catalog({"spells": ["spells/fire-bolt"], "inventory": [{"item": "items/torch", "qty": 3, "max": 10}],
+		"_refs": {"spells/fire-bolt": {"name": "Fire Bolt", "level": 0}}}, "round")
+	var portraits := cat.filter(func(c: Dictionary) -> bool: return c.w == "portrait")
+	_check(portraits.size() == 3 and cat.any(func(c: Dictionary) -> bool: return c.tab == "Spells" and c.label == "Fire Bolt" and c.v == "round")
+		and cat.any(func(c: Dictionary) -> bool: return c.tab == "Items" and c.ref == "items/torch")
+		and cat.any(func(c: Dictionary) -> bool: return c.tab == "Checks" and c.ref == "dex save" and c.label == "DEX save"), "the catalog: variants side by side, a card per spell, item, check")
+	_check(HudWidgets.quick_amount("item", "items/torch", {"inventory": [{"item": "items/torch", "qty": 3, "max": 10}]}) == "3/10"
+		and HudWidgets.quick_amount("item", "items/rope", {"inventory": []}) == "0", "item amounts on the badge")
+
 	# --- At the table -------------------------------------------------------------------------
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
 	Worlds.install_example(ProjectSettings.globalize_path(DIR + "/worlds"))
@@ -149,11 +172,21 @@ func _init() -> void:
 	_check(hud.editor != null and not hud.visible, "F2 opens the HUD editor")
 	var ed := hud.editor
 	_check(ed.items().size() == 6, "it starts with the default HUD (portrait, health, slots, Compendium, Book, Leave)")
-	_check(ed.find_child("Grid", false, false) != null, "with a grid to build on")
+	_check(ed.find_child("Grid", true, false) != null, "with a grid to build on")
+	_check(ed.view_scale() < 0.9 and ed.preview_rect().end.y < ed.find_child("Tray", false, false).position.y, "the screen is shown smaller, the catalog below it")
+	_check(ed.find_child("Card_portrait_picture_", true, false) != null, "the catalog shows the portrait variants (Character tab)")
+	ed.show_tab("Spells")
+	_check(ed.find_child("Card_spell_square_spells/cure-wounds".validate_node_name(), true, false) != null, "a card per spell (Spells tab)")
+	ed.show_tab("Items")
+	_check((ed.find_child("Cards", true, false).get_child(0) is Label), "Borin carries nothing: the Items tab says so")
 	ed.add("skills")
 	ed.place(6, Rect2i(10, 18, 9, 9))
 	ed.remove(2)  # no spell slots
 	_check(ed.items().map(func(i: Dictionary) -> String: return i.w) == ["portrait", "hp", "compendium", "book", "leave", "skills"], "add, move, remove")
+	ed.add_item("portrait", "small")
+	ed.cycle_variant(6)
+	_check(ed.items()[6].v == "token", "double-click: the next variant")
+	ed.remove(6)
 	hud._input(f2)
 	_check(hud.editor == null and hud.visible, "F2 again saves and closes it")
 	await _until(func() -> bool: return dm.timeline.entry("characters/borin").is_empty() == false and (Replay.entity_state(dm.timeline.entry("characters/borin"), dm.event_log.effective("characters/borin")).get("hud", []) as Array).size() == 6)
@@ -166,14 +199,17 @@ func _init() -> void:
 	_check(hud.shows_app_buttons(), "the HUD shows the app's buttons itself")
 	await process_frame
 	_check(hud.find_child("W_skills", true, false) != null and hud.find_child("W_slots", true, false) == null, "the HUD shows the new layout")
-	# F3: the sheet pages, like home screens
+	# F2 with a sheet page open: the page editor (one key for both)
 	var f3 := f2.duplicate() as InputEventKey
 	f3.physical_keycode = KEY_F3
 	hud._input(f3)
-	_check(hud.editor != null and hud.editor.multi and hud.pages.visible, "F3 opens the page editor on the sheet")
+	_check(hud.editor == null, "F3 is no editor key any more")
+	hud._input(one)
+	hud._input(f2)
+	_check(hud.editor != null and hud.editor.multi and hud.pages.visible, "F2 on an open sheet page edits the pages")
 	hud.editor.add_page()
 	hud.editor.add("description")
-	hud._input(f3)
+	hud._input(f2)
 	await _until(func() -> bool: return (ann.sheets.get("characters/borin", {}).get("_pages", []) as Array).size() == 3)
 	_check(hud.page_list().size() == 3 and hud.page_list()[2].items[0].w == "description", "a third page with the description (%s)" % [hud.page_list().map(func(pg: Dictionary) -> String: return pg.name)])
 	var three := one.duplicate() as InputEventKey
@@ -182,6 +218,34 @@ func _init() -> void:
 	hud._input(three)
 	_check(hud.pages.visible and hud.pages.current == 2 and hud.pages.find_child("W_description", true, false) != null, "3 opens it")
 	hud.pages.close()
+
+	# quick buttons (TASK-48): Borin (cleric 3) casts, uses, rolls; it is posted in the chat
+	var borin_sheet: Dictionary = ann.sheets["characters/borin"]
+	var spell_ref := str((borin_sheet.get("spells", []) as Array)[0]) if not (borin_sheet.get("spells", []) as Array).is_empty() else "spells/cure-wounds"
+	hud.edit_hud()
+	hud.editor.add_item("spell", "round", spell_ref)
+	hud.editor.add_item("check", "square", "wis save")
+	hud.editor.add_item("item", "square", "items/torch")
+	hud.editor.finish(true)
+	await _until(func() -> bool: return hud.find_child("W_check", true, false) != null)
+	await process_frame
+	_check((borin_sheet.get("_refs", {}) as Dictionary).has(spell_ref), "the sheet knows its spells' names (%s)" % [borin_sheet.get("_refs")])
+	var spell_button: Control = hud.find_child("W_spell", true, false)
+	_check(spell_button != null and spell_button.get_node("Button/Glyph") != null, "a spell button on the HUD")
+	var torch: Control = hud.find_child("W_item", true, false)
+	_check(torch != null and (torch.get_node("Button/Badge") as Label).text == "0", "an item not held shows 0")
+	var rolls_before := ann.rolls.size()
+	(spell_button.get_node("Button") as Button).pressed.emit()
+	await _until(func() -> bool: return ann.rolls.size() > rolls_before)
+	var cast: Dictionary = ann.rolls[ann.rolls.size() - 1] if ann.rolls.size() > rolls_before else {}
+	_check(str(cast.get("action", "")) == spell_ref and str(cast.get("text", "")).begins_with("casts ") and str(cast.get("who", "")) == "Borin Stoneshield",
+		"a click casts the spell: posted in the chat (%s)" % [cast])
+	_check(NetTable.roll_bbcode(cast).contains("casts "), "the chat shows it")
+	_check(int(ann.sheets["characters/borin"].get("spell_slots_used", {}).get("1", 0)) == 2, "nothing is spent yet (TASK-49)")
+	rolls_before = ann.rolls.size()
+	(hud.find_child("W_check", true, false).get_node("Button") as Button).pressed.emit()
+	await _until(func() -> bool: return ann.rolls.size() > rolls_before)
+	_check(ann.rolls.size() > rolls_before and str(ann.rolls[ann.rolls.size() - 1].results[0].label) == "WIS save", "a check button rolls it")
 
 	# a click on the empty map: nothing selected or active, the HUD goes away
 	ann.grid.select(["characters/aria"])

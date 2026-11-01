@@ -4,12 +4,14 @@ title: Entity editor in the VTT
 status: To Do
 assignee: []
 created_date: '2026-11-01 13:02'
+updated_date: '2026-11-01 13:16'
 labels:
   - mvp
   - ui
   - data
 dependencies:
   - TASK-1
+  - TASK-22
 documentation:
   - data-layout
   - package-format
@@ -29,4 +31,5 @@ The VTT is the only editor now ([[data-layout]]). The DM needs to create and edi
 - [ ] #3 Monster editor edits stats and the feature list (add, reorder, edit feature entries)
 - [ ] #4 Changes in a campaign during a session are logged as events where the event doc says so; prep edits save to JSON
 - [ ] #5 Source (book) packages are read-only by default; editing makes a copy or needs an explicit unlock
+- [ ] #6 The editor opens in the entry's full-view tab from TASK-22 (Edit button), so viewing and editing happen in the same place
 <!-- AC:END -->

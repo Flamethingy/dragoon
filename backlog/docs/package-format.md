@@ -14,6 +14,7 @@ data/packages/<package-id>/
   spells.json
   items.json ...
   assets/           images referenced by entries (relative paths)
+  docs/             PDFs of the source (rulebooks, homebrew), part of import/export
 ```
 
 `data/` is git-ignored (copyrighted book content) and has a `.gdignore`, so Godot does not
@@ -33,7 +34,14 @@ invocations, infusions, rules, conditions, diseases, tables, features`.
 | `version` | package version (semver) |
 | `description` | Markdown |
 | `counts` | entries per kind |
+| `documents` | PDFs of the package: `[{file, title, size}]`, `file` relative to the package folder (`docs/Players Handbook.pdf`), `size` in bytes |
 | `created`, `imported_from` | provenance |
+
+The importer takes the PDFs linked in the vault's source page (`Sources/<Source>.md`, links like
+`[[Players Handbook.pdf|Player's Handbook]]`), copies them into `docs/` (only new or changed
+files, stale ones are removed) and turns the links in the description into Markdown links
+(`[Player's Handbook](<docs/Players Handbook.pdf>)`). Currently 42 PDFs in 13 packages, 1.7 GB.
+Unlinked PDFs (e.g. the DM Tuz Vault folders, the 2024 PHB) are not imported yet.
 
 ## Entries
 

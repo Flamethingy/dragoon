@@ -1,0 +1,37 @@
+---
+id: TASK-23
+title: Packages as cards with their own full view and PDFs
+status: To Do
+assignee: []
+created_date: '2026-11-01 13:20'
+labels:
+  - ui
+  - data
+dependencies:
+  - TASK-22
+documentation:
+  - package-format
+priority: high
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Expand the compendium's **Packages** menu so packages are treated like every other kind of card:
+- Packages appear as **cards** in the binder (cover image if the package has one, name, kind badge `source` / `world`, entry count). Filters: kind, enabled/disabled, has PDFs. Search over name and description.
+- The existing **On/Off** toggle stays: on the card (small switch) and in the full view. Disabled packages are dimmed and their entries vanish from the other kinds, as today.
+- Opening a package (TASK-22 tab system) shows a **full view**: name, version, kind, description (Markdown), counts per kind (each count clickable → Browse tab filtered to that package + kind), import origin, dependencies (empty for now) and a **Documents** section.
+- **Documents**: the manifest gets a `documents` list `[{file, title, size, pages?}]` with paths relative to the package folder (`docs/Players Handbook.pdf`). Show them as a list with title, size and an **Open** button. For now, open the PDF in the system's default viewer (`OS.shell_open`). A built-in viewer can come later. Also offer "Show in folder" and **Add PDF...** (copies a file into `docs/` and adds it to the manifest).
+- Export/import (TASK-16) includes `docs/`. Show the size before exporting, because PDFs can be large.
+
+Tamago fills `documents` from the Obsidian vault via `tools/import_obsidian.py`; the field is described in package-format.md.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 Packages show as cards in the compendium with name, kind badge, entry count and on/off switch; filter and search work
+- [ ] #2 On/off still works from card and full view; disabled packages are dimmed and their entries are hidden elsewhere
+- [ ] #3 The package full view (own tab) shows version, kind, description, clickable counts per kind, origin and dependencies
+- [ ] #4 Documents section lists the manifest's PDFs with title and size; Open launches the default viewer, 'Show in folder' and 'Add PDF...' work
+- [ ] #5 Package export/import includes docs/ and shows the total size first
+<!-- AC:END -->

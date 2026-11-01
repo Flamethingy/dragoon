@@ -529,6 +529,63 @@ def extract_features(monsters: list[dict], source: str) -> list[dict]:
     return list(by_key.values())
 
 
+# ---------------------------------------------------------------- documents (PDFs)
+
+pdf_index: dict[str, Path] = {}  # lower-case file name -> path, from all vaults
+
+
+def resolve_pdf(link: str, source_doc: Path) -> Path | None:
+    """[[Players Handbook.pdf]] or [[RPG/DnD5e/Assets/Sources/x.pdf]] -> file on disk."""
+    link = link.replace("\\", "/").strip()
+    for base in [source_doc.parent, *source_doc.parents]:
+        p = base / link
+        if p.is_file():
+            return p
+    return pdf_index.get(Path(link).name.lower())
+
+
+def sync_docs(pdir: Path, files: list[Path]) -> None:
+    """Copy PDFs into <package>/docs/ (only new or changed ones) and remove stale ones."""
+    docs = pdir / "docs"
+    wanted = {f.name for f in files}
+    if docs.exists():
+        for old in docs.iterdir():
+            if old.name not in wanted:
+                old.unlink()
+    for f in files:
+        docs.mkdir(exist_ok=True)
+        dst = docs / f.name
+        if not dst.exists() or dst.stat().st_size != f.stat().st_size:
+            shutil.copy2(f, dst)
+    if docs.exists() and not any(docs.iterdir()):
+        docs.rmdir()
+
+
+def collect_documents(desc: str, source_doc: Path, pdir: Path, report: Counter) -> tuple[str, list]:
+    """PDF wikilinks in the source page become package documents: copied into docs/, listed in
+    the manifest and turned into normal Markdown links in the description."""
+    documents, files = [], []
+
+    def repl(m):
+        target, _, alias = m.group(1).partition("|")
+        if not target.lower().endswith(".pdf"):
+            return m.group(0)
+        path = resolve_pdf(target, source_doc)
+        title = alias.strip() or Path(target).stem
+        if not path:
+            report["pdf missing in vault"] += 1
+            return title
+        if path.name not in {f.name for f in files}:
+            files.append(path)
+            documents.append({"file": f"docs/{path.name}", "title": title, "size": path.stat().st_size})
+        report["pdfs"] += 1
+        return f"[{title}](<docs/{path.name}>)"
+
+    desc = re.sub(r"!?\[\[([^\]]+)\]\]", repl, desc)
+    sync_docs(pdir, files)
+    return desc, documents
+
+
 # ---------------------------------------------------------------- main
 
 def main() -> int:
@@ -543,6 +600,7 @@ def main() -> int:
         image_index.update({p.name.lower(): p for p in vault.rglob("*")
                             if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif")})
         source_docs.update({p.stem: p for p in (vault / "Sources").glob("*.md")})
+        pdf_index.update({p.name.lower(): p for p in vault.rglob("*.pdf")})
 
     packages: dict[str, dict] = defaultdict(lambda: defaultdict(list))
     package_names: dict[str, str] = {}
@@ -607,9 +665,11 @@ def main() -> int:
     summary = []
     for pid, kinds in sorted(packages.items()):
         pdir = out / pid
-        if pdir.exists():
-            shutil.rmtree(pdir)
-        pdir.mkdir(parents=True)
+        if pdir.exists():  # rebuild everything except docs/ (PDFs are synced, not recopied)
+            for child in pdir.iterdir():
+                if child.name != "docs":
+                    shutil.rmtree(child) if child.is_dir() else child.unlink()
+        pdir.mkdir(parents=True, exist_ok=True)
         counts = {}
         if "monsters" in kinds:
             unique_ids(kinds["monsters"])
@@ -633,8 +693,12 @@ def main() -> int:
                 missing_images.append(f"{pid}: {img}")
         name = package_names[pid]
         desc = ""
+        documents = []
         if name in source_docs:
             desc = drop_empty_headings(strip_dataview(split_frontmatter(read_text(source_docs[name]))[1]))
+            desc, documents = collect_documents(desc, source_docs[name], pdir, report)
+        else:
+            sync_docs(pdir, [])
         manifest = {
             "format": "dragoon-package",
             "format_version": FORMAT_VERSION,
@@ -644,6 +708,7 @@ def main() -> int:
             "version": "1.0.0",
             "description": desc,
             "counts": counts,
+            "documents": documents,
             "created": now,
             "imported_from": "Obsidian vault " + ", ".join(sorted(package_vaults[pid])),
         }

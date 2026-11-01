@@ -148,16 +148,22 @@ func _init() -> void:
 	hud._input(f2)
 	_check(hud.editor != null and not hud.visible, "F2 opens the HUD editor")
 	var ed := hud.editor
-	_check(ed.items().size() == 3, "it starts with the default HUD")
+	_check(ed.items().size() == 6, "it starts with the default HUD (portrait, health, slots, Compendium, Book, Leave)")
+	_check(ed.find_child("Grid", false, false) != null, "with a grid to build on")
 	ed.add("skills")
-	ed.place(3, Rect2i(10, 18, 9, 9))
+	ed.place(6, Rect2i(10, 18, 9, 9))
 	ed.remove(2)  # no spell slots
-	_check(ed.items().map(func(i: Dictionary) -> String: return i.w) == ["portrait", "hp", "skills"], "add, move, remove")
+	_check(ed.items().map(func(i: Dictionary) -> String: return i.w) == ["portrait", "hp", "compendium", "book", "leave", "skills"], "add, move, remove")
 	hud._input(f2)
 	_check(hud.editor == null and hud.visible, "F2 again saves and closes it")
-	await _until(func() -> bool: return dm.timeline.entry("characters/borin").is_empty() == false and (Replay.entity_state(dm.timeline.entry("characters/borin"), dm.event_log.effective("characters/borin")).get("hud", []) as Array).size() == 3)
+	await _until(func() -> bool: return dm.timeline.entry("characters/borin").is_empty() == false and (Replay.entity_state(dm.timeline.entry("characters/borin"), dm.event_log.effective("characters/borin")).get("hud", []) as Array).size() == 6)
 	var saved: Array = Replay.entity_state(dm.timeline.entry("characters/borin"), dm.event_log.effective("characters/borin")).get("hud", [])
-	_check(saved.size() == 3 and saved[2].w == "skills" and saved[2].r == [10, 18, 9, 9], "saved in Borin as an event (%s)" % [saved])
+	_check(saved.size() == 6 and saved[5].w == "skills" and saved[5].r == [10, 18, 9, 9], "saved in Borin as an event (%s)" % [saved])
+	# a player gets Leave, not the DM's Compendium and Book
+	hud.actions = {"leave": func() -> void: pass}
+	hud.refresh()
+	_check((hud.find_child("W_leave", true, false) as Control).visible and not (hud.find_child("W_book", true, false) as Control).visible, "app buttons only for who may use them")
+	_check(hud.shows_app_buttons(), "the HUD shows the app's buttons itself")
 	await process_frame
 	_check(hud.find_child("W_skills", true, false) != null and hud.find_child("W_slots", true, false) == null, "the HUD shows the new layout")
 	# F3: the sheet pages, like home screens

@@ -54,6 +54,13 @@ func _ready() -> void:
 	blur.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	blur.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(blur)
+	var lines := Control.new()  # the grid, above the blur
+	lines.name = "Grid"
+	lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lines.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	lines.draw.connect(_draw_grid.bind(lines))
+	resized.connect(lines.queue_redraw)
+	add_child(lines)
 	_layer = Control.new()
 	_layer.name = "Pieces"
 	_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -249,14 +256,18 @@ static func _ignore_mouse(c: Control) -> void:
 			_ignore_mouse(child)
 
 
-func _draw() -> void:
+## The cells: thin lines, every 4th a stronger one, a frame around the whole grid.
+func _draw_grid(on: Control) -> void:
 	var a := _area()
 	var c := cell_size()
-	draw_rect(a, Color(1, 1, 1, 0.04))
+	on.draw_rect(a, Color(1, 1, 1, 0.05))
 	for x in grid.x + 1:
-		draw_line(a.position + Vector2(x * c.x, 0), a.position + Vector2(x * c.x, a.size.y), Color(1, 1, 1, 0.12), 1.0)
+		var strong := x % 4 == 0
+		on.draw_line(a.position + Vector2(x * c.x, 0), a.position + Vector2(x * c.x, a.size.y), Color(1, 1, 1, 0.38 if strong else 0.18), 1.5 if strong else 1.0)
 	for y in grid.y + 1:
-		draw_line(a.position + Vector2(0, y * c.y), a.position + Vector2(a.size.x, y * c.y), Color(1, 1, 1, 0.12), 1.0)
+		var strong := y % 4 == 0
+		on.draw_line(a.position + Vector2(0, y * c.y), a.position + Vector2(a.size.x, y * c.y), Color(1, 1, 1, 0.38 if strong else 0.18), 1.5 if strong else 1.0)
+	on.draw_rect(a, Color(1.0, 0.55, 0.1, 0.8), false, 2.0)
 
 
 ## Outlines and resize handles above the pieces.

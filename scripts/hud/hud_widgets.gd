@@ -21,13 +21,22 @@ const KINDS := {
 	"features": {"label": "Features", "size": [5, 5]},
 	"spells": {"label": "Spells", "size": [5, 5]},
 	"inventory": {"label": "Inventory", "size": [5, 5]},
+	# the app's buttons (Nico, 2026-11-01: "for now" pieces too); only shown to who may use them
+	"compendium": {"label": "Compendium", "size": [4, 1]},
+	"book": {"label": "Book", "size": [3, 1]},
+	"leave": {"label": "Leave", "size": [3, 1]},
 }
+## Pieces that are buttons of the app (CharacterHud.actions).
+const APP_BUTTONS := ["compendium", "book", "leave"]
 
 ## Without a layout of its own (Nico, 2026-11-01): portrait, health and spell slots, lower left.
 const DEFAULT_HUD := [
 	{"w": "portrait", "r": [0, 19, 4, 5]},
 	{"w": "hp", "r": [0, 24, 4, 1]},
 	{"w": "slots", "r": [0, 25, 4, 2]},
+	{"w": "compendium", "r": [37, 0, 4, 1]},
+	{"w": "book", "r": [41, 0, 3, 1]},
+	{"w": "leave", "r": [44, 0, 3, 1]},
 ]
 const DEFAULT_PAGES := [
 	{"name": "Sheet", "items": [
@@ -59,6 +68,8 @@ static func clean(items: Variant, grid: Vector2i) -> Array:
 ## The widget `kind` for the sheet `s`, `size` pixels big. `hud` rolls, spends slots and
 ## knows the portrait. Its name is "W_<kind>".
 static func build(kind: String, s: Dictionary, hud: CharacterHud, size: Vector2) -> Control:
+	if kind in APP_BUTTONS:
+		return _app_button(kind, hud, size)
 	var panel := PanelContainer.new()
 	panel.name = "W_" + kind
 	panel.theme_type_variation = UISkin.V_PAGE
@@ -93,6 +104,24 @@ static func build(kind: String, s: Dictionary, hud: CharacterHud, size: Vector2)
 			body = Label.new()
 	panel.add_child(body)
 	return panel
+
+
+## Compendium / Book / Leave: the app's button (hidden when this user can't use it, e.g. a
+## player has no Book; the editor still shows it, dimmed).
+static func _app_button(kind: String, hud: CharacterHud, size: Vector2) -> Control:
+	var b := Button.new()
+	b.name = "W_" + kind
+	b.text = str(KINDS[kind].label)
+	b.size = size
+	b.focus_mode = Control.FOCUS_NONE
+	var action: Callable = hud.actions.get(kind, Callable())
+	if action.is_valid():
+		b.pressed.connect(func() -> void: action.call())
+	elif hud.editor == null:
+		b.visible = false
+	else:
+		b.modulate.a = 0.5
+	return b
 
 
 static func _portrait(s: Dictionary, hud: CharacterHud, size: Vector2) -> Control:

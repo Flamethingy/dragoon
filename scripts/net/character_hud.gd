@@ -11,6 +11,7 @@ extends Control
 ## pages (SheetPages), F3 edits them.
 
 signal active_changed(ref: String)
+signal shown  ## the HUD was (re)built or hidden: the app checks whether it shows its buttons
 
 const SLIDE := 0.18  ## seconds of the change animation
 ## Spell slots per character level of a full caster (5e), level 1 slots first.
@@ -25,6 +26,9 @@ const HALF_UP := ["artificer"]
 var table: NetTable
 var active := ""  ## the active entity's ref ("" = none)
 var pages: SheetPages  ## the sheet pages (keys 1-9), set by TableUI
+## The app's buttons as pieces: "compendium" / "book" / "leave" -> what they do (set by the
+## app for what this user may use).
+var actions := {}
 var editor: LayoutEditor  ## the HUD / page editor while it is open
 var _dismissed := false  ## a click on the empty map hid it: stays hidden until Q / E or a selection
 var _pieces: Control
@@ -213,6 +217,7 @@ func _fill() -> void:
 	if pages != null:
 		pages.refresh()
 	if not visible:
+		shown.emit()
 		return
 	for c in _pieces.get_children():
 		_pieces.remove_child(c)
@@ -226,6 +231,17 @@ func _fill() -> void:
 		w.position = rect.position
 		w.size = rect.size
 		_pieces.add_child(w)
+	shown.emit()
+
+
+## Builds it again (e.g. the app's buttons changed).
+func refresh() -> void:
+	_fill()
+
+
+## True if the HUD shows the app's buttons (Compendium, Book, Leave) itself.
+func shows_app_buttons() -> bool:
+	return visible and layout().any(func(it: Dictionary) -> bool: return str(it.w) in HudWidgets.APP_BUTTONS and actions.has(str(it.w)))
 
 
 func cell_size() -> Vector2:

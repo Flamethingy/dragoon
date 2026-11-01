@@ -294,6 +294,7 @@ func _refresh_view(which: String) -> void:
 
 
 func _sync_buttons() -> void:
+	_hud_actions()
 	for v: String in _view_buttons:
 		var b: Button = _view_buttons[v]
 		b.set_pressed_no_signal(dock.is_shown(v) if v != "table" else view == "table")
@@ -385,6 +386,29 @@ func _on_table_changed() -> void:
 		show_view("")
 	elif table.is_online():
 		_sync_buttons()
+
+
+## The calm table's buttons as HUD pieces (Nico, 2026-11-01): Compendium and Book for the DM,
+## Leave for everyone. While the HUD shows them, the bar at the top right steps aside.
+func _hud_actions() -> void:
+	var hud := table_ui.hud
+	if hud == null:
+		return
+	var acts := {"leave": leave}
+	if table.is_dm():
+		acts["compendium"] = toggle_view.bind("compendium")
+		acts["book"] = toggle_view.bind("world")
+	if hud.actions.keys() != acts.keys():
+		hud.actions = acts
+		hud.refresh()
+	if not hud.shown.is_connected(_hud_shown):
+		hud.shown.connect(_hud_shown)
+	_hud_shown()
+
+
+func _hud_shown() -> void:
+	if _bar != null and minimal:
+		_bar.visible = view != "" and not table_ui.hud.shows_app_buttons()
 
 
 func _build_bar(root: Control) -> void:

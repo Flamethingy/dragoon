@@ -176,7 +176,7 @@ func _init() -> void:
 	b.close_requested.emit()
 	b = again.open_book_alone()
 	await process_frame
-	_check(again.view == "compendium" and b.visible and not again.start.visible, "compendium from the start screen")
+	_check(again.view == "compendium" and b.get_parent() is Window and again.start.visible, "compendium from the start screen: its own window, the start screen stays")
 	b.close_requested.emit()
 	_check(again.view == "" and again.start.visible and again.book == null, "closing it goes back to the start screen")
 

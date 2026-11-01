@@ -121,23 +121,40 @@ func join(address: String, player_name: String) -> Error:
 	return err
 
 
-## The compendium without a session (back to the start screen when closed): the core book,
-## or a world's (`world_dir`) or a timeline's (`timeline_dir`) book.
+## The compendium without a session, in its own OS window (TASK-37) beside the start screen,
+## which stays usable: the core book, or a world's (`world_dir`) or a timeline's
+## (`timeline_dir`) book. Closing the window closes the book.
 func open_book_alone(timeline_dir := "", world_dir := "") -> Compendium:
 	_drop_books()
 	book = _new_book()
 	book.timeline_dir = timeline_dir
 	book.world_dir = world_dir
-	_layer.get_node("Views").add_child(book)
-	book.move_to_front()
+	var w := Window.new()
+	w.name = "BookWindow"
+	w.visible = false
+	w.force_native = DisplayServer.get_name() != "headless"
+	w.title = "Dragoon · %s" % ("Timeline" if timeline_dir != "" else "World" if world_dir != "" else "Compendium")
+	w.theme = UISkin.theme()
+	w.min_size = Vector2i(640, 480)
+	w.size = Vector2i(1280, 820)
+	w.position = get_window().position + Vector2i(60, 60)
+	var bg := Panel.new()
+	bg.theme_type_variation = UISkin.V_PAGE
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	w.add_child(bg)
+	book.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	w.add_child(book)
+	add_child(w)
+	var b := book
+	w.close_requested.connect(func() -> void: b.close_requested.emit())
 	book.close_requested.connect(func() -> void:
 		_drop_books()
-		show_view(""))
+		if view == "compendium":
+			show_view(""))
 	if timeline_dir != "":
 		_remember({"timeline": timeline_dir, "world": timeline_dir.get_base_dir().get_base_dir()})
 	view = "compendium"
-	start.hide()
-	_bar.hide()
+	w.show()
 	return book
 
 
@@ -307,8 +324,12 @@ func _new_book() -> Compendium:
 
 func _drop_books() -> void:
 	if book != null and not book in books.values():
-		book.get_parent().remove_child(book)
-		book.queue_free()
+		var holder := book.get_parent()
+		if holder is Window:
+			holder.queue_free()  # the book's own window
+		else:
+			holder.remove_child(book)
+			book.queue_free()
 	for b: Compendium in books.values():
 		b.get_parent().remove_child(b)
 		b.queue_free()

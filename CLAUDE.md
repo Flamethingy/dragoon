@@ -1,9 +1,12 @@
 # Dragoon
 
-New game project in **Godot 4.7** (Forward Plus, Jolt Physics). Concept: still to be defined,
-see `backlog/docs/concept.md` once it exists.
+Custom virtual tabletop (VTT) for our own DnD campaign, built in **Godot 4.7** (Forward Plus,
+Jolt Physics). Hardcodes our ruleset and homebrew, reads campaign data from markdown files written
+by the vault program, logs every change as an event on one world timeline, and the DM client
+hosts players over ENet.
 
 ## Read first
+- `backlog/docs/Dragoon Concept.md`: vision, data model, campaign layers, event timeline, MVP.
 - `backlog/docs/progress.md`: current status, open questions, next steps. **Update it at the end
   of every work session.**
 

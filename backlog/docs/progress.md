@@ -50,6 +50,18 @@
   to the DM, who stamps, saves and shares them; "Next session" logs session.started and opens a new file.
   Tests: `tools/test_session_notes.gd`, `tools/test_net_table.gd`.
 
+- 2026-11-01: TASK-7 + TASK-8 (Mochi): the shared table `scenes/table.tscn` (`NetTable` + `TableUI`).
+  Start screen: the DM hosts a campaign folder on a port, players join with name and address and pick their PC
+  (cards; taken ones greyed). The host keeps everything: players get a whitelisted view of the map and tokens
+  (`Campaign.map_view` / `token_view`: name, size, image hash; HP/AC only for their own PC; never bodies or
+  `dm_` keys). Images go once per SHA-256 and are cached on disk (`AssetCache`, 48 KB chunks, checked on
+  arrival). Players may drag only their own PC (checked on the host too); moves glide and snap, and are
+  logged. The DM switches maps in the top bar (PCs come along to `party_start`, positions per map from the
+  log). Who plays whom and the map are kept in `table.json`, so rejoining by name works and a restarted host
+  continues. `Secrets` (proposal for TASK-1): `dm`/`secret`/`dm_*` keys, `%% comments %%`, `> [!dm]`
+  callouts and "DM..."/"Secret..." sections are stripped. Examples: 2 PCs, second map "Old Mill".
+  Test: `tools/test_net_table.gd`; screenshots: `tools/screenshot_table.gd`.
+
 ## Open questions
 See the "Open questions" section of the concept (secrets marking, event log format, YAML parsing, hosting ...).
 

@@ -4,6 +4,7 @@ extends Node2D
 ## lists -> tokens on the grid at their creature size (TASK-3 spike, used by the TASK-5
 ## network spike). Tokens are keyed by entity id and placed by cell; moves glide.
 ## Mouse wheel zooms, right/middle drag pans, hovering a token shows its name and HP.
+## The network table (TASK-7) feeds it data instead of files: show_map() / add_token_view().
 
 ## A token was dropped on a cell (left drag). Whoever owns the state decides.
 signal move_requested(entity: String, cell: Vector2i)
@@ -25,7 +26,11 @@ var offset := Vector2.ZERO
 var map_size := Vector2.ZERO
 var grid_size := Vector2i.ZERO  ## map size in cells
 var entities := {}  ## entity id -> {"frontmatter", "body"}
-var tokens := {}  ## entity id -> Sprite2D (meta: cell Vector2i, cells float)
+var tokens := {}  ## entity id -> Sprite2D (meta: cell Vector2i, cells float, info Dictionary)
+## Which tokens this user may drag (empty = all), e.g. players only their own PC.
+var can_drag: Callable
+
+var _image: Sprite2D
 
 var _camera: Camera2D
 var _info: Label
@@ -51,7 +56,6 @@ func _ready() -> void:
 
 ## Shows a map entity and its tokens. Returns false (with an error) if it can't.
 func load_map(id: String) -> bool:
-	map_id = id
 	var map := _entity(id)
 	if map.is_empty():
 		return false
@@ -60,27 +64,47 @@ func load_map(id: String) -> bool:
 	if texture == null:
 		return false
 	var grid: Dictionary = fm.get("grid", {}) if fm.get("grid") is Dictionary else {}
-	cell = float(grid.get("size", 70))
 	var off: Variant = grid.get("offset", [0, 0])
-	offset = Vector2(float(off[0]), float(off[1])) if off is Array and off.size() == 2 else Vector2.ZERO
-
-	var image := Sprite2D.new()
-	image.texture = texture
-	image.centered = false
-	image.z_index = -1  # the grid (_draw) goes on top of it
-	add_child(image)
-	map_size = texture.get_size()
-	grid_size = Vector2i(floori((map_size.x - offset.x) / cell), floori((map_size.y - offset.y) / cell))
-	queue_redraw()
-
+	show_map({"id": id, "name": fm.get("name", id), "grid": {"size": float(grid.get("size", 70)),
+		"offset": Vector2(float(off[0]), float(off[1])) if off is Array and off.size() == 2 else Vector2.ZERO}}, texture)
 	for t: Variant in fm.get("tokens", []):
 		if t is Dictionary:
 			var at: Variant = t.get("at", [0, 0])
 			add_token(str(t.get("entity", "")), Vector2i(int(at[0]), int(at[1])) if at is Array and at.size() == 2 else Vector2i.ZERO)
-	if _camera:
-		_camera.position = map_size * 0.5
 	set_info("%s: %d tokens (left drag: move, wheel: zoom, right drag: pan)" % [fm.get("name", id), tokens.size()])
 	return true
+
+
+## Shows a map from data: {id, name, grid: {size, offset: Vector2}} and its image.
+## Removes the previous map and all tokens.
+func show_map(view: Dictionary, texture: Texture2D) -> void:
+	clear()
+	map_id = str(view.get("id", ""))
+	var grid: Dictionary = view.get("grid", {})
+	cell = float(grid.get("size", 70.0))
+	offset = grid.get("offset", Vector2.ZERO)
+	_image = Sprite2D.new()
+	_image.texture = texture
+	_image.centered = false
+	_image.z_index = -1  # the grid (_draw) goes on top of it
+	add_child(_image)
+	map_size = texture.get_size()
+	grid_size = Vector2i(floori((map_size.x - offset.x) / cell), floori((map_size.y - offset.y) / cell))
+	queue_redraw()
+	if _camera:
+		_camera.position = map_size * 0.5
+
+
+## Removes the map image and all tokens.
+func clear() -> void:
+	for token: Sprite2D in tokens.values():
+		token.queue_free()
+	tokens.clear()
+	if _image:
+		_image.queue_free()
+		_image = null
+	map_size = Vector2.ZERO
+	queue_redraw()
 
 
 ## The map's own token list: entity id -> start cell.
@@ -99,13 +123,24 @@ func add_token(id: String, at: Vector2i) -> void:
 	var texture := _texture(str(fm.get("token", "")))
 	if texture == null:
 		return
-	var cells: float = SIZE_CELLS.get(str(fm.get("size", "medium")).to_lower(), 1.0)
+	var info := fm.duplicate()
+	info["id"] = id
+	add_token_view(info, texture, at)
+
+
+## A token from data: {id, name, size, ...} (the info is shown on hover).
+func add_token_view(info: Dictionary, texture: Texture2D, at: Vector2i) -> void:
+	var id := str(info.get("id", ""))
+	if tokens.has(id):
+		tokens[id].queue_free()
+	var cells: float = SIZE_CELLS.get(str(info.get("size", "medium")).to_lower(), 1.0)
 	var token := Sprite2D.new()
 	token.texture = texture
 	token.scale = Vector2.ONE * cell * cells / maxf(texture.get_width(), texture.get_height())
 	token.set_meta("entity", id)
 	token.set_meta("cells", cells)
 	token.set_meta("start", at)
+	token.set_meta("info", info)
 	tokens[id] = token
 	add_child(token)
 	set_token_cell(id, at, false)
@@ -218,6 +253,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			var at := get_global_mouse_position()
 			if event.pressed:
 				_dragging = _token_under(at)
+				if _dragging and can_drag.is_valid() and not can_drag.call(str(_dragging.get_meta("entity"))):
+					_dragging = null
 				if _dragging:
 					_drag_from = _dragging.position
 					_dragging.z_index = 10
@@ -244,5 +281,12 @@ func _unhandled_input(event: InputEvent) -> void:
 func _hover(at: Vector2) -> void:
 	var token := _token_under(at)
 	if token:
-		var fm: Dictionary = entities[token.get_meta("entity")].frontmatter
-		set_info("%s  HP %s  AC %s  (%s)" % [fm.get("name", "?"), fm.get("hp", "?"), fm.get("ac", "?"), fm.get("size", "?")])
+		var info: Dictionary = token.get_meta("info", {})
+		var parts := PackedStringArray([str(info.get("name", "?"))])
+		for key: String in ["hp", "ac"]:
+			if info.has(key):
+				parts.append("%s %s" % [key.to_upper(), info[key]])
+		parts.append("(%s)" % info.get("size", "medium"))
+		if str(info.get("owner", "")) != "":
+			parts.append("· %s" % info.owner)
+		set_info("  ".join(parts))

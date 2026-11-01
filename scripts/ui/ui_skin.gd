@@ -183,6 +183,13 @@ static func theme() -> Theme:
 	t.set_color("caret_color", "LineEdit", WINE)
 	t.set_color("selection_color", "LineEdit", Color(WINE, 0.25))
 	t.set_color("clear_button_color", "LineEdit", WINE)
+	t.set_stylebox("normal", "TextEdit", box("flat_tan", 18, Vector2(14, 10)))
+	t.set_stylebox("focus", "TextEdit", box("outline_wine", 18, Vector2(14, 10)))
+	t.set_color("font_color", "TextEdit", INK)
+	t.set_color("font_placeholder_color", "TextEdit", Color(INK, 0.5))
+	t.set_color("caret_color", "TextEdit", WINE)
+	t.set_color("selection_color", "TextEdit", Color(WINE, 0.25))
+	t.set_color("background_color", "TextEdit", Color(0, 0, 0, 0))
 
 	t.set_color("default_color", "RichTextLabel", INK)
 	t.set_color("selection_color", "RichTextLabel", Color(WINE, 0.2))

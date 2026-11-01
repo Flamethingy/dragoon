@@ -1,10 +1,10 @@
 ---
 id: TASK-1
-title: Define frontmatter schema for entities
+title: Define entity schema (JSON) for world and campaign
 status: In Progress
 assignee: []
 created_date: '2026-11-01 11:17'
-updated_date: '2026-11-01 12:58'
+updated_date: '2026-11-01 13:02'
 labels:
   - decision
   - data
@@ -13,21 +13,22 @@ documentation:
   - Dragoon Concept
   - package-format
   - reveal-visibility
+  - data-layout
 priority: high
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Agree on the YAML frontmatter schema for monsters, NPCs, PCs, places and items (concept: Data model, Next steps 2). Write it down while importing the campaign into the vault so loader, sheets and future import agents share one schema. Also decide how DM-only secrets are marked (section marker or separate file).
+Nico decided on 2026-11-01: JSON everywhere, the VTT is the editor (see [[data-layout]]). Core schemas are in [[package-format]]. Still to define: fields per world/campaign kind (PC, NPC, place, faction, map, lore, note), using the same field names as the packages. DM secrets are decided ([[reveal-visibility]]).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Schema doc in backlog/docs lists required and optional fields per entity type
-- [ ] #2 Wikilink fields (faction, location) and token/size fields are defined
-- [x] #3 Marking of DM-only secrets is decided and documented
-- [ ] #4 At least one example file per entity type exists
+- [x] #1 Marking of DM-only secrets is decided and documented
+- [ ] #2 data-layout.md lists required and optional fields for PC, NPC, place, faction, map, lore and note
+- [ ] #3 Link fields (faction, location, owner) and token/size/map grid fields are defined
+- [ ] #4 Example campaign in JSON (replaces examples/campaign/*.md) with at least one entry per kind
 <!-- AC:END -->
 
 ## Implementation Notes

@@ -2,6 +2,12 @@
 
 Nov 1, 2026 · @Nico
 
+> **Decisions since writing (2026-11-01):** the VTT is the editor, and all data is JSON with
+> Markdown text fields, so there is no vault program and no markdown entity files. Core data is in
+> source packages (package-format.md), worlds are packages too, and campaigns are folders
+> (data-layout.md). DM secrets are per-passage `<reveal>` tags (reveal-visibility.md). The
+> sections below still describe the original idea where they mention markdown files.
+
 ## Vision
 
 A virtual tabletop built in Godot for one table only: our DnD campaign. Foundry tries to support every system, so setup drowns in settings, modules and compendium work. Our VTT hardcodes our ruleset, homebrew and house rules, so there is nothing to configure.

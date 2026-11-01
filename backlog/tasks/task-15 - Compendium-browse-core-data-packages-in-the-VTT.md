@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@Mochi'
 created_date: '2026-11-01 11:30'
-updated_date: '2026-11-01 12:08'
+updated_date: '2026-11-01 12:13'
 labels:
   - mvp
   - data
@@ -46,6 +46,13 @@ PackageDB loads data/packages on a WorkerThreadPool task (index by kind + by low
 - The open card shows a title plate, a big framed picture, stat chips with icons, ability hexes, the source, and the full StatBlock text folded under "Full text".
 - Entries without art get a fallback (`CardArt`): a plate coloured by type or school, with a ring and the initial.
 - Images load on worker threads (`ImageCache`). Text colours are switched to ink on paper.
+
+2026-11-01 12:20 (Mochi): Adapted to the new features.json format (importer commit 38f4dda); my commit is 0241ea4.
+- `PackageDB` indexes entries by package/kind/id. New: `get_entry()`, `feature()`, and `features_of(monster, list)`. Ids that don't resolve become `{_missing}`.
+- The stat block resolves feature ids and shows `legendary_intro` above Legendary Actions. A missing id renders a small warning line instead of crashing.
+- `features` is its own kind: a card with a used-by count badge, chips for to-hit, range, damage, save and uses, and a "Used by N monsters" list of `entry:` links.
+- "Text too" search now goes through the resolved features.
+- Test: 0 of all feature ids missing, Goblin and Bone Lord OK, Shortbow lists Goblin. Note: Bone Lord's `legendary_intro` is empty in the data. 29 monsters have an intro in total.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -97,6 +97,12 @@ func _build() -> void:
 	_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_tabs.add_theme_constant_override("separation", 6)
 	tabs_scroll.add_child(_tabs)
+	var manage := Button.new()
+	manage.text = "Packages..."
+	manage.tooltip_text = "Import, export, switch on/off or remove source packages"
+	manage.icon = UISkin.tex("icon_chest")
+	manage.pressed.connect(_open_packages)
+	side.add_child(manage)
 
 	# Middle: the binder page.
 	var page := PanelContainer.new()
@@ -236,6 +242,9 @@ func _flipped(t: Texture2D) -> Texture2D:
 
 func _on_loaded() -> void:
 	_progress.hide()
+	for c in _tabs.get_children():
+		_tabs.remove_child(c)
+		c.queue_free()
 	_status.text = "%d cards from %d packages" % [db.count(), db.packages.size()]
 	if not db.errors.is_empty():
 		_status.text += "\n%d problems (see Output)" % db.errors.size()
@@ -251,8 +260,29 @@ func _on_loaded() -> void:
 		tab.pressed.connect(_select_kind.bind(k))
 		_tabs.add_child(tab)
 	if _tabs.get_child_count() > 0:
-		(_tabs.get_child(0) as Button).button_pressed = true
-		_select_kind(db.kinds()[0])
+		var keep := db.kinds().find(_kind)  # after a reload, stay on the same kind
+		var i := keep if keep >= 0 else 0
+		(_tabs.get_child(i) as Button).button_pressed = true
+		_select_kind(db.kinds()[i])
+	else:
+		_matches = []
+		_render_page()
+
+
+## The Packages window; after changes the book reloads.
+func _open_packages() -> void:
+	var panel := PackagesPanel.new()
+	panel.manager = PackageManager.new(db.root)
+	panel.changed.connect(_reload)
+	add_child(panel)
+
+
+func _reload() -> void:
+	_progress.show()
+	_status.text = "Re-reading packages..."
+	_current = {}
+	_history.clear()
+	db.load_async(db.root)
 
 
 func _select_kind(kind: String) -> void:

@@ -1,0 +1,223 @@
+class_name PackageManager
+extends RefCounted
+## Source packages as single files (TASK-16): export a package folder (manifest, JSON per
+## kind, assets) as one zip file (EXTENSION), inspect and install such a file, enable or
+## disable packages, and remove them. Removing moves the folder to `<root>/../removed/`
+## so nothing is lost by a wrong click.
+
+enum Conflict { REPLACE, KEEP_BOTH, CANCEL }
+
+const EXTENSION := "dragoonpkg"
+const FORMAT := "dragoon-package"
+const FORMAT_VERSION := 1  ## newest version this VTT understands
+const SETTINGS := "user://packages.cfg"
+
+var root := ""  ## the packages folder
+
+
+func _init(packages_root := "") -> void:
+	root = packages_root if packages_root != "" else PackageDB.default_root()
+
+
+# --- Export --------------------------------------------------------------------------
+
+## Writes the package folder `id` into one file. Returns OK or an error.
+func export_package(id: String, file: String) -> Error:
+	var folder := root.path_join(id)
+	if not DirAccess.dir_exists_absolute(folder):
+		return ERR_FILE_NOT_FOUND
+	var zip := ZIPPacker.new()
+	var err := zip.open(file)
+	if err != OK:
+		return err
+	for rel in _files_under(folder, ""):
+		var data := FileAccess.get_file_as_bytes(folder.path_join(rel))
+		zip.start_file(id + "/" + rel)
+		zip.write_file(data)
+		zip.close_file()
+	return zip.close()
+
+
+static func _files_under(folder: String, prefix: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	for f in DirAccess.get_files_at(folder.path_join(prefix)):
+		out.append(prefix.path_join(f) if prefix != "" else f)
+	for d in DirAccess.get_directories_at(folder.path_join(prefix)):
+		out.append_array(_files_under(folder, prefix.path_join(d) if prefix != "" else d))
+	return out
+
+
+# --- Import --------------------------------------------------------------------------
+
+## Reads a package file without installing it:
+## {ok, error, manifest, top (folder in the zip, may be ""), files, exists (id installed)}.
+func inspect(file: String) -> Dictionary:
+	var result := {"ok": false, "error": "", "manifest": {}, "top": "", "files": PackedStringArray(), "exists": false}
+	var zip := ZIPReader.new()
+	if zip.open(file) != OK:
+		result.error = "Not a package file (can't open it as a zip)"
+		return result
+	var files := zip.get_files()
+	zip.close()
+	result.files = files
+	# The manifest is package.json at the top or inside one top folder.
+	var manifest_path := ""
+	for f in files:
+		if f == "package.json" or (f.count("/") == 1 and f.ends_with("/package.json")):
+			manifest_path = f
+			break
+	if manifest_path == "":
+		result.error = "No package.json in the file"
+		return result
+	for f in files:
+		if f.begins_with("/") or f.contains("..") or f.contains(":") or f.contains("\\"):
+			result.error = "Unsafe path in the file: %s" % f
+			return result
+	zip.open(file)
+	var manifest: Variant = JSON.parse_string(zip.read_file(manifest_path).get_string_from_utf8())
+	zip.close()
+	if not manifest is Dictionary:
+		result.error = "package.json is not valid JSON"
+		return result
+	if str(manifest.get("format", "")) != FORMAT:
+		result.error = "Not a Dragoon package (format \"%s\")" % manifest.get("format", "")
+		return result
+	var version := int(manifest.get("format_version", 0))
+	if version < 1 or version > FORMAT_VERSION:
+		result.error = "Package format version %d is not supported (this VTT reads up to %d)" % [version, FORMAT_VERSION]
+		return result
+	var id := str(manifest.get("id", ""))
+	if id == "" or not id.is_valid_filename() or id.contains(" "):
+		result.error = "The package has no usable id"
+		return result
+	result.manifest = manifest
+	result.top = manifest_path.get_base_dir()
+	result.exists = DirAccess.dir_exists_absolute(root.path_join(id))
+	result.ok = true
+	return result
+
+
+## Installs a package file. With an existing id: REPLACE it, KEEP_BOTH (the new one gets
+## a free id like "<id>-2" and "(2)" in its name) or CANCEL. Returns
+## {ok, error, id} (id = the installed package's id).
+func install(file: String, conflict := Conflict.CANCEL) -> Dictionary:
+	var info := inspect(file)
+	if not info.ok:
+		return {"ok": false, "error": info.error, "id": ""}
+	var manifest: Dictionary = info.manifest
+	var id := str(manifest.id)
+	if info.exists:
+		match conflict:
+			Conflict.CANCEL:
+				return {"ok": false, "error": "A package with the id \"%s\" is already installed" % id, "id": id}
+			Conflict.KEEP_BOTH:
+				var n := 2
+				while DirAccess.dir_exists_absolute(root.path_join("%s-%d" % [id, n])):
+					n += 1
+				manifest["id"] = "%s-%d" % [id, n]
+				manifest["name"] = "%s (%d)" % [manifest.get("name", id), n]
+				id = manifest.id
+	# Unpack into a temporary folder first, so a broken file never leaves half a package.
+	var temp := root.path_join(".installing-" + id)
+	_delete_tree(temp)
+	DirAccess.make_dir_recursive_absolute(temp)
+	var zip := ZIPReader.new()
+	zip.open(file)
+	var top: String = info.top
+	for f: String in info.files:
+		if f.ends_with("/"):
+			continue
+		var rel := f.substr(top.length() + 1) if top != "" else f
+		if top != "" and not f.begins_with(top + "/"):
+			continue
+		var dest := temp.path_join(rel)
+		DirAccess.make_dir_recursive_absolute(dest.get_base_dir())
+		var out := FileAccess.open(dest, FileAccess.WRITE)
+		if out == null:
+			zip.close()
+			_delete_tree(temp)
+			return {"ok": false, "error": "Can't write %s" % dest, "id": id}
+		out.store_buffer(zip.read_file(f))
+		out.close()
+	zip.close()
+	# The manifest may have a new id / name (keep both).
+	var mf := FileAccess.open(temp.path_join("package.json"), FileAccess.WRITE)
+	mf.store_string(JSON.stringify(manifest, "  "))
+	mf.close()
+	var target := root.path_join(id)
+	if DirAccess.dir_exists_absolute(target):
+		var moved := remove(id)  # replace: the old one goes to removed/
+		if moved != OK:
+			_delete_tree(temp)
+			return {"ok": false, "error": "Can't replace the installed package (%s)" % error_string(moved), "id": id}
+	var err := DirAccess.rename_absolute(temp, target)
+	if err != OK:
+		_delete_tree(temp)
+		return {"ok": false, "error": "Can't install: %s" % error_string(err), "id": id}
+	set_enabled(id, true)
+	return {"ok": true, "error": "", "id": id}
+
+
+# --- Enable, disable, remove ---------------------------------------------------------
+
+func is_enabled(id: String) -> bool:
+	return id not in _disabled()
+
+
+func set_enabled(id: String, enabled: bool) -> void:
+	var list := _disabled()
+	if enabled:
+		list.erase(id)
+	elif id not in list:
+		list.append(id)
+	var cfg := ConfigFile.new()
+	cfg.load(SETTINGS)
+	cfg.set_value("disabled", _key(), list)
+	cfg.save(SETTINGS)
+
+
+func _disabled() -> PackedStringArray:
+	var cfg := ConfigFile.new()
+	cfg.load(SETTINGS)
+	return PackedStringArray(cfg.get_value("disabled", _key(), PackedStringArray()))
+
+
+## Settings are kept per packages folder (tests use their own).
+func _key() -> String:
+	return root.simplify_path().replace("/", "|").replace(":", "")
+
+
+## Moves the package folder to `<root>/../removed/<id>-<timestamp>`.
+func remove(id: String) -> Error:
+	var folder := root.path_join(id)
+	if not DirAccess.dir_exists_absolute(folder):
+		return ERR_FILE_NOT_FOUND
+	var trash := root.get_base_dir().path_join("removed")
+	DirAccess.make_dir_recursive_absolute(trash)
+	var stamp := Time.get_datetime_string_from_system().replace(":", "-")
+	return DirAccess.rename_absolute(folder, trash.path_join("%s-%s" % [id, stamp]))
+
+
+## Manifests of every installed package, enabled or not: [{manifest..., "_enabled"}].
+func list() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for id in DirAccess.get_directories_at(root):
+		if id.begins_with("."):
+			continue
+		var m: Variant = JSON.parse_string(FileAccess.get_file_as_string(root.path_join(id).path_join("package.json")))
+		if m is Dictionary:
+			m["_folder"] = id
+			m["_enabled"] = is_enabled(id)
+			out.append(m)
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return str(a.get("name", "")).to_lower() < str(b.get("name", "")).to_lower())
+	return out
+
+
+static func _delete_tree(path: String) -> void:
+	if not DirAccess.dir_exists_absolute(path):
+		return
+	for f in DirAccess.get_files_at(path):
+		DirAccess.remove_absolute(path.path_join(f))
+	for d in DirAccess.get_directories_at(path):
+		_delete_tree(path.path_join(d))
+	DirAccess.remove_absolute(path)

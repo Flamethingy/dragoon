@@ -59,7 +59,10 @@ func _load_all() -> void:
 	if dir == null:
 		problems.append("Packages folder not found: %s" % root)
 	else:
+		var disabled := PackageManager.new(root)._disabled()
 		for id in dir.get_directories():
+			if id.begins_with(".") or id in disabled:
+				continue  # being installed, or switched off in the Packages window
 			var folder := root.path_join(id)
 			var manifest: Variant = _read_json(folder.path_join("package.json"), problems)
 			if not manifest is Dictionary:

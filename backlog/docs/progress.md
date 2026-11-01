@@ -25,6 +25,24 @@
   Test: `tools/test_compendium.gd` (formats every entry; 2434 of 2888 wikilinks resolve, the rest point to
   PDFs or missing pages). Not yet: jumping to a `#Section` inside the opened page.
 
+- 2026-11-01: TASK-15 redesign (Mochi): the compendium is now a card-collection binder using the UI sheet
+  `assets/ui_sprites.png` (`UISkin`): cover with bookmark tabs per kind, a page of cards (art, name, badge),
+  a detail panel with chips and ability hexes, and the full text on demand. Monster features come from
+  `features.json` by id (`PackageDB.feature`, `features_of`), with a feature view listing "Used by" monsters
+  and `legendary_intro` above Legendary Actions. Test: every feature id resolves (16,433 entries).
+- 2026-11-01: TASK-9 (Mochi): `EventLog` (`scripts/timeline/event_log.gd`): append-only JSONL with writers
+  for the MVP event types, undo events, world clock; `Replay` (`scripts/timeline/replay.gd`) rebuilds an
+  entity's state up to any in-game moment. Test: `tools/test_event_log.gd`.
+- 2026-11-01: TASK-5 (Mochi): network spike `scenes/spikes/net_table.tscn` (`NetTable`, ENet). The DM is
+  the authority: players request moves, the DM checks, logs a `token.moved` event and broadcasts; a
+  restarted DM restores tokens from the log. Run with `--host` / `--join=ip:port`.
+  Test: `tools/test_net_table.gd` (two tables in one process). Spike limit: anyone may move any token.
+- 2026-11-01: TASK-16 (Mochi): `PackageManager` (`scripts/compendium/package_manager.gd`): export a
+  package as one `.dragoonpkg` zip (with assets), inspect (format, version, safe paths, counts), install
+  with replace / keep both / cancel, enable/disable (`user://packages.cfg`), remove (moved to
+  `data/removed`). "Packages..." window in the compendium (`PackagesPanel`); the book reloads on close.
+  Test: `tools/test_packages.gd`; screenshot: `tools/screenshot_packages.gd`.
+
 ## Open questions
 See the "Open questions" section of the concept (secrets marking, event log format, YAML parsing, hosting ...).
 

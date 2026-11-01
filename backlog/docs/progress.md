@@ -67,6 +67,16 @@
   `token.moved` per member with `data.group = "party"`. Local maps show the PCs one by one at their own
   positions. Example world map "The Westmarch" (`maps/world.md`). Splitting/merging groups: later.
 
+- 2026-11-01: TASK-1 (Mochi): JSON entry schema in `data-layout.md` (refs `kind/id` resolving campaign > world >
+  core; PC, NPC, monster, place, faction, lore, map, note, campaign.json). Examples: campaign
+  `examples/campaigns/red-fang/` and world package `examples/packages/westmarch/`. TASK-2 closed (types approved).
+- 2026-11-01: TASK-20 (Mochi): the table runs on JSON campaigns. `Campaign` reads campaign.json + one JSON per
+  kind; on first host the example is copied to `data/campaigns/red-fang`. Logins are the campaign's players
+  (id or name), PCs belong to their `player`; free PCs can be picked (kept in `table.json`). Events go to the
+  campaign's `events.jsonl` with `by` = player id; notes to `notes.json` (`SessionNotes`, headings with the
+  players' names). `TokenGrid` only shows data now; the markdown example and spike scenes are gone
+  (`Frontmatter` stays for importers, test fixtures in `tools/fixtures/`). `secrets.gd` is unused until TASK-18.
+
 ## Open questions
 See the "Open questions" section of the concept (secrets marking, event log format, YAML parsing, hosting ...).
 

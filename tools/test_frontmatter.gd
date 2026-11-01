@@ -44,7 +44,7 @@ n: "[[Red Fang Clan]]"
 	var none := Frontmatter.parse("# Just markdown\n")
 	_eq(none, {"frontmatter": {}, "body": "# Just markdown\n"})
 
-	var chief := Frontmatter.load_file("res://examples/campaign/monsters/goblin-chief.md")
+	var chief := Frontmatter.load_file("res://tools/fixtures/goblin-chief.md")
 	var fm: Dictionary = chief.get("frontmatter", {})
 	_eq(fm.get("name"), "Goblin Chief")
 	_eq(fm.get("hp"), 21)
@@ -57,7 +57,7 @@ n: "[[Red Fang Clan]]"
 	_eq(str(fm.get("dm_notes", "")).begins_with("Knows where"), true)
 	_eq(str(chief.get("body", "")).begins_with("# Goblin Chief"), true)
 
-	var map: Dictionary = Frontmatter.load_file("res://examples/campaign/maps/forest-road.md").get("frontmatter", {})
+	var map: Dictionary = Frontmatter.load_file("res://tools/fixtures/forest-road.md").get("frontmatter", {})
 	_eq(map.get("grid"), {"size": 70, "offset": [0, 0]})
 	_eq(map.get("tokens", []).size(), 2)
 	_eq(map.get("tokens", [{}, {}])[1].get("at"), [11, 6])

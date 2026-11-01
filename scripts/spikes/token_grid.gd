@@ -1,10 +1,10 @@
 class_name TokenGrid
 extends Node2D
-## A map entity (markdown) -> its image with a grid overlay, and the entity files it
-## lists -> tokens on the grid at their creature size (TASK-3 spike, used by the TASK-5
-## network spike). Tokens are keyed by entity id and placed by cell; moves glide.
-## Mouse wheel zooms, right/middle drag pans, hovering a token shows its name and HP.
-## The network table (TASK-7) feeds it data instead of files: show_map() / add_token_view().
+## A map image with a grid overlay and tokens on it at their creature size (TASK-3 spike,
+## the shared table since TASK-7). It only shows what it is given: show_map() and
+## add_token_view(); the table (NetTable) decides. Tokens are keyed by entity ref and placed
+## by cell; moves glide. Mouse wheel zooms, right/middle drag pans, hovering a token shows
+## its name (and HP/AC when the viewer may see them).
 
 ## A token was dropped on a cell (left drag). Whoever owns the state decides.
 signal move_requested(entity: String, cell: Vector2i)
@@ -13,19 +13,13 @@ signal move_requested(entity: String, cell: Vector2i)
 const SIZE_CELLS := {"tiny": 0.5, "small": 1.0, "medium": 1.0, "large": 2.0, "huge": 3.0, "gargantuan": 4.0}
 const MOVE_SECONDS_PER_CELL := 0.12
 
-## Campaign folder; entity ids and image paths in the files are relative to it.
-@export_dir var campaign_dir := "res://examples/campaign"
-## Map entity id (path without .md).
-@export var map_id := "maps/forest-road"
 @export var grid_color := Color(0, 0, 0, 0.35)
-## Load the map in _ready (off for tests that call load_map themselves).
-@export var auto_load := true
 
+var map_id := ""  ## ref of the shown map, e.g. "maps/forest-road"
 var cell := 70.0
 var offset := Vector2.ZERO
 var map_size := Vector2.ZERO
 var grid_size := Vector2i.ZERO  ## map size in cells
-var entities := {}  ## entity id -> {"frontmatter", "body"}
 var tokens := {}  ## entity id -> Sprite2D (meta: cell Vector2i, cells float, info Dictionary)
 ## Which tokens this user may drag (empty = all), e.g. players only their own PC.
 var can_drag: Callable
@@ -50,29 +44,6 @@ func _ready() -> void:
 	_info.add_theme_color_override("font_outline_color", Color.BLACK)
 	_info.add_theme_constant_override("outline_size", 6)
 	ui.add_child(_info)
-	if auto_load:
-		load_map(map_id)
-
-
-## Shows a map entity and its tokens. Returns false (with an error) if it can't.
-func load_map(id: String) -> bool:
-	var map := _entity(id)
-	if map.is_empty():
-		return false
-	var fm: Dictionary = map.frontmatter
-	var texture := _texture(str(fm.get("image", "")))
-	if texture == null:
-		return false
-	var grid: Dictionary = fm.get("grid", {}) if fm.get("grid") is Dictionary else {}
-	var off: Variant = grid.get("offset", [0, 0])
-	show_map({"id": id, "name": fm.get("name", id), "grid": {"size": float(grid.get("size", 70)),
-		"offset": Vector2(float(off[0]), float(off[1])) if off is Array and off.size() == 2 else Vector2.ZERO}}, texture)
-	for t: Variant in fm.get("tokens", []):
-		if t is Dictionary:
-			var at: Variant = t.get("at", [0, 0])
-			add_token(str(t.get("entity", "")), Vector2i(int(at[0]), int(at[1])) if at is Array and at.size() == 2 else Vector2i.ZERO)
-	set_info("%s: %d tokens (left drag: move, wheel: zoom, right drag: pan)" % [fm.get("name", id), tokens.size()])
-	return true
 
 
 ## Shows a map from data: {id, name, grid: {size, offset: Vector2}} and its image.
@@ -113,19 +84,6 @@ func start_cells() -> Dictionary:
 	for id: String in tokens:
 		out[id] = tokens[id].get_meta("start")
 	return out
-
-
-func add_token(id: String, at: Vector2i) -> void:
-	var entity := _entity(id)
-	if entity.is_empty():
-		return
-	var fm: Dictionary = entity.frontmatter
-	var texture := _texture(str(fm.get("token", "")))
-	if texture == null:
-		return
-	var info := fm.duplicate()
-	info["id"] = id
-	add_token_view(info, texture, at)
 
 
 ## A token from data: {id, name, size, ...} (the info is shown on hover).
@@ -196,28 +154,6 @@ func can_place(id: String, at: Vector2i) -> bool:
 func set_info(text: String) -> void:
 	if _info:
 		_info.text = text
-
-
-## Loads (and caches) an entity file of the campaign.
-func _entity(id: String) -> Dictionary:
-	if entities.has(id):
-		return entities[id]
-	var path := campaign_dir.path_join(id + ".md")
-	var data := Frontmatter.load_file(path)
-	if data.is_empty():
-		return {}
-	entities[id] = data
-	return data
-
-
-## An image of the campaign folder, loaded at runtime (campaign files aren't imported).
-func _texture(rel: String) -> Texture2D:
-	var path := campaign_dir.path_join(rel)
-	var image := Image.load_from_file(path)
-	if image == null or image.is_empty():
-		push_error("Image not found: %s" % path)
-		return null
-	return ImageTexture.create_from_image(image)
 
 
 func _draw() -> void:

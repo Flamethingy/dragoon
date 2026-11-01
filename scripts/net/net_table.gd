@@ -1,7 +1,8 @@
 class_name NetTable
 extends Node
-## The shared table (TASK-5 spike, grown for TASK-7/8/14). The DM hosts a campaign folder
-## over ENet; players join by address with a name and pick their PC in the lobby.
+## The shared table (TASK-5 spike, grown for TASK-7/8/14/20). The DM hosts a campaign folder
+## (JSON, data-layout.md) over ENet; players join by address with their player name from
+## campaign.json and get their PC (pcs.json `player`), or pick a free one in the lobby.
 ##
 ## The DM instance owns all state. Players only ever receive a compact, whitelisted view
 ## of the current map and its tokens (Campaign.map_view / token_view, no bodies, no
@@ -10,7 +11,7 @@ extends Node
 ## Images go once per content hash and are cached on the clients (AssetCache).
 ## On world maps (`kind: world`) the PCs travel as one party token (TASK-13): moving it logs
 ## one token.moved per member (data.group = "party"); local maps show them one by one.
-## Who plays which PC and the current map are kept in `table.json` next to the event log,
+## The current map and picks of free PCs are kept in `table.json` in the campaign folder,
 ## so players can drop out and rejoin (by name) without restarting the host.
 ##
 ## Command line: `-- --host[=port] [--campaign=path]` or `-- --join=ip:port --name=Aria`.
@@ -22,16 +23,17 @@ signal pcs_changed  ## lobby: the PC list or my PC changed
 
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
-const DEFAULT_CAMPAIGN := "res://examples/campaign"
 const PARTY := "party"  ## id of the group token on world maps
 
-## Host: the campaign folder (entity markdown files and images).
-@export var campaign_dir := DEFAULT_CAMPAIGN
-## Host: the campaign's event log; empty = user://campaigns/<folder name>/events.jsonl.
+## Host: the campaign folder; empty = data/campaigns/red-fang (the example is copied
+## there on first use).
+@export var campaign_dir := ""
+## Host: the campaign's event log; empty = events.jsonl in the campaign folder.
 @export var log_path := ""
 @export var auto_ui := true
 @export var calendar_path := "res://calendars/default.json"
-## The player's name (players are recognised by it when they rejoin).
+## The login: a player's id or name from campaign.json (they are recognised by it when
+## they rejoin).
 @export var player_name := ""
 @export var cache_dir := "user://cache/assets"
 
@@ -44,12 +46,14 @@ var status := "Offline"
 var campaign: Campaign
 var event_log: EventLog
 var map_id := ""
-var owners := {}  ## pc id -> player name (kept when they disconnect)
-var peers := {}  ## peer id -> player name (connected and greeted)
+var owners := {}  ## pc ref -> player id (pcs.json `player`, plus picks of free PCs)
+var claims := {}  ## pc ref -> player id: free PCs picked in the lobby (table.json)
+var peers := {}  ## peer id -> player id (connected and greeted)
 
 # Player
 var pc_choices: Array = []  ## [{id, name, class, image, taken_by}]
 var my_pc := ""
+var my_player := ""  ## my player id, as the host knows me
 var assets_received := 0  ## images downloaded this run (tests check the cache with it)
 var _state := {}  ## the last table view from the host
 var _requested := {}  ## sha -> true while downloading
@@ -60,7 +64,6 @@ var _ui: TableUI
 func _ready() -> void:
 	grid = TokenGrid.new()
 	grid.name = "Grid"
-	grid.auto_load = false
 	grid.can_drag = _may_drag
 	add_child(grid)
 	grid.move_requested.connect(_on_move_requested)
@@ -112,14 +115,17 @@ func is_dm() -> bool:
 ## The DM: opens the campaign and its event log (so the table continues where it
 ## stopped) and listens on `port`.
 func host(port := DEFAULT_PORT) -> Error:
-	if not DirAccess.dir_exists_absolute(campaign_dir):
-		_set_status("Campaign folder not found: %s" % campaign_dir)
+	if campaign_dir == "":
+		campaign_dir = Campaign.install_example(Campaign.default_root().path_join("red-fang"))
+	if not Campaign.is_campaign(campaign_dir):
+		_set_status("No campaign (campaign.json) in %s" % campaign_dir)
 		return ERR_FILE_NOT_FOUND
 	campaign = Campaign.new(campaign_dir, assets)
 	if log_path == "":
-		log_path = "user://campaigns/%s/events.jsonl" % campaign_dir.trim_suffix("/").get_file()
+		log_path = campaign.events_path()
 	event_log = EventLog.open(log_path)
 	_load_table_file()
+	_update_owners()
 	var maps := campaign.maps()
 	if map_id not in maps:
 		map_id = maps[0] if not maps.is_empty() else ""
@@ -132,7 +138,7 @@ func host(port := DEFAULT_PORT) -> Error:
 	player_name = "DM"
 	_open_notes()
 	_apply_state(view_for(""))
-	_set_status("Hosting %s on port %d (%d events in the log)" % [campaign_dir.get_file(), port, event_log.events.size()])
+	_set_status("Hosting %s on port %d (%d events in the log)" % [campaign.info.get("name", campaign.id()), port, event_log.events.size()])
 	return OK
 
 
@@ -190,7 +196,7 @@ func _party_token(members: Array, placed: Dictionary, start: Vector2i, image: St
 	if image == "":
 		image = campaign.token_view(members[0]).get("image", "")
 	return {"id": PARTY, "image": image, "name": "Party: %s" % ", ".join(names), "size": "medium",
-		"type": "party", "members": members, "players": players, "cell": cell}
+		"kind": "party", "members": members, "players": players, "cell": cell}
 
 
 ## DM: shows another map to everyone.
@@ -212,7 +218,7 @@ func _send_tables() -> void:
 func _send_pc_lists() -> void:
 	var choices := campaign.pc_choices(owners)
 	for peer_id: int in peers:
-		pc_list.rpc_id(peer_id, choices, _pc_of(peers[peer_id]))
+		pc_list.rpc_id(peer_id, choices, _pc_of(peers[peer_id]), peers[peer_id])
 
 
 func _pc_of(player: String) -> String:
@@ -222,8 +228,16 @@ func _pc_of(player: String) -> String:
 	return ""
 
 
+## PCs with a `player` in pcs.json belong to them; free ones to whoever picked them.
+func _update_owners() -> void:
+	owners = campaign.owners()
+	for pc: String in claims:
+		if not owners.has(pc) and pc in campaign.pcs():
+			owners[pc] = claims[pc]
+
+
 func _table_file() -> String:
-	return log_path.get_base_dir().path_join("table.json")
+	return campaign_dir.path_join("table.json")
 
 
 func _load_table_file() -> void:
@@ -231,14 +245,13 @@ func _load_table_file() -> void:
 		if FileAccess.file_exists(_table_file()) else null
 	if data is Dictionary:
 		map_id = str(data.get("map", ""))
-		owners = data.get("owners", {}) if data.get("owners") is Dictionary else {}
+		claims = data.get("claims", {}) if data.get("claims") is Dictionary else {}
 
 
 func _save_table_file() -> void:
-	DirAccess.make_dir_recursive_absolute(_table_file().get_base_dir())
 	var f := FileAccess.open(_table_file(), FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"map": map_id, "owners": owners}, "  "))
+		f.store_string(JSON.stringify({"map": map_id, "claims": claims}, "  "))
 
 
 func _on_peer_connected(id: int) -> void:
@@ -248,7 +261,7 @@ func _on_peer_connected(id: int) -> void:
 
 func _on_peer_disconnected(id: int) -> void:
 	if is_dm() and peers.has(id):
-		_set_status("%s left (their PC stays at the table)" % peers[id])
+		_set_status("%s left (their PC stays at the table)" % campaign.player_name(peers[id]))
 		peers.erase(id)
 
 
@@ -279,21 +292,20 @@ func hello(name_given: String) -> void:
 	if not is_dm():
 		return
 	var sender := multiplayer.get_remote_sender_id()
-	var player := name_given.strip_edges().left(32)
-	if player == "" or player.to_lower() == "dm":
-		join_denied.rpc_id(sender, "Pick a name first")
+	var player := campaign.player_id(name_given.left(64))
+	if player == "":
+		join_denied.rpc_id(sender, "\"%s\" isn't a player in this campaign" % name_given.strip_edges().left(64))
 		return
 	if player in peers.values():
-		join_denied.rpc_id(sender, "Someone called %s is already at the table" % player)
+		join_denied.rpc_id(sender, "%s is already at the table" % campaign.player_name(player))
 		return
 	peers[sender] = player
-	pc_list.rpc_id(sender, campaign.pc_choices(owners), _pc_of(player))
-	sync_notes.rpc_id(sender, notes.session, notes.entries)
-	if _pc_of(player) != "":
-		receive_table.rpc_id(sender, view_for(player))
-		_set_status("%s is back" % player)
-	else:
-		_set_status("%s joined, picking a character" % player)
+	pc_list.rpc_id(sender, campaign.pc_choices(owners), _pc_of(player), player)
+	sync_notes.rpc_id(sender, notes.session, notes.entries, notes.names)
+	receive_table.rpc_id(sender, view_for(player))
+	var who := campaign.player_name(player)
+	_set_status("%s joined as %s" % [who, campaign.name_of(_pc_of(player))] if _pc_of(player) != "" \
+		else "%s joined, picking a character" % who)
 
 
 ## DM -> player: the name was refused; the player hangs up.
@@ -303,11 +315,12 @@ func join_denied(reason: String) -> void:
 	_go_offline.call_deferred()
 
 
-## DM -> player: the PCs to pick from and which one is theirs ("" = none yet).
+## DM -> player: the PCs to pick from, which one is theirs ("" = none yet) and who they are.
 @rpc("authority", "call_remote", "reliable")
-func pc_list(choices: Array, mine: String) -> void:
+func pc_list(choices: Array, mine: String, player: String) -> void:
 	pc_choices = choices
 	my_pc = mine
+	my_player = player
 	var need := []
 	for c: Dictionary in choices:
 		need.append(c.get("image", ""))
@@ -337,17 +350,19 @@ func request_pc(pc: String) -> void:
 		return
 	var taken_by: String = owners.get(pc, "")
 	if taken_by != "" and taken_by != player:
-		pc_denied.rpc_id(sender, "%s already plays %s" % [taken_by, campaign.name_of(pc)])
+		pc_denied.rpc_id(sender, "%s already plays %s" % [campaign.player_name(taken_by), campaign.name_of(pc)])
 		return
-	var before := _pc_of(player)
-	if before != "":
-		owners.erase(before)
-	owners[pc] = player
+	for other: String in claims.keys():  # one picked PC per player
+		if claims[other] == player:
+			claims.erase(other)
+	if not campaign.owners().has(pc):
+		claims[pc] = player
+	_update_owners()
 	_save_table_file()
 	_send_pc_lists()
 	_apply_state(view_for(""))
 	_send_tables()
-	_set_status("%s plays %s" % [player, campaign.name_of(pc)])
+	_set_status("%s plays %s" % [campaign.player_name(player), campaign.name_of(pc)])
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -363,6 +378,7 @@ func _go_offline() -> void:
 	multiplayer.multiplayer_peer = null
 	peers.clear()
 	my_pc = ""
+	my_player = ""
 	pc_choices = []
 	_state = {}
 	grid.clear()
@@ -478,12 +494,12 @@ func _may_drag(entity: String) -> bool:
 	if is_dm():
 		return true
 	var token: Sprite2D = grid.tokens.get(entity)
-	if token == null or player_name == "":
+	if token == null or my_player == "":
 		return false
 	var info: Dictionary = token.get_meta("info", {})
 	if info.has("players"):  # the party token: anyone in the party
-		return player_name in info.players
-	return str(info.get("owner", "")) == player_name
+		return my_player in info.players
+	return str(info.get("owner", "")) == my_player
 
 
 ## Dropped a token here: the DM decides directly, players ask the DM.
@@ -521,7 +537,7 @@ func _handle_move(sender: int, entity: String, cell: Vector2i) -> void:
 		_deny(sender, entity, "that square is blocked")
 		return
 	var from := grid.token_cell(entity)
-	var by := "dm" if sender == 1 else "player:%s" % peers[sender]
+	var by := "dm" if sender == 1 else str(peers[sender])
 	var e := event_log.move_token(entity, grid.map_id, from, cell, by)
 	grid.set_token_cell(entity, cell)
 	for peer_id: int in peers:
@@ -540,7 +556,7 @@ func _handle_party_move(sender: int, cell: Vector2i) -> void:
 		_deny(sender, PARTY, "that square is blocked")
 		return
 	var from := grid.token_cell(PARTY)
-	var by := "dm" if sender == 1 else "player:%s" % peers[sender]
+	var by := "dm" if sender == 1 else str(peers[sender])
 	var last := {}
 	for pc: String in info.members:
 		last = event_log.move_token(pc, grid.map_id, from, cell, by, PARTY)
@@ -597,7 +613,7 @@ func request_note(text: String) -> void:
 
 
 func _handle_note(sender: int, text: String) -> void:
-	var by: String = "DM" if sender == 1 else peers.get(sender, "Player %d" % sender)
+	var by: String = "dm" if sender == 1 else peers.get(sender, "")
 	var entry := notes.add(text.left(10000), by, event_log.day, event_log.time)
 	_show_notes()
 	for peer_id: int in peers:
@@ -611,10 +627,12 @@ func note_added(entry: Dictionary) -> void:
 	_show_notes()
 
 
-## DM -> players: all notes of the current session (on join and when a session starts).
+## DM -> players: all notes of the current session (on join and when a session starts)
+## and the writers' display names.
 @rpc("authority", "call_remote", "reliable")
-func sync_notes(session: int, entries: Array) -> void:
+func sync_notes(session: int, entries: Array, names: Dictionary) -> void:
 	notes.session = session
+	notes.names = names
 	notes.entries.clear()
 	for e: Dictionary in entries:
 		notes.entries.append(e)
@@ -628,12 +646,15 @@ func start_next_session() -> void:
 	event_log.start_session(event_log.session + 1)
 	_open_notes()
 	for peer_id: int in peers:
-		sync_notes.rpc_id(peer_id, notes.session, notes.entries)
+		sync_notes.rpc_id(peer_id, notes.session, notes.entries, notes.names)
 	_set_status("Session %d started" % event_log.session)
 
 
 func _open_notes() -> void:
-	notes = SessionNotes.open(log_path.get_base_dir(), event_log.session, notes.calendar)
+	notes = SessionNotes.open(campaign_dir, event_log.session, notes.calendar)
+	notes.names = {"dm": str(campaign.info.get("dm", {}).get("name", "DM"))}
+	for p: Dictionary in campaign.players():
+		notes.names[str(p.id)] = str(p.get("name", p.id))
 	_show_notes()
 
 

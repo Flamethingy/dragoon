@@ -1,66 +1,149 @@
 class_name Campaign
 extends RefCounted
-## The DM's campaign folder on the host (TASK-7/8): entity files, maps, player characters,
-## and the compact, player-safe views of them that are sent to the table. Players only get
-## whitelisted fields (never bodies or DM-only keys, see Secrets); images go by hash
-## through the AssetCache.
+## A campaign folder on the DM's host (data-layout.md): campaign.json (name, world, calendar,
+## players with their colors, dm), one JSON array per kind (pcs.json, npcs.json,
+## monsters.json, maps.json ...), events.jsonl, notes.json and assets/.
+## Entries are addressed by ref "<kind>/<id>" (e.g. "pcs/aria"). The table only gets the
+## compact player views from here (map_view / token_view): whitelisted fields, never
+## descriptions; images go by hash through the AssetCache.
 
-const MAP_FIELDS := ["name"]
-## Token fields every player sees; PC owners also get OWNER_FIELDS of their own PC.
-const TOKEN_FIELDS := ["name", "size", "type"]
-const OWNER_FIELDS := ["hp", "ac", "class"]
+const FORMAT := "dragoon-campaign"
+const EXAMPLE := "res://examples/campaigns/red-fang"
+## Kinds that can stand on a map.
+const CREATURES := ["pcs", "npcs", "monsters"]
+## Token fields every player sees; owners also get OWNER_FIELDS of their own PC.
+const TOKEN_FIELDS := ["name", "size"]
+const OWNER_FIELDS := ["hp", "ac"]
 
 var folder := ""
 var assets: AssetCache
-var _entities := {}  ## id -> {"frontmatter", "body"}
+var info := {}  ## campaign.json
+var _kinds := {}  ## kind -> {id -> entry}
 
 
 func _init(campaign_folder: String, asset_cache: AssetCache) -> void:
 	folder = campaign_folder
 	assets = asset_cache
+	var file := folder.path_join("campaign.json")
+	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(file)) if FileAccess.file_exists(file) else null
+	info = data if data is Dictionary else {}
 
 
-## An entity file ({} if missing). Ids are paths without .md, e.g. "pcs/aria".
-func entity(id: String) -> Dictionary:
-	if not _entities.has(id):
-		var path := folder.path_join(id + ".md")
-		if not FileAccess.file_exists(path):
-			return {}
-		_entities[id] = Frontmatter.load_file(path)
-	return _entities[id]
+## The folder holding all campaigns: data/campaigns next to data/packages.
+static func default_root() -> String:
+	return PackageDB.default_root().get_base_dir().path_join("campaigns")
 
 
-func frontmatter(id: String) -> Dictionary:
-	var e := entity(id)
-	return e.get("frontmatter", {}) if e.get("frontmatter") is Dictionary else {}
+## True if the folder has a readable campaign.json of our format.
+static func is_campaign(path: String) -> bool:
+	if not FileAccess.file_exists(path.path_join("campaign.json")):
+		return false
+	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(path.path_join("campaign.json")))
+	return data is Dictionary and str(data.get("format", "")) == FORMAT
 
 
-## Entity ids of one type ("map", "pc", ...) found in the campaign's sub folders.
-func ids_of_type(type: String) -> PackedStringArray:
+## Copies the example campaign to `target` (if there is no campaign there yet), so the
+## table has something to host on a fresh install. Returns the folder.
+static func install_example(target: String) -> String:
+	if is_campaign(target):
+		return target
+	_copy_tree(EXAMPLE, target)
+	return target
+
+
+static func _copy_tree(from: String, to: String) -> void:
+	DirAccess.make_dir_recursive_absolute(to)
+	for f in DirAccess.get_files_at(from):
+		DirAccess.copy_absolute(from.path_join(f), to.path_join(f))
+	for d in DirAccess.get_directories_at(from):
+		_copy_tree(from.path_join(d), to.path_join(d))
+
+
+func id() -> String:
+	return str(info.get("id", folder.get_file()))
+
+
+func events_path() -> String:
+	return folder.path_join("events.jsonl")
+
+
+# --- Entries -------------------------------------------------------------------------
+
+## All entries of a kind as id -> entry (loaded once).
+func entries(kind: String) -> Dictionary:
+	if not _kinds.has(kind):
+		var by_id := {}
+		var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(folder.path_join(kind + ".json"))) \
+			if FileAccess.file_exists(folder.path_join(kind + ".json")) else []
+		if data is Array:
+			for e: Variant in data:
+				if e is Dictionary and e.has("id"):
+					by_id[str(e.id)] = e
+		_kinds[kind] = by_id
+	return _kinds[kind]
+
+
+## An entry by ref "<kind>/<id>" ({} if there is none).
+func entry(ref: String) -> Dictionary:
+	var kind := ref.get_slice("/", 0)
+	var id_part := ref.get_slice("/", 1)
+	return entries(kind).get(id_part, {}) if "/" in ref else {}
+
+
+func refs(kind: String) -> PackedStringArray:
 	var out := PackedStringArray()
-	for sub in DirAccess.get_directories_at(folder):
-		for f in DirAccess.get_files_at(folder.path_join(sub)):
-			if f.get_extension() == "md":
-				var id := sub.path_join(f.get_basename())
-				if str(frontmatter(id).get("type", "")) == type:
-					out.append(id)
+	for id_part: String in entries(kind):
+		out.append("%s/%s" % [kind, id_part])
 	out.sort()
 	return out
 
 
 func maps() -> PackedStringArray:
-	return ids_of_type("map")
+	return refs("maps")
 
 
 func pcs() -> PackedStringArray:
-	return ids_of_type("pc")
+	return refs("pcs")
 
 
-func name_of(id: String) -> String:
-	return str(frontmatter(id).get("name", id.get_file()))
+func name_of(ref: String) -> String:
+	return str(entry(ref).get("name", ref.get_file()))
 
 
-## Hash of an image named in a file (relative to the campaign folder); "" if none.
+# --- Players -----------------------------------------------------------------------------
+
+## [{id, name, color}] from campaign.json.
+func players() -> Array:
+	return info.get("players", []) if info.get("players") is Array else []
+
+
+## The player id for a login name (matches id or name, any case); "" if unknown.
+func player_id(login: String) -> String:
+	var l := login.strip_edges().to_lower()
+	for p: Dictionary in players():
+		if str(p.get("id", "")).to_lower() == l or str(p.get("name", "")).to_lower() == l:
+			return str(p.id)
+	return ""
+
+
+func player_name(player: String) -> String:
+	for p: Dictionary in players():
+		if p.get("id") == player:
+			return str(p.get("name", player))
+	return "DM" if player == "dm" else player
+
+
+## Who plays which PC, from pcs.json (`player`); PCs without one are left out.
+func owners() -> Dictionary:
+	var out := {}
+	for ref in pcs():
+		var player := str(entry(ref).get("player", ""))
+		if player != "":
+			out[ref] = player
+	return out
+
+
+## Hash of an image path relative to the campaign folder; "" if none.
 func image_hash(rel: String) -> String:
 	return assets.register(folder.path_join(rel)) if rel != "" else ""
 
@@ -68,43 +151,63 @@ func image_hash(rel: String) -> String:
 # --- Player views ----------------------------------------------------------------------
 
 ## A map for the table: {id, name, image, grid: {size, offset}, kind ("world" or "local"),
-## party_token, party_start, tokens: {id: [x, y]}}.
-func map_view(id: String) -> Dictionary:
-	var fm := frontmatter(id)
-	if fm.is_empty():
+## party_token, party_start, tokens: {ref: Vector2i}}.
+func map_view(ref: String) -> Dictionary:
+	var m := entry(ref)
+	if m.is_empty():
 		return {}
-	var grid: Dictionary = fm.get("grid", {}) if fm.get("grid") is Dictionary else {}
-	var off: Variant = grid.get("offset", [0, 0])
+	var grid: Dictionary = m.get("grid", {}) if m.get("grid") is Dictionary else {}
 	var tokens := {}
-	for t: Variant in fm.get("tokens", []):
+	for t: Variant in m.get("tokens", []):
 		if t is Dictionary:
-			var at: Variant = t.get("at", [0, 0])
-			tokens[str(t.get("entity", ""))] = _cell(at)
-	return {"id": id, "name": str(fm.get("name", id)), "image": image_hash(str(fm.get("image", ""))),
-		"grid": {"size": float(grid.get("size", 70)), "offset": _vec(off)},
-		"kind": str(fm.get("kind", "local")), "party_token": image_hash(str(fm.get("party_token", ""))),
-		"party_start": _cell(fm.get("party_start", [1, 1])), "tokens": tokens}
+			tokens[str(t.get("entity", ""))] = _cell(t.get("at", [0, 0]))
+	return {"id": ref, "name": str(m.get("name", ref)), "image": image_hash(str(m.get("image", ""))),
+		"grid": {"size": float(grid.get("size", 70)), "offset": _vec(grid.get("offset", [0, 0]))},
+		"kind": str(m.get("kind", "local")), "party_token": image_hash(str(m.get("party_token", ""))),
+		"party_start": _cell(m.get("party_start", [1, 1])), "tokens": tokens}
 
 
-## A token as players see it: {id, image, name, size, type, owner, (own PC: hp, ac, class)}.
-func token_view(id: String, owner := "", for_owner := false) -> Dictionary:
-	var fm := frontmatter(id)
-	if fm.is_empty():
+## A token as players see it: {id, image, name, size, kind, owner, (owner only: hp, ac, class)}.
+func token_view(ref: String, owner := "", for_owner := false) -> Dictionary:
+	var e := entry(ref)
+	if e.is_empty() or ref.get_slice("/", 0) not in CREATURES:
 		return {}
-	var view := {"id": id, "image": image_hash(str(fm.get("token", ""))), "owner": owner}
-	for key in TOKEN_FIELDS + (OWNER_FIELDS if for_owner else []):
-		if fm.has(key) and not Secrets.is_secret_key(key):
-			view[key] = fm[key]
+	var token := str(e.get("token", ""))
+	var view := {"id": ref, "image": image_hash(token if token != "" else str(e.get("image", ""))),
+		"kind": ref.get_slice("/", 0), "owner": owner}
+	for key: String in TOKEN_FIELDS:
+		if e.has(key):
+			view[key] = e[key]
+	if for_owner:
+		for key: String in OWNER_FIELDS:
+			if e.has(key):
+				view[key] = e[key]
+		if e.has("classes"):
+			view["class"] = class_text(e)
 	return view
 
 
-## The PCs for the lobby picker: [{id, name, class, image, taken_by}].
-func pc_choices(owners: Dictionary) -> Array[Dictionary]:
+## "Ranger 3" or "Fighter 2 / Wizard 1" from a PC's classes.
+func class_text(pc: Dictionary) -> String:
+	var parts := PackedStringArray()
+	for c: Variant in pc.get("classes", []):
+		if c is Dictionary:
+			var cls := str(c.get("class", "")).get_file().replace("-", " ").capitalize()
+			parts.append("%s %d" % [cls, int(c.get("level", 1))])
+	return " / ".join(parts)
+
+
+## The PCs for the lobby picker: [{id, name, class, image, player, taken_by}].
+## `taken_by` is the player's display name ("" = free to pick).
+func pc_choices(owner_map: Dictionary) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
-	for id in pcs():
-		var fm := frontmatter(id)
-		out.append({"id": id, "name": str(fm.get("name", id)), "class": str(fm.get("class", "")),
-			"image": image_hash(str(fm.get("token", ""))), "taken_by": str(owners.get(id, ""))})
+	for ref in pcs():
+		var e := entry(ref)
+		var token := str(e.get("token", ""))
+		var owner: String = owner_map.get(ref, "")
+		out.append({"id": ref, "name": str(e.get("name", ref)), "class": class_text(e),
+			"image": image_hash(token if token != "" else str(e.get("image", ""))),
+			"player": owner, "taken_by": player_name(owner) if owner != "" else ""})
 	return out
 
 

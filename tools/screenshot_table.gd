@@ -9,6 +9,8 @@ var _out := "user://"
 
 func _init() -> void:
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
+	Campaign.install_example(DIR + "/campaign")
+	_free_borin()
 	var args := OS.get_cmdline_user_args()
 	_out = args[0] if args.size() > 0 else "user://"
 	await process_frame
@@ -22,18 +24,18 @@ func _init() -> void:
 
 	dm.host(47791)
 	dm.event_log.advance_time(400, 14 * 60 + 30, "travel")
-	me.join("127.0.0.1:47791", "Ann")
+	me.join("127.0.0.1:47791", "Bob")
 	await _until(func() -> bool: return me.pc_choices.size() == 2 and me.pc_choices.all(func(c: Dictionary) -> bool: return me.assets.has(c.image)))
 	await _shot("table_picker.png")
 
-	me.claim_pc("pcs/aria")
-	await _until(func() -> bool: return me.grid.tokens.has("pcs/aria"))
+	me.claim_pc("pcs/borin")
+	await _until(func() -> bool: return me.grid.tokens.has("pcs/borin"))
 	me.add_note("We reached the forest road. The wolf looks **hungry**.")
 	dm.add_note("A goblin horn sounds from the trees.")
-	await _until(func() -> bool: return me.notes.entries.size() == 2)
+	await _until(func() -> bool: return me.notes.entries.size() == 3)
 	await _shot("table_player.png")
 
-	dm.show_map_to_all("maps/world")
+	dm.show_map_to_all("maps/westmarch")
 	await _until(func() -> bool: return me.grid.tokens.has("party"))
 	me.grid.move_requested.emit("party", Vector2i(8, 6))
 	await _until(func() -> bool: return me.grid.token_cell("party") == Vector2i(8, 6))
@@ -52,7 +54,7 @@ func _table(branch: String, ui: bool) -> NetTable:
 	var t := NetTable.new()
 	t.name = "Table"
 	t.auto_ui = ui
-	t.log_path = DIR + "/campaign/events.jsonl"
+	t.campaign_dir = DIR + "/campaign"
 	t.cache_dir = DIR.path_join("cache_" + branch)
 	holder.add_child(t)
 	return t
@@ -70,3 +72,13 @@ func _until(done: Callable, frames := 600) -> void:
 		if done.call():
 			return
 		await process_frame
+
+
+## Borin without a player, so the picker has something to offer.
+func _free_borin() -> void:
+	var file := DIR + "/campaign/pcs.json"
+	var pcs: Array = JSON.parse_string(FileAccess.get_file_as_string(file))
+	for e: Dictionary in pcs:
+		if e.id == "borin":
+			e.player = ""
+	FileAccess.open(file, FileAccess.WRITE).store_string(JSON.stringify(pcs, "  "))

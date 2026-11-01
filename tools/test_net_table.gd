@@ -1,65 +1,67 @@
 extends SceneTree
-## Headless check of the shared table (TASK-5/7/8/14): a DM and players in one process
-## (each table with its own MultiplayerAPI) talk over ENet on localhost.
+## Headless check of the shared table (TASK-5/7/8/13/14/20): a DM and players in one
+## process (each table with its own MultiplayerAPI) talk over ENet on localhost. The DM hosts
+## a copy of the example JSON campaign; in the copy Borin has no player, so Bob picks him.
 ## godot --headless --path . -s tools/test_net_table.gd
 
 const PORT := 47777
 const ADDRESS := "127.0.0.1:47777"
 const DIR := "user://test_net"
-const LOG := DIR + "/campaign/events.jsonl"
+const CAMPAIGN := DIR + "/campaign"
 
 var _failed := 0
 
 
 func _init() -> void:
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))
+	Campaign.install_example(CAMPAIGN)
+	_set_player(CAMPAIGN, "borin", "")  # a free PC to pick in the lobby
 	await process_frame  # the tree is ready from the first frame on
 	var dm := _table("DM", "dm")
 	var ann := _table("Ann", "ann")
 	var bob := _table("Bob", "bob", true)  # with the UI, so the screens get built too
 	await process_frame
 
-	# --- Lobby: host, join with a name, pick a PC -----------------------------------
+	# --- Lobby: host, join with a player name, own PC from pcs.json ---------------------
 	_check(dm.host(PORT) == OK, "DM hosts")
 	_check(dm.grid.map_id == "maps/forest-road", "DM shows the first map (%s)" % dm.grid.map_id)
+	_check(dm.owners == {"pcs/aria": "ann"}, "owners from pcs.json (%s)" % [dm.owners])
 	_check(ann.join(ADDRESS, "Ann") == OK, "Ann joins")
-	await _until(func() -> bool: return ann.pc_choices.size() == 2)
-	_check(ann.pc_choices.size() == 2 and ann.my_pc == "", "Ann gets the PCs to pick from")
+	await _until(func() -> bool: return ann.my_pc == "pcs/aria" and ann.grid.tokens.has("pcs/aria"))
+	_check(ann.my_pc == "pcs/aria" and ann.my_player == "ann", "Ann (player ann) plays Aria right away")
+	_check(ann.pc_choices.size() == 2, "the PC list arrives too")
 	await _until(func() -> bool: return ann.pc_choices.all(func(c: Dictionary) -> bool: return ann.assets.has(c.image)))
 	_check(ann.pc_choices.all(func(c: Dictionary) -> bool: return ann.assets.texture(c.image) != null), "PC portraits arrive")
-	ann.claim_pc("pcs/aria")
-	await _until(func() -> bool: return ann.my_pc == "pcs/aria" and ann.grid.tokens.has("pcs/aria"))
-	_check(ann.my_pc == "pcs/aria", "Ann plays Aria")
 	_check(ann.grid.map_id == "maps/forest-road" and ann.grid.grid_size.x > 0, "Ann sees the map with its grid")
 	_check(ann.grid.tokens.has("monsters/goblin-chief") and ann.grid.tokens.has("monsters/dire-wolf"), "Ann sees the monsters")
+	_check(ann.grid.token_cell("pcs/aria") == Vector2i(3, 6), "Aria at the party start")
 	_check(dm.grid.tokens.has("pcs/aria"), "Aria's token is on the DM's table too")
 	var aria_info: Dictionary = ann.grid.tokens["pcs/aria"].get_meta("info")
 	var chief_info: Dictionary = ann.grid.tokens["monsters/goblin-chief"].get_meta("info")
-	_check(aria_info.get("hp") == 27 and aria_info.get("owner") == "Ann", "own PC with HP and owner")
+	_check(aria_info.get("hp") == 27 and aria_info.get("owner") == "ann" and aria_info.get("class") == "Ranger 3", "own PC with HP, class and owner (%s)" % aria_info)
 	_check(chief_info.get("name") == "Goblin Chief" and not chief_info.has("hp"), "monster: name only, no HP")
 
 	# --- DM-only content never reaches players ----------------------------------------
 	var seen := JSON.stringify([ann._state, ann.pc_choices]) + var_to_str(ann.grid.tokens.values().map(
 		func(t: Sprite2D) -> Dictionary: return t.get_meta("info")))
-	for secret in ["dm_notes", "stolen caravan", "brother", "Leader of the", "Half-elf ranger", "[[Red Fang"]:
+	for secret in ["reveal", "stolen caravan", "brother", "Leader of the", "Half-elf ranger", "[[Red Fang", "Chain Shirt"]:
 		_check(not seen.contains(secret), "player data has no '%s'" % secret)
-	var stripped := Secrets.strip_entity(Frontmatter.load_file("res://examples/campaign/pcs/aria.md"))
-	_check(not stripped.frontmatter.has("dm_notes") and stripped.frontmatter.has("hp"), "Secrets drops dm_ keys")
-	_check(not stripped.body.contains("brother") and stripped.body.contains("Half-elf"), "Secrets drops %% comments %%")
-	var body := "Intro\n## DM only\nhidden\n### deeper\nhidden too\n## Public\nshown\n> [!dm] Twist\n> secret line\nafter"
-	var clean := Secrets.strip_body(body)
-	_check(clean == "Intro\n## Public\nshown\nafter", "Secrets drops DM sections and callouts (%s)" % clean.c_escape())
 
-	# --- A second player: names are unique, PCs too -------------------------------------
-	bob.join(ADDRESS, "Ann")
+	# --- Logins: only campaign players, once; free PCs can be picked --------------------
+	bob.join(ADDRESS, "Carl")
 	await _until(func() -> bool: return bob.status.begins_with("Can't join"))
-	_check(bob.status.begins_with("Can't join"), "a taken name is refused (%s)" % bob.status)
+	_check(bob.status.contains("isn't a player"), "an unknown name is refused (%s)" % bob.status)
+	await _until(func() -> bool: return not bob.is_online())
+	bob.join(ADDRESS, "ann")
+	await _until(func() -> bool: return bob.status.begins_with("Can't join") and bob.status.contains("already"))
+	_check(bob.status.contains("already at the table"), "a player already there is refused (%s)" % bob.status)
 	await _until(func() -> bool: return not bob.is_online())
 	_check(not bob.is_online(), "refused player is back at the start screen")
 	bob.join(ADDRESS, "Bob")
 	await _until(func() -> bool: return bob.pc_choices.size() == 2)
+	_check(bob.my_pc == "" and bob.my_player == "bob", "Bob has no PC yet")
 	var aria_choice: Array = bob.pc_choices.filter(func(c: Dictionary) -> bool: return c.id == "pcs/aria")
-	_check(not aria_choice.is_empty() and aria_choice[0].taken_by == "Ann", "Bob sees Aria is taken")
+	_check(not aria_choice.is_empty() and aria_choice[0].taken_by == "Ann", "Bob sees Aria is taken by Ann")
 	bob.claim_pc("pcs/aria")
 	await _until(func() -> bool: return bob.status.contains("already plays"))
 	_check(bob.status.contains("already plays") and bob.my_pc == "", "taken PC refused")
@@ -67,7 +69,7 @@ func _init() -> void:
 	await _until(func() -> bool: return bob.my_pc == "pcs/borin" and ann.grid.tokens.has("pcs/borin") and bob.grid.tokens.has("pcs/aria"))
 	_check(ann.grid.tokens.has("pcs/borin") and bob.grid.tokens.has("pcs/aria"), "both PCs on both tables")
 	var ann_bob_info: Dictionary = ann.grid.tokens["pcs/borin"].get_meta("info")
-	_check(not ann_bob_info.has("hp") and ann_bob_info.get("owner") == "Bob", "Ann doesn't get Borin's HP")
+	_check(not ann_bob_info.has("hp") and ann_bob_info.get("owner") == "bob", "Ann doesn't get Borin's HP")
 
 	# --- Moves: own token only, tweened, logged ------------------------------------------
 	var start := ann.grid.token_cell("pcs/aria")
@@ -82,7 +84,7 @@ func _init() -> void:
 	await _until(func() -> bool: return token.position.is_equal_approx(target), 2000)
 	_check(token.position.is_equal_approx(target), "and snaps onto the cell")
 	var e: Dictionary = dm.event_log.events.back()
-	_check(e.type == "token.moved" and e.entity == "pcs/aria" and e.by == "player:Ann", "move logged as Ann's (%s)" % e.get("by"))
+	_check(e.type == "token.moved" and e.entity == "pcs/aria" and e.by == "ann", "move logged as Ann's (%s)" % e.get("by"))
 	var events_before := dm.event_log.events.size()
 	ann.request_move.rpc_id(1, "monsters/dire-wolf", Vector2i(1, 1))  # bypassing the UI check
 	await _until(func() -> bool: return ann.status.contains("not your token"))
@@ -106,8 +108,8 @@ func _init() -> void:
 	_check(ann.grid.token_cell("pcs/aria") == to, "Aria back where she was on this map")
 
 	# --- World map: the party travels as one token (TASK-13) ------------------------------
-	dm.show_map_to_all("maps/world")
-	await _until(func() -> bool: return ann.grid.map_id == "maps/world" and ann.grid.tokens.has("party") and bob.grid.tokens.has("party"))
+	dm.show_map_to_all("maps/westmarch")
+	await _until(func() -> bool: return ann.grid.map_id == "maps/westmarch" and ann.grid.tokens.has("party") and bob.grid.tokens.has("party"))
 	_check(ann.grid.tokens.has("party") and not ann.grid.tokens.has("pcs/aria") and not ann.grid.tokens.has("pcs/borin"), "one party token instead of the PCs")
 	var party: Dictionary = ann.grid.tokens["party"].get_meta("info") if ann.grid.tokens.has("party") else {}
 	_check(str(party.get("name", "")).contains("Aria Windrunner") and str(party.get("name", "")).contains("Borin Stoneshield"), "named after its members (%s)" % party.get("name"))
@@ -122,13 +124,13 @@ func _init() -> void:
 	var movers := travel.map(func(ev: Dictionary) -> String: return ev.entity)
 	movers.sort()
 	_check(movers == ["pcs/aria", "pcs/borin"], "events for Aria and Borin (%s)" % [movers])
-	_check(travel.all(func(ev: Dictionary) -> bool: return ev.type == "token.moved" and ev.data.get("group") == "party" 		and ev.data.get("to") == [8, 6] and ev.by == "player:Ann"), "token.moved with group party, by Ann")
+	_check(travel.all(func(ev: Dictionary) -> bool: return ev.type == "token.moved" and ev.data.get("group") == "party" 		and ev.data.get("to") == [8, 6] and ev.by == "ann"), "token.moved with group party, by Ann")
 	dm.show_map_to_all("maps/forest-road")
 	await _until(func() -> bool: return ann.grid.map_id == "maps/forest-road" and ann.grid.tokens.has("pcs/aria"))
 	_check(ann.grid.tokens.has("pcs/aria") and ann.grid.tokens.has("pcs/borin") and not ann.grid.tokens.has("party"), "a local map shows the members one by one")
 	_check(ann.grid.token_cell("pcs/aria") == to, "at their own positions on this map")
-	dm.show_map_to_all("maps/world")
-	await _until(func() -> bool: return ann.grid.map_id == "maps/world")
+	dm.show_map_to_all("maps/westmarch")
+	await _until(func() -> bool: return ann.grid.map_id == "maps/westmarch")
 	_check(ann.grid.token_cell("party") == Vector2i(8, 6), "back on the world map the party is where it travelled to")
 	dm.show_map_to_all("maps/forest-road")
 	await _until(func() -> bool: return ann.grid.map_id == "maps/forest-road" and bob.grid.map_id == "maps/forest-road")
@@ -146,14 +148,16 @@ func _init() -> void:
 	_check(ann2.assets_received == 0, "everything from the disk cache (%d downloads)" % ann2.assets_received)
 
 	# --- Notes (TASK-14) ----------------------------------------------------------------
+	var prep := dm.notes.entries.size()  # the example campaign has a prep note
+	_check(ann2.notes.entries.size() == prep, "joining players get the session's notes (%d)" % prep)
 	bob.add_note("We hide in the **barn**.")
-	await _until(func() -> bool: return ann2.notes.entries.size() == 1 and dm.notes.entries.size() == 1)
-	_check(ann2.notes.entries.size() == 1 and dm.notes.entries.size() == 1, "note reaches DM and players")
-	if ann2.notes.entries.size() == 1:
-		var n: Dictionary = ann2.notes.entries[0]
-		_check(n.by == "Bob" and n.session == dm.event_log.session, "note stamped by the DM (%s)" % n)
-		_check(ann2.notes.heading(n).contains(" · Prep · "), "player formats the heading")
-	_check(FileAccess.get_file_as_string(SessionNotes.path_for(LOG.get_base_dir(), 0)).contains("**barn**"), "note saved as markdown")
+	await _until(func() -> bool: return ann2.notes.entries.size() == prep + 1 and dm.notes.entries.size() == prep + 1)
+	_check(ann2.notes.entries.size() == prep + 1 and dm.notes.entries.size() == prep + 1, "note reaches DM and players")
+	if ann2.notes.entries.size() == prep + 1:
+		var n: Dictionary = ann2.notes.entries.back()
+		_check(n.by == "bob" and n.session == dm.event_log.session, "note stamped by the DM (%s)" % n)
+		_check(ann2.notes.heading(n).contains(" · Prep · ") and ann2.notes.heading(n).ends_with(" · Bob"), "player formats the heading (%s)" % ann2.notes.heading(n))
+	_check(FileAccess.get_file_as_string(CAMPAIGN.path_join("notes.json")).contains("We hide in the **barn**."), "note saved in notes.json")
 	dm.start_next_session()
 	await _until(func() -> bool: return bob.notes.session == 1)
 	_check(bob.notes.session == 1 and bob.notes.entries.is_empty(), "next session: new empty notes for everyone")
@@ -166,7 +170,7 @@ func _init() -> void:
 	await process_frame
 	dm.multiplayer.multiplayer_peer.close()
 	dm2.host(PORT + 1)
-	_check(dm2.owners.get("pcs/aria") == "Ann" and dm2.owners.get("pcs/borin") == "Bob", "who plays whom is kept")
+	_check(dm2.owners.get("pcs/aria") == "ann" and dm2.owners.get("pcs/borin") == "bob", "who plays whom is kept (%s)" % [dm2.owners])
 	_check(dm2.grid.token_cell("pcs/aria") == to, "positions restored from the log")
 	_check(dm2.grid.token_cell("monsters/dire-wolf") == Vector2i(2, 2), "the DM's moves too")
 
@@ -183,7 +187,7 @@ func _table(branch: String, cache: String, ui := false) -> NetTable:
 	var t := NetTable.new()
 	t.name = "Table"
 	t.auto_ui = ui
-	t.log_path = LOG
+	t.campaign_dir = CAMPAIGN
 	t.cache_dir = DIR.path_join("cache_" + cache)
 	holder.add_child(t)
 	return t
@@ -201,3 +205,14 @@ func _check(ok: bool, what: String) -> void:
 	if not ok:
 		_failed += 1
 		printerr("FAIL: ", what)
+
+
+## Sets a PC's player in a campaign's pcs.json.
+func _set_player(campaign: String, pc: String, player: String) -> void:
+	var file := campaign.path_join("pcs.json")
+	var pcs: Array = JSON.parse_string(FileAccess.get_file_as_string(file))
+	for e: Dictionary in pcs:
+		if e.id == pc:
+			e.player = player
+	var f := FileAccess.open(file, FileAccess.WRITE)
+	f.store_string(JSON.stringify(pcs, "  "))

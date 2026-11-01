@@ -70,7 +70,12 @@ func _refresh() -> void:
 		for i in _maps.item_count:
 			if _maps.get_item_metadata(i) == table.map_id:
 				_maps.select(i)
-	_who.text = "DM" if dm else ("%s · %s" % [table.player_name, _pc_name(table.my_pc)] if table.my_pc != "" else table.player_name)
+	var me := table.player_name
+	if dm:
+		me = "DM"
+	elif table.my_pc != "":
+		me = "%s · %s" % [table.notes.names.get(table.my_player, table.player_name), _pc_name(table.my_pc)]
+	_who.text = me
 
 
 func _pc_name(id: String) -> String:
@@ -115,6 +120,7 @@ func _build_lobby(root: Control) -> void:
 
 	var host := _form(row, "Host a session (DM)")
 	_campaign = _field(host, "Campaign folder", table.campaign_dir)
+	_campaign.placeholder_text = "empty = the example campaign"
 	_port = _field(host, "Port", str(NetTable.DEFAULT_PORT))
 	var host_button := Button.new()
 	host_button.text = "Host as DM"
@@ -124,7 +130,7 @@ func _build_lobby(root: Control) -> void:
 	host.add_child(host_button)
 
 	var join := _form(row, "Join a session")
-	_name = _field(join, "Your name", table.player_name)
+	_name = _field(join, "Your player name", table.player_name)
 	_address = _field(join, "Address (ip:port)", "127.0.0.1:%d" % NetTable.DEFAULT_PORT)
 	var join_button := Button.new()
 	join_button.text = "Join"

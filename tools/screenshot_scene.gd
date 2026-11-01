@@ -1,11 +1,11 @@
 extends SceneTree
 ## Renders a scene for a few frames and saves a screenshot (not headless):
-## godot --path . -s tools/screenshot_scene.gd -- res://scenes/spikes/token_grid.tscn out.png
+## godot --path . -s tools/screenshot_scene.gd -- res://scenes/table.tscn out.png
 
 
 func _init() -> void:
 	var args := OS.get_cmdline_user_args()
-	var scene: PackedScene = load(args[0] if args.size() > 0 else "res://scenes/spikes/token_grid.tscn")
+	var scene: PackedScene = load(args[0] if args.size() > 0 else "res://scenes/table.tscn")
 	root.add_child(scene.instantiate())
 	for i in 10:
 		await process_frame

@@ -490,6 +490,45 @@ def normalize_types(entries: list[dict]) -> None:
 CONVERTERS = {"monsters": convert_monster, "spells": convert_spell}
 
 
+# ---------------------------------------------------------------- features
+
+FEATURE_LISTS = ["traits", "actions", "bonus_actions", "reactions", "legendary_actions"]
+
+
+def unique_ids(entries: list[dict]) -> None:
+    seen = Counter()
+    for e in sorted(entries, key=lambda e: e["name"].lower()):
+        seen[e["id"]] += 1
+        if seen[e["id"]] > 1:
+            e["id"] = f"{e['id']}-{seen[e['id']]}"
+
+
+def extract_features(monsters: list[dict], source: str) -> list[dict]:
+    """Move monster features into their own kind. Identical features (same name, text and
+    parsed data) are stored once; different ones with the same name get their own id
+    (bite, bite-2, ...). Monsters keep the ids in their feature lists."""
+    by_key: dict[str, dict] = {}
+    seen = Counter()
+    for m in sorted(monsters, key=lambda e: e["name"].lower()):
+        for field in FEATURE_LISTS:
+            ids = []
+            for f in m[field]:
+                key = json.dumps(f, sort_keys=True, ensure_ascii=False)
+                feat = by_key.get(key)
+                if feat is None:
+                    base = slug(f["name"])
+                    seen[base] += 1
+                    feat = {"id": base if seen[base] == 1 else f"{base}-{seen[base]}",
+                            "name": f["name"], "source": source, **{k: v for k, v in f.items() if k != "name"},
+                            "used_by": []}
+                    by_key[key] = feat
+                if m["id"] not in feat["used_by"]:
+                    feat["used_by"].append(m["id"])
+                ids.append(feat["id"])
+            m[field] = ids
+    return list(by_key.values())
+
+
 # ---------------------------------------------------------------- main
 
 def main() -> int:
@@ -572,6 +611,9 @@ def main() -> int:
             shutil.rmtree(pdir)
         pdir.mkdir(parents=True)
         counts = {}
+        if "monsters" in kinds:
+            unique_ids(kinds["monsters"])
+            kinds["features"] = extract_features(kinds["monsters"], package_names[pid])
         for kind, entries in sorted(kinds.items()):
             seen = Counter()
             for e in sorted(entries, key=lambda e: e["name"].lower()):

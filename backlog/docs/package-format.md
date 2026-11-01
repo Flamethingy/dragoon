@@ -20,7 +20,7 @@ data/packages/<package-id>/
 import it. The VTT loads packages at runtime with `FileAccess`.
 
 Kinds: `monsters, spells, items, feats, races, subraces, classes, subclasses, backgrounds,
-invocations, infusions, rules, conditions, diseases, tables`.
+invocations, infusions, rules, conditions, diseases, tables, features`.
 
 ## Manifest (`package.json`)
 
@@ -50,9 +50,20 @@ condition_immunities[], environments[], spells[]`, plus feature lists `traits, a
 bonus_actions, reactions, legendary_actions` and `legendary_intro` (the "can take 3 legendary
 actions" rules text).
 
-A feature: `{name, text (Markdown), uses?, cost?, attack?{kind, to_hit, range, damage[{dice,
-average, type}]}, save?{dc, ability}, damage?[...]}`. The structured parts are parsed from the
-text so the dice roller can roll them; `text` stays the source of truth.
+The feature lists hold **feature ids** (strings) that point into `features.json` of the same
+package, e.g. `"actions": ["scimitar-6", "shortbow"]`.
+
+### Feature (`features.json`)
+
+`{id, name, source, text (Markdown), uses?, cost?, attack?{kind, to_hit, range, damage[{dice,
+average, type}]}, save?{dc, ability}, damage?[...], used_by[] (monster ids)}`. The structured
+parts are parsed from the text so the dice roller can roll them; `text` stays the source of truth.
+
+Identical features (same name, text and data) are stored once and shared (e.g. one Shortbow for
+goblin and skeleton). Different ones with the same name are separate entries: `bite`, `bite-2`,
+... (646 Bites in total). Which section a feature is in (trait, action, reaction ...) is decided
+by the monster's list, not by the feature. Shared templates across packages are only an idea for
+now: see idea-shared-features-and-package-dependencies.md.
 
 ### Spell
 

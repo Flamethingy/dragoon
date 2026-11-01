@@ -129,3 +129,12 @@ See the "Open questions" section of the concept (secrets marking, event log form
   Account colors: `Campaign.accounts()` / `set_color()` (campaign.json); at the table a color button in the
   top bar, `NetTable.set_my_color` -> DM saves and sends `receive_accounts` to everyone (also on join).
   Tests: `tools/test_reveal_ui.gd`, `tools/test_net_table.gd`; screenshot `editor_reveal.png`.
+
+- 2026-11-01: TASK-24 (Mochi): compendium follow-ups. Middle-click on a card or a link (full view and quick card,
+  via `meta_hover_*`) opens a **background tab** right after the current one (several line up in order), marked
+  with a short "✦" highlight; an open entry is only highlighted. **Back** arrow next to the title of every full
+  view, Alt+Left and the mouse back button go to the previously shown tab (tab history, closed tabs skipped) and
+  close the tab they leave; `back_closes_tab` (default on, saved with the tabs) switches that off. On Browse,
+  Alt+Left still steps back through the quick card. **Right-click on a tab**: Close, Close all tabs, Close tabs to
+  the left / right, and the "Back closes the tab" toggle. The quick card always shows the full text (no fold).
+  Test: `tools/test_compendium_back.gd`.

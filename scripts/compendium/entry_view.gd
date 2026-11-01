@@ -8,6 +8,9 @@ extends ScrollContainer
 
 signal link_clicked(meta: String)
 signal edit_requested(entry: Dictionary)
+signal back_requested  ## the back arrow next to the title (TASK-24)
+## A link middle-clicked: open it in a background tab (TASK-24).
+signal link_background(meta: String)
 
 const ART_HEIGHT := 300
 const SIDE_WIDTH := 340
@@ -15,6 +18,8 @@ const SIDE_WIDTH := 340
 var entry: Dictionary
 var key := ""  ## package/kind/id
 var edit_button: Button
+var back_button: Button
+var _hovered_meta := ""
 var editor: EntryEditor  ## while editing (TASK-21)
 
 
@@ -105,6 +110,12 @@ func _header(e: Dictionary) -> Control:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
 	plate.add_child(row)
+	back_button = Button.new()
+	back_button.icon = Compendium.flipped(UISkin.tex("arrow_right"))
+	back_button.tooltip_text = "Back to the previous tab (Alt+Left, mouse back button)"
+	back_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	back_button.pressed.connect(func() -> void: back_requested.emit())
+	row.add_child(back_button)
 	var col := VBoxContainer.new()
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	col.add_theme_constant_override("separation", 0)
@@ -168,5 +179,11 @@ func _text(bb: String) -> RichTextLabel:
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	text.add_theme_constant_override("paragraph_separation", 4)
 	text.meta_clicked.connect(func(meta: Variant) -> void: link_clicked.emit(str(meta)))
+	text.meta_hover_started.connect(func(meta: Variant) -> void: _hovered_meta = str(meta))
+	text.meta_hover_ended.connect(func(_meta: Variant) -> void: _hovered_meta = "")
+	text.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_MIDDLE and _hovered_meta != "":
+			link_background.emit(_hovered_meta)
+			text.accept_event())
 	text.text = bb
 	return text

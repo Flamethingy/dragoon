@@ -56,7 +56,7 @@ func _init() -> void:
 	mid.pressed = true
 	var card2: EntryCard = book._grid.get_child(1)
 	card2._gui_input(mid)
-	_check(book.current_tab_key() == EntryView.key_of(card2.entry), "middle-click on a card opens its tab")
+	_check(book.current_tab_key() == "" and book._tab_index(EntryView.key_of(card2.entry)) >= 0, "middle-click on a card opens its tab in the background")
 
 	# Switching and closing.
 	var n := book.tab_keys().size()

@@ -49,7 +49,6 @@ var _search_timer: Timer
 var _detail_scroll: ScrollContainer
 var _detail_box: VBoxContainer
 var _back: Button
-var _full_text := false
 
 var _kind := ""
 var _level_values: Array = []  ## option index - 1 -> value
@@ -69,6 +68,16 @@ var _browse: Control
 var _open_views := {}  ## key -> EntryView
 var _saved_tabs: Variant = null  ## {tabs: [{key, scroll}], current} to restore after a load
 var _restoring := false
+## Back closes the tab it leaves (TASK-24, Nico's try-out setting; kept in tabs_file).
+var back_closes_tab := true
+var _tab_history: Array[String] = []  ## previously shown tabs ("" = Browse), newest last
+var _last_key := ""
+var _navigating := false  ## don't record history while going back
+var _bg_after := ""  ## key of the last background tab (they line up after the current one)
+var _bg_from := ""  ## the tab that was current when background opening started
+var highlighted := {}  ## key -> msec when a tab was last highlighted (tests)
+var _tab_menu: PopupMenu
+var _hovered_meta := ""
 ## The running campaign's log, if any: editor saves during a session become events.
 var event_log: EventLog
 var _stores := {}  ## package id -> EntryStore
@@ -317,6 +326,10 @@ func _arrow(back: bool) -> TextureButton:
 
 ## A horizontally mirrored copy of a sprite (for the back arrows).
 func _flipped(t: Texture2D) -> Texture2D:
+	return flipped(t)
+
+
+static func flipped(t: Texture2D) -> Texture2D:
 	var img := t.get_image()
 	img.flip_x()
 	return ImageTexture.create_from_image(img)
@@ -540,6 +553,7 @@ func _render_page() -> void:
 		card.selected = _matches[i] == _current
 		card.pressed.connect(_show)
 		card.open_requested.connect(open_tab)
+		card.background_requested.connect(func(entry: Dictionary) -> void: open_tab(entry, true))
 		_grid.add_child(card)
 	_center_grid()
 	_prev.disabled = _page == 0
@@ -675,14 +689,7 @@ func _build_detail(e: Dictionary) -> void:
 	source.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_detail_box.add_child(source)
 
-	# The full text, folded away.
-	var toggle := Button.new()
-	toggle.toggle_mode = true
-	toggle.button_pressed = _full_text
-	toggle.text = "Full text"
-	toggle.icon = UISkin.tex("arrow_down")
-	toggle.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_detail_box.add_child(toggle)
+	# The full text, always shown (TASK-24); the column scrolls.
 	var text := RichTextLabel.new()
 	text.bbcode_enabled = true
 	text.fit_content = true
@@ -690,14 +697,13 @@ func _build_detail(e: Dictionary) -> void:
 	text.meta_underlined = false
 	text.add_theme_constant_override("paragraph_separation", 4)
 	text.meta_clicked.connect(_on_meta)
-	text.visible = _full_text
-	if _full_text:
-		text.text = StatBlock.to_bbcode(e)
-	toggle.toggled.connect(func(on: bool) -> void:
-		_full_text = on
-		if on and text.text == "":
-			text.text = StatBlock.to_bbcode(e)
-		text.visible = on)
+	text.meta_hover_started.connect(func(meta: Variant) -> void: _hovered_meta = str(meta))
+	text.meta_hover_ended.connect(func(_meta: Variant) -> void: _hovered_meta = "")
+	text.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_MIDDLE and _hovered_meta != "":
+			_follow(_hovered_meta, _current, true, true)
+			text.accept_event())
+	text.text = StatBlock.to_bbcode(e)
 	_detail_box.add_child(text)
 
 
@@ -746,7 +752,7 @@ func _on_meta(meta: Variant) -> void:
 
 ## Follows a link from `from`: entry:/wiki: links open the entry (quick card or new tab),
 ## web links the browser.
-func _follow(link: String, from: Dictionary, in_tab: bool) -> void:
+func _follow(link: String, from: Dictionary, in_tab: bool, background := false) -> void:
 	var e := {}
 	if link.begins_with("entry:"):
 		var parts := link.substr(6).split("/")
@@ -765,7 +771,9 @@ func _follow(link: String, from: Dictionary, in_tab: bool) -> void:
 		return
 	if e.is_empty():
 		return
-	if in_tab:
+	if background:
+		open_tab(e, true)
+	elif in_tab:
 		open_tab(e)
 	else:
 		_show(e)
@@ -774,18 +782,26 @@ func _follow(link: String, from: Dictionary, in_tab: bool) -> void:
 # --- Document tabs (TASK-22) ------------------------------------------------------------
 
 ## Opens an entry in its own full-view tab, or focuses the tab it already has.
-func open_tab(e: Dictionary) -> EntryView:
+## `background` (middle-click): the tab opens right after the current one (several in a row
+## line up in order) and is only highlighted, the current tab stays (TASK-24).
+func open_tab(e: Dictionary, background := false) -> EntryView:
 	if e.is_empty():
 		return null
 	var key := EntryView.key_of(e)
 	if _open_views.has(key):
-		_tab_bar.current_tab = _tab_index(key)
+		if background:
+			_highlight(key)
+		else:
+			_tab_bar.current_tab = _tab_index(key)
+			_on_tab_changed(_tab_bar.current_tab)
 		return _open_views[key]
 	var view := EntryView.new()
 	view.setup(e)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	view.hide()
 	view.link_clicked.connect(func(link: String) -> void: _follow(link, view.entry, true))
+	view.link_background.connect(func(link: String) -> void: _follow(link, view.entry, true, true))
+	view.back_requested.connect(go_back_tab)
 	view.edit_requested.connect(func(_e: Dictionary) -> void: start_edit(view))
 	_views.add_child(view)
 	_open_views[key] = view
@@ -793,9 +809,40 @@ func open_tab(e: Dictionary) -> EntryView:
 	var i := _tab_bar.tab_count - 1
 	_tab_bar.set_tab_metadata(i, key)
 	_tab_bar.set_tab_tooltip(i, "%s\n%s · %s" % [e.get("name", "?"), CardData.subtitle(e), e.get("_package_name", "")])
+	if background:
+		var cur := current_tab_key()
+		if _bg_from != cur or _tab_index(_bg_after) < 0:
+			_bg_from = cur
+			_bg_after = cur
+		var to := _tab_index(_bg_after) + 1  # Browse ("" -> -1): to the front
+		var keep := _tab_bar.current_tab
+		_navigating = true
+		_tab_bar.move_tab(i, to)
+		_tab_bar.current_tab = _tab_index(cur) if cur != "" else -1
+		_navigating = false
+		if keep != _tab_bar.current_tab or cur == "":
+			_on_tab_changed(_tab_bar.current_tab)
+		_bg_after = key
+		_highlight(key)
+		_save_tabs()
+		return view
 	_tab_bar.current_tab = i
 	_on_tab_changed(i)  # tab_changed isn't sent when the first tab is selected on its own
 	return view
+
+
+## A short highlight on a tab: a star before its title for a moment.
+func _highlight(key: String) -> void:
+	highlighted[key] = Time.get_ticks_msec()
+	var i := _tab_index(key)
+	if i < 0:
+		return
+	var title := _tab_bar.get_tab_title(i).trim_prefix("✦ ")
+	_tab_bar.set_tab_title(i, "✦ " + title)
+	get_tree().create_timer(1.2).timeout.connect(func() -> void:
+		var j := _tab_index(key)
+		if j >= 0:
+			_tab_bar.set_tab_title(j, _tab_bar.get_tab_title(j).trim_prefix("✦ ")))
 
 
 func close_tab(index: int) -> void:
@@ -846,11 +893,95 @@ func _tab_index(key: String) -> int:
 
 func _on_tab_changed(_index: int) -> void:
 	var key := current_tab_key()
+	if key != _last_key:
+		if not _navigating and not _restoring:
+			_tab_history.append(_last_key)
+			if _tab_history.size() > 100:
+				_tab_history.pop_front()
+		_last_key = key
+	for k: String in _open_views:
+		_open_views[k].back_button.disabled = _back_target(k) == null
 	_browse.visible = key == ""
 	_browse_button.set_pressed_no_signal(key == "")
 	for k: String in _open_views:
 		_open_views[k].visible = k == key
 	_save_tabs()
+
+
+## The tab Back goes to from `from`: the newest earlier tab that is still open (or Browse);
+## null if there is none.
+func _back_target(from: String) -> Variant:
+	for i in range(_tab_history.size() - 1, -1, -1):
+		var k: String = _tab_history[i]
+		if k != from and (k == "" or _open_views.has(k)):
+			return k
+	return null
+
+
+## Back (arrow, Alt+Left, mouse back button): to the previously shown tab, closing the one
+## left if back_closes_tab. Nothing on Browse.
+func go_back_tab() -> void:
+	var from := current_tab_key()
+	if from == "":
+		return
+	var target: Variant = _back_target(from)
+	if target == null:
+		return
+	while not _tab_history.is_empty():  # drop the history up to the target
+		if _tab_history.pop_back() == target:
+			break
+	_navigating = true
+	if back_closes_tab:
+		close_tab(_tab_index(from))
+	if target == "":
+		show_browse()
+	else:
+		_tab_bar.current_tab = _tab_index(target)
+		_on_tab_changed(_tab_bar.current_tab)
+	_navigating = false
+
+
+## Right-click on a tab: Close / Close all / to the left / to the right, and the setting.
+func open_tab_menu(index: int, at := Vector2.ZERO) -> PopupMenu:
+	if _tab_menu == null:
+		_tab_menu = PopupMenu.new()
+		_tab_menu.id_pressed.connect(func(id: int) -> void: _on_tab_menu(id, int(_tab_menu.get_meta("tab", -1))))
+		add_child(_tab_menu)
+	_tab_menu.clear()
+	_tab_menu.add_item("Close", 0)
+	_tab_menu.add_item("Close all tabs", 1)
+	_tab_menu.add_item("Close tabs to the left", 2)
+	_tab_menu.add_item("Close tabs to the right", 3)
+	_tab_menu.add_separator()
+	_tab_menu.add_check_item("Back closes the tab", 4)
+	_tab_menu.set_item_checked(_tab_menu.get_item_index(4), back_closes_tab)
+	_tab_menu.set_item_disabled(_tab_menu.get_item_index(2), index <= 0)
+	_tab_menu.set_item_disabled(_tab_menu.get_item_index(3), index >= _tab_bar.tab_count - 1)
+	_tab_menu.set_meta("tab", index)
+	_tab_menu.reset_size()
+	_tab_menu.popup(Rect2i(Vector2i(at if at != Vector2.ZERO else get_global_mouse_position()), Vector2i.ZERO))
+	return _tab_menu
+
+
+func _on_tab_menu(id: int, index: int) -> void:
+	var key := str(_tab_bar.get_tab_metadata(index)) if index >= 0 and index < _tab_bar.tab_count else ""
+	match id:
+		0:
+			close_tab(index)
+		1:
+			_close_all_tabs()
+		2:
+			for i in range(index - 1, -1, -1):
+				close_tab(i)
+		3:
+			for i in range(_tab_bar.tab_count - 1, index, -1):
+				close_tab(i)
+		4:
+			back_closes_tab = not back_closes_tab
+			_save_tabs()
+	if id in [2, 3] and key != "" and current_tab_key() == "":
+		_tab_bar.current_tab = _tab_index(key)
+		_on_tab_changed(_tab_bar.current_tab)
 
 
 ## Ctrl+Tab / Ctrl+Shift+Tab: Browse, then the tabs in order, round.
@@ -865,18 +996,24 @@ func _cycle_tab(by: int) -> void:
 
 
 func _on_tab_bar_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_MIDDLE:
-		var i := _tab_bar.get_tab_idx_at_point(event.position)
-		if i >= 0:
-			close_tab(i)
-			_tab_bar.accept_event()
+	if not (event is InputEventMouseButton and event.pressed):
+		return
+	var i := _tab_bar.get_tab_idx_at_point(event.position)
+	if i < 0:
+		return
+	if event.button_index == MOUSE_BUTTON_MIDDLE:
+		close_tab(i)
+		_tab_bar.accept_event()
+	elif event.button_index == MOUSE_BUTTON_RIGHT:
+		open_tab_menu(i)
+		_tab_bar.accept_event()
 
 
 func _tabs_state() -> Dictionary:
 	var list := []
 	for key in tab_keys():
 		list.append({"key": key, "scroll": _open_views[key].scroll_vertical})
-	return {"tabs": list, "current": current_tab_key()}
+	return {"tabs": list, "current": current_tab_key(), "back_closes_tab": back_closes_tab}
 
 
 func _save_tabs() -> void:
@@ -892,6 +1029,7 @@ func _restore_tabs(state: Variant) -> void:
 	if not state is Dictionary or state.is_empty():
 		return
 	_restoring = true
+	back_closes_tab = bool(state.get("back_closes_tab", true))
 	var scrolls := {}
 	for t: Variant in state.get("tabs", []):
 		if not t is Dictionary:
@@ -1097,6 +1235,10 @@ func _notification(what: int) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_XBUTTON1 and is_visible_in_tree():
+		_back_everywhere()
+		get_viewport().set_input_as_handled()
+		return
 	if not (event is InputEventKey and event.pressed and event.ctrl_pressed) or not is_visible_in_tree():
 		return
 	if event.keycode == KEY_TAB:
@@ -1109,6 +1251,14 @@ func _input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
+## Alt+Left / mouse back: in a full-view tab the tab history, on Browse the quick card's.
+func _back_everywhere() -> void:
+	if current_tab_key() != "":
+		go_back_tab()
+	else:
+		_go_back()
+
+
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not event.pressed:
 		return
@@ -1117,7 +1267,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_search.grab_focus()
 		_search.select_all()
 	elif event.keycode == KEY_LEFT and event.alt_pressed:
-		_go_back()
+		_back_everywhere()
 	elif event.keycode == KEY_PAGEDOWN and _browse.visible:
 		_flip(1)
 	elif event.keycode == KEY_PAGEUP and _browse.visible:

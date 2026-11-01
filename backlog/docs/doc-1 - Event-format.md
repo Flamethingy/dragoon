@@ -7,7 +7,7 @@ tags:
   - decision
 project: Dragoon
 created_date: '2026-11-01 11:41'
-updated_date: '2026-11-01 11:41'
+updated_date: '2026-11-01 14:09'
 ---
 
 How the VTT records changes on the world timeline (concept: *Timeline and calendars*, [[Dragoon Concept]]). Result of [[TASK-2]].
@@ -79,7 +79,55 @@ Revisit when the log passes about 50 MB or startup replay gets slow. The fix the
 | `session.started` / `session.ended` | `""` | `{}`. `session` holds the number. |
 | `dice.rolled` | roller | `roll` (e.g. `perception`), `formula`, `result`, `dice`. History only, changes no state. |
 
-Later, not MVP: conditions, initiative, party split/merge, travel arrivals (`party.arrived`), drafts from assistants.
+`dice.rolled` at the table (TASK-12) also carries `results` (every roll of a multi-part roll such as attack + damage: `label`, `formula`, `total`, `dice`, `text`, `crit`), `who` (the creature's name) and `hidden` (a DM-only roll; never sent to players).
+
+## More event types (TASK-17)
+
+Added 2026-11-01 by Mochi. `Replay.entity_state` rebuilds the per-entity ones; `Replay.world_state(events)` rebuilds the world-wide ones: `{combat, weather, party_groups}`. Test: `tools/test_event_types.gd`.
+
+| Type | `entity` | `data` | Replay |
+| --- | --- | --- | --- |
+| `condition.applied` / `condition.removed` | creature | `condition` (e.g. `poisoned`), `source` (optional), `until` (optional `{day, time}`) | `conditions` list |
+| `combat.started` | `""` | `map`, `order: [{entity, initiative}]` (may be empty) | world: `combat` active, round 1 |
+| `initiative.rolled` | combatant | `total`, `formula` (optional) | world: joins / re-sorts the order |
+| `combat.turn` | `""` | `round`, `turn` (index into the order) | world: round and turn |
+| `combat.ended` | `""` | `reason` (optional) | world: combat inactive |
+| `resource.used` / `resource.restored` | creature | `resource` (dotted, e.g. `spell_slots.1`, `ki`, `second_wind`), `amount` (default 1; restored without amount = all) | `resources_used` {resource: n} |
+| `rest.taken` | creature (one event per member) | `kind` (`short` / `long`), `hp` (after, optional), `restores` (short rest: resources it refills) | long: HP, clears resources, death saves, temp HP |
+| `death_save.rolled` | creature | `success`, `roll`, `count` (2 for a natural 1), `hp` (a natural 20: back up with this HP) | `death_saves` {successes, failures}; cleared when HP > 0 |
+| `currency.changed` | holder | `delta` ({gp, sp, cp, ep, pp}), `reason` | `currency` sums |
+| `relationship.changed` | NPC or faction | `with` (entity or `party`), `from`, `to` (word or number), `reason` | `relations` {with: to} |
+| `quest.updated` | quest | `status` (`open` / `done` / `failed`, optional), `step` + `text` (optional) | `quest_status`, `progress` list |
+| `party.split` / `party.merged` | `""` | `groups: [[pc refs]]` / `place` (optional) | world: `party_groups` ([] = one party) |
+| `party.arrived` | PC (one per member) | `place`, `map`, `at` | `location` |
+| `weather.changed` | `""` | `region` (place ref, `""` = everywhere), `weather`, `temperature`, `wind` | world: `weather` per region |
+| `assistant.drafted` | the entity drafted for | `assistant`, `field`, `text`, `status` (`draft` / `accepted` / `rejected`) | history only |
+
+`item.gained` / `item.lost` keep the shape of a sheet's own inventory list (`[{item, qty, ...}]`) when the entity has one.
+
+### Examples
+
+```json
+{"id": 51, "type": "condition.applied", "entity": "pcs/thalia", "day": 152, "time": 900, "real": "2026-11-07T20:10:00Z", "session": 3, "by": "dm", "data": {"condition": "poisoned", "source": "monsters/giant-spider"}}
+{"id": 52, "type": "combat.started", "entity": "", "day": 152, "time": 900, "real": "2026-11-07T20:10:05Z", "session": 3, "by": "dm", "data": {"map": "maps/forest-road", "order": [{"entity": "monsters/goblin-chief", "initiative": 12}]}}
+{"id": 53, "type": "initiative.rolled", "entity": "pcs/thalia", "day": 152, "time": 900, "real": "2026-11-07T20:10:09Z", "session": 3, "by": "anna", "data": {"total": 17, "formula": "1d20+3"}}
+{"id": 54, "type": "combat.turn", "entity": "", "day": 152, "time": 901, "real": "2026-11-07T20:14:30Z", "session": 3, "by": "dm", "data": {"round": 2, "turn": 1}}
+{"id": 55, "type": "combat.ended", "entity": "", "day": 152, "time": 903, "real": "2026-11-07T20:31:00Z", "session": 3, "by": "dm", "data": {"reason": "goblins fled"}}
+{"id": 56, "type": "resource.used", "entity": "pcs/thalia", "day": 152, "time": 901, "real": "2026-11-07T20:15:00Z", "session": 3, "by": "anna", "data": {"resource": "spell_slots.1", "amount": 1}}
+{"id": 57, "type": "resource.restored", "entity": "pcs/thalia", "day": 152, "time": 960, "real": "2026-11-07T20:40:00Z", "session": 3, "by": "dm", "data": {"resource": "second_wind"}}
+{"id": 58, "type": "death_save.rolled", "entity": "pcs/thalia", "day": 152, "time": 902, "real": "2026-11-07T20:20:00Z", "session": 3, "by": "anna", "data": {"success": false, "roll": 1, "count": 2}}
+{"id": 59, "type": "rest.taken", "entity": "pcs/thalia", "day": 153, "time": 480, "real": "2026-11-07T21:30:00Z", "session": 3, "by": "dm", "data": {"kind": "long", "hp": 24}}
+{"id": 60, "type": "currency.changed", "entity": "pcs/thalia", "day": 153, "time": 500, "real": "2026-11-07T21:32:00Z", "session": 3, "by": "dm", "data": {"delta": {"gp": 15, "sp": -3}, "reason": "goblin loot"}}
+{"id": 61, "type": "relationship.changed", "entity": "npcs/mira", "day": 153, "time": 520, "real": "2026-11-07T21:35:00Z", "session": 3, "by": "dm", "data": {"with": "pcs/thalia", "from": "neutral", "to": "friendly", "reason": "saved her brother"}}
+{"id": 62, "type": "quest.updated", "entity": "quests/red-fang-road", "day": 153, "time": 520, "real": "2026-11-07T21:36:00Z", "session": 3, "by": "dm", "data": {"status": "open", "step": 2, "text": "Freed the prisoner"}}
+{"id": 63, "type": "party.split", "entity": "", "day": 153, "time": 540, "real": "2026-11-07T21:40:00Z", "session": 3, "by": "dm", "data": {"groups": [["pcs/thalia"], ["pcs/aria", "pcs/borin"]]}}
+{"id": 64, "type": "party.merged", "entity": "", "day": 153, "time": 700, "real": "2026-11-07T21:50:00Z", "session": 3, "by": "dm", "data": {"place": "places/thornwick"}}
+{"id": 65, "type": "party.arrived", "entity": "pcs/thalia", "day": 153, "time": 700, "real": "2026-11-07T21:50:01Z", "session": 3, "by": "dm", "data": {"place": "places/thornwick", "map": "maps/westmarch", "at": [8, 6]}}
+{"id": 66, "type": "weather.changed", "entity": "", "day": 153, "time": 720, "real": "2026-11-07T21:52:00Z", "session": 3, "by": "dm", "data": {"region": "places/westmarch", "weather": "heavy rain", "temperature": 9, "wind": "strong"}}
+{"id": 67, "type": "assistant.drafted", "entity": "npcs/mira", "day": 153, "time": 720, "real": "2026-11-07T21:53:00Z", "session": 3, "by": "assistant:Tamago", "data": {"assistant": "Tamago", "field": "description", "text": "Mira's brother...", "status": "draft"}}
+```
+
+Still open (add as features land): spells cast / concentration, XP awarded, exhaustion levels, light sources / vision, encounter loot tables (TASK-25).
 
 ## Calendar
 

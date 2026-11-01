@@ -179,3 +179,12 @@ See the "Open questions" section of the concept (secrets marking, event log form
   DM) under the notes; on the sheet, abilities, saves, skills, initiative and attacks are roll links. A late
   joiner / restarted host gets the session's rolls from the log. Fix: `is_online()` is false once the peer is
   disconnected (no error spam when the host closes). Test: `tools/test_dice.gd`.
+
+- 2026-11-01: TASK-17 (Mochi): more event types (doc-1 "More event types"): conditions, combat start/turn/end
+  with initiative order, resources used/restored, short/long rests, death saves, currency, relationships /
+  faction standing, quest progress, party split/merge/arrived, weather, assistant drafts. Each with its data
+  fields and an example in doc-1. `Replay.entity_state` rebuilds the per-entity ones (`conditions`,
+  `resources_used`, `death_saves`, `currency`, `relations`, `quest_status`/`progress`, `location`);
+  `Replay.world_state(events)` the world-wide ones (`combat`, `weather`, `party_groups`). Item events now keep a
+  sheet's own inventory list shape (`[{item, qty}]`) instead of failing on it. The table's sheet shows
+  conditions, death saves, used resources and coins. Test: `tools/test_event_types.gd`.

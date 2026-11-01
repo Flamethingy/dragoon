@@ -137,6 +137,22 @@ static func to_bbcode(s: Dictionary) -> String:
 		bb += StatBlock._field("Speed", StatBlock._speed(s))
 		if s.get("proficiency_bonus") != null:
 			bb += StatBlock._field("Proficiency", StatBlock._signed(int(s.proficiency_bonus)))
+		# State from the TASK-17 events.
+		if s.get("conditions") is Array and not s.conditions.is_empty():
+			bb += StatBlock._field("Conditions", Markdown.escape(", ".join(s.conditions.map(func(c: Variant) -> String: return str(c).capitalize()))))
+		if s.get("death_saves") is Dictionary:
+			bb += StatBlock._field("Death Saves", "%d successes, %d failures" % [int(s.death_saves.get("successes", 0)), int(s.death_saves.get("failures", 0))])
+		if s.get("resources_used") is Dictionary and not s.resources_used.is_empty():
+			var used := PackedStringArray()
+			for r: Variant in s.resources_used:
+				used.append("%s %d" % [str(r).replace("_", " ").replace(".", " ").capitalize(), int(s.resources_used[r])])
+			bb += StatBlock._field("Used", Markdown.escape(", ".join(used)))
+		if s.get("currency") is Dictionary and not s.currency.is_empty():
+			var coins := PackedStringArray()
+			for coin in ["pp", "gp", "ep", "sp", "cp"]:
+				if int(s.currency.get(coin, 0)) != 0:
+					coins.append("%d %s" % [int(s.currency[coin]), coin])
+			bb += StatBlock._field("Coins", ", ".join(coins))
 		bb += StatBlock._rule()
 		var stats: Dictionary = s.get("stats", {}) if s.get("stats") is Dictionary else {}
 		bb += "[table=6]"

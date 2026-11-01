@@ -73,6 +73,7 @@ var tables := {}  ## id -> rollable table (packages' tables.json, the timeline's
 const ROLL_LOG_SIZE := 100
 var sheet_watchers := {}  ## host: ref -> {peer id: true} who has the sheet open
 var _state := {}  ## the last table view from the host
+var _status: ServerStatus.Responder  ## host: answers the start screens' heartbeat (TASK-38)
 var _requested := {}  ## sha -> true while downloading
 
 var _ui: TableUI
@@ -157,6 +158,10 @@ func host(port := DEFAULT_PORT) -> Error:
 		_set_status("Can't host on port %d: %s" % [port, error_string(err)])
 		return err
 	multiplayer.multiplayer_peer = peer
+	_status = ServerStatus.Responder.new()
+	_status.info = status_info
+	if _status.start(port) != OK:
+		push_warning("No heartbeat on TCP port %d" % port)
 	player_name = "DM"
 	_open_notes()
 	accounts = timeline.accounts()
@@ -498,8 +503,26 @@ func pc_denied(reason: String) -> void:
 	pcs_changed.emit()
 
 
+## Host: what the heartbeat tells start screens (ServerStatus): world, timeline, DM, players.
+func status_info() -> Dictionary:
+	var names := []
+	for id: int in peers:
+		names.append(timeline.player_name(peers[id]))
+	return {"world": str(timeline.world_manifest().get("name", timeline.world_id())), "timeline": str(timeline.info.get("name", timeline.id())),
+		"dm": str((timeline.info.get("dm", {}) as Dictionary).get("name", "DM")) if timeline.info.get("dm") is Dictionary else "DM",
+		"players": names, "online": names.size(), "max": MAX_PLAYERS}
+
+
+func _process(_delta: float) -> void:
+	if _status != null:
+		_status.poll()
+
+
 ## Back to the start screen (call deferred, not from inside the network poll).
 func _go_offline() -> void:
+	if _status != null:
+		_status.stop()
+		_status = null
 	if multiplayer.multiplayer_peer and not multiplayer.multiplayer_peer is OfflineMultiplayerPeer:
 		multiplayer.multiplayer_peer.close()
 	multiplayer.multiplayer_peer = null

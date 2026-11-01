@@ -3,7 +3,9 @@ extends SceneTree
 ## and a new timeline (fork point, players, colours) are made there; hosting opens the table
 ## and the views (table, compendium, notes, timeline) switch without restarting; a player
 ## joins from a second app and only gets table and notes; the last used world and timeline
-## are preselected on the next start; leaving goes back to the start screen.
+## are preselected on the next start; leaving goes back to the start screen. TASK-38: world
+## cards with their timelines (a click hosts), saved servers with a heartbeat (a click on an
+## online one joins), kept in user://.
 ## godot --headless --path . -s tools/test_app.gd
 
 const DIR := "user://test_app"
@@ -17,13 +19,16 @@ func _init() -> void:
 	PackageManager._delete_tree(base)
 	DirAccess.make_dir_recursive_absolute(base.path_join("packages"))
 	App.settings_file = DIR.path_join("app.cfg")
+	ServerStatus.servers_file = DIR.path_join("servers.json")
 	await process_frame
 
 	# --- First start: the example world, the start screen --------------------------------------
 	var dm := _app("DM")
 	await process_frame
 	_check(dm.view == "" and dm.start.visible and not dm._bar.visible, "starts on the start screen")
-	_check(dm.start.get_node_or_null("%Host") == null and _find(dm.start, "Host") != null and _find(dm.start, "Join") != null and _find(dm.start, "OpenCompendium") != null, "host, join and compendium buttons")
+	_check(_find(dm.start, "World_westmarch") != null and _find(dm.start, "Timeline_red-fang") is Button and _find(dm.start, "Timeline_prologue") is Button, "a world card with its timelines")
+	_check(_find(dm.start, "NewWorld") != null and _find(dm.start, "NewTimeline") != null and _find(dm.start, "EditWorld") != null, "new world, new timeline, edit world")
+	_check(_find(dm.start, "AddServer") != null and _find(dm.start, "OpenCompendium") != null, "servers panel and compendium")
 	_check(Worlds.list(dm.worlds_root).size() == 1, "a fresh install gets the example world")
 
 	# --- New world, new timeline -------------------------------------------------------------------
@@ -49,13 +54,17 @@ func _init() -> void:
 	_check(Timeline.is_timeline(a_dir) and int(a.info.fork_at) == 1 and a.info.parent == "prologue", "forked after the first event (%s)" % [a.info])
 	_check(a.players().size() == 2 and str(a.players()[1].id) == "bob-two" and str(a.players()[1].color) == "#3a5f9a", "players with colours")
 	_check(str(a.info.dm.name) == "Nico", "DM name")
-	dm.start._fill_timelines(a_dir)
-	_check(dm.start.timeline_dir() == a_dir, "the new timeline is selected")
+	dm.start.refresh(world, a_dir)
+	await process_frame
+	_check(dm.start.timeline_dir() == a_dir and _find(dm.start, "Timeline_campaign-a") is Button, "the new timeline is on the world's card")
+	_check(StartScreen.timeline_line(Timeline.list(world)[0]).contains("0 sessions"), "sessions and last played on the line")
 
 	# --- Host and switch views ---------------------------------------------------------------------
 	var west: Dictionary = Worlds.list(dm.worlds_root).filter(func(w: Dictionary) -> bool: return w.id == "westmarch")[0]
 	var red := str(west._dir).path_join("timelines/red-fang")
-	_check(dm.host(red, PORT) == OK and dm.table.is_dm(), "host the example timeline")
+	dm.start.port_edit.text = str(PORT)
+	(_find(dm.start, "Timeline_red-fang") as Button).pressed.emit()
+	_check(dm.table.is_dm() and dm.table.timeline_dir == red, "clicking a timeline hosts it")
 	_check(dm.view == "table" and not dm.start.visible and dm._bar.visible, "table view after hosting")
 	dm.show_view("compendium")
 	await process_frame
@@ -85,8 +94,21 @@ func _init() -> void:
 	await process_frame
 	pl.table.cache_dir = DIR.path_join("cache_ann")
 	_check(pl.join("127.0.0.1:%d" % PORT, "") != OK, "a name is needed to join")
-	_check(pl.join("127.0.0.1:%d" % PORT, "Ann") == OK, "join as Ann")
+	pl.start.add_server("Local table", "127.0.0.1", PORT)
+	pl.start.add_server("Nobody", "127.0.0.1", PORT + 7)
+	await _until(func() -> bool: return pl.start.server_state(0) == "online" and pl.start.server_state(1) == "offline", 600)
+	_check(pl.start.server_state(0) == "online" and pl.start.server_state(1) == "offline", "heartbeat: online and offline (%s, %s)" % [pl.start.server_state(0), pl.start.server_state(1)])
+	var probe: ServerStatus.Probe = pl.start.probes[0]
+	_check(probe.info.get("world") == "The Westmarch" and probe.info.get("timeline") == "The Red Fang Road" and probe.info.get("dm") == "Nico", "status: world, timeline, DM (%s)" % [probe.info])
+	var offline_join := _find(pl.start.servers_box.get_child(1), "Join") as Button
+	_check(offline_join != null and offline_join.disabled, "an offline server can't be clicked")
+	pl.start.name_edit.text = "Ann"
+	(_find(pl.start.servers_box.get_child(0), "Join") as Button).pressed.emit()
 	await _until(func() -> bool: return pl.table.my_pc == "pcs/aria")
+	_check(pl.table.is_online(), "clicking an online server joins")
+	var check := ServerStatus.Probe.new("127.0.0.1", PORT)
+	await _until(func() -> bool: return check.poll(), 600)
+	_check(check.info.get("players") == ["Ann"] and int(check.info.get("online", 0)) == 1, "players online in the status (%s)" % [check.info])
 	_check(pl.view == "table" and pl._bar.visible, "player sees the table")
 	_check(not pl._view_buttons.compendium.visible and not pl._view_buttons.timeline.visible and not pl._view_buttons.encounters.visible and pl._view_buttons.notes.visible, "player has table and notes only")
 	pl.show_view("timeline")
@@ -103,6 +125,12 @@ func _init() -> void:
 	await process_frame
 	_check(again.start.timeline_dir() == red and again.start.world_dir() == str(west._dir), "last world and timeline preselected (%s)" % again.start.timeline_dir())
 	_check(again.start.name_edit.text == "Ann" and again.start.port_edit.text == str(PORT), "last player name and port")
+	_check(again.start.servers.size() == 2 and again.start.servers[0].name == "Local table", "saved servers persist")
+	again.start.edit_server(1, "Renamed", "localhost", PORT + 8)
+	again.start.remove_server(0)
+	_check(ServerStatus.load_servers().size() == 1 and ServerStatus.load_servers()[0].name == "Renamed" and int(ServerStatus.load_servers()[0].port) == PORT + 8, "servers edited and removed")
+	await _until(func() -> bool: return again.start.server_state(0) == "offline", 600)
+	_check(again.start.server_state(0) == "offline", "the DM is gone: offline")
 
 	# --- Compendium without a session -----------------------------------------------------------
 	var b := again.open_book_alone(a_dir)

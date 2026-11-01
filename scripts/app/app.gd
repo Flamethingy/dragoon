@@ -62,10 +62,10 @@ func _ready() -> void:
 	start.host_requested.connect(host)
 	start.join_requested.connect(join)
 	start.compendium_requested.connect(open_book_alone)
+	start.edit_world_requested.connect(open_world)
 	var cfg := _settings()
 	start.refresh(str(cfg.get_value("last", "world", "")), str(cfg.get_value("last", "timeline", "")))
 	start.name_edit.text = str(cfg.get_value("last", "player", ""))
-	start.address_edit.text = str(cfg.get_value("last", "address", start.address_edit.text))
 	start.port_edit.text = str(cfg.get_value("last", "port", start.port_edit.text))
 	table.status_changed.connect(func(text: String) -> void: start.status.text = text)
 	table.table_changed.connect(_on_table_changed)
@@ -120,6 +120,11 @@ func open_book_alone(timeline_dir := "") -> Compendium:
 	start.hide()
 	_bar.hide()
 	return book
+
+
+## A world's own book: its NPCs, places, maps, factions and lore (from the start screen).
+func open_world(world_dir: String) -> Compendium:
+	return open_book_alone(Worlds.start_timeline(world_dir))
 
 
 ## Leaves the session: closes the connection and goes back to the start screen.

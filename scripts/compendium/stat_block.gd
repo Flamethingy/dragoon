@@ -2,8 +2,8 @@ class_name StatBlock
 ## Compendium entries as BBCode: a stat block for monsters, the spell header for spells
 ## and a field table for every other kind. Text fields are Markdown (see Markdown).
 
-const ACCENT := Color(0.85, 0.35, 0.3)  ## headings and rules, stat block red
-const LABEL := Color(0.9, 0.75, 0.55)
+const ACCENT := Color8(102, 42, 58)  ## headings and rules (UISkin.WINE)
+const LABEL := Color8(150, 72, 80)
 const ABILITIES := ["str", "dex", "con", "int", "wis", "cha"]
 const XP := {0.0: 10, 0.125: 25, 0.25: 50, 0.5: 100, 1: 200, 2: 450, 3: 700, 4: 1100, 5: 1800,
 	6: 2300, 7: 2900, 8: 3900, 9: 5000, 10: 5900, 11: 7200, 12: 8400, 13: 10000, 14: 11500,

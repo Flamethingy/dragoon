@@ -1,19 +1,19 @@
 class_name Markdown
-## Markdown -> RichTextLabel BBCode (from the Tamago desktop app, adapted to the dark
-## editor theme and Obsidian [[wikilinks]]).
+## Markdown -> RichTextLabel BBCode (from the Tamago desktop app, adapted to the paper
+## UI (UISkin) and Obsidian [[wikilinks]]).
 ## Supports headings, **bold**, *italic*, ~~strike~~, `code`, fenced code blocks,
 ## lists (nested, ordered, task boxes), > quotes, links, tables, --- rules and images.
 ## [[Target]], [[Target|Label]] and [[Target#Section|Label]] (the pipe may be escaped
 ## as \| inside tables) become [url=wiki:Target#Section] links for the compendium.
 ## Everything else is shown as plain text: BBCode in the input is escaped.
 
-const MUTED := Color(0.65, 0.65, 0.7)
-const LINK := Color(0.55, 0.75, 1.0)
-const CODE_BG := Color(1, 1, 1, 0.07)
-const TABLE_HEAD := Color(1, 1, 1, 0.12)
-const TABLE_ODD := Color(1, 1, 1, 0.0)
-const TABLE_EVEN := Color(1, 1, 1, 0.04)
-const TABLE_BORDER := Color(1, 1, 1, 0.2)
+const MUTED := Color8(128, 92, 96)
+const LINK := Color8(176, 58, 64)
+const CODE_BG := Color(0.4, 0.16, 0.23, 0.08)
+const TABLE_HEAD := Color(0.4, 0.16, 0.23, 0.14)
+const TABLE_ODD := Color(0.4, 0.16, 0.23, 0.0)
+const TABLE_EVEN := Color(0.4, 0.16, 0.23, 0.05)
+const TABLE_BORDER := Color(0.4, 0.16, 0.23, 0.3)
 ## Meta prefix of wikilinks: meta_clicked gets "wiki:Target#Section".
 const WIKI := "wiki:"
 ## Groups: 1 target, 2 section, 3 label.

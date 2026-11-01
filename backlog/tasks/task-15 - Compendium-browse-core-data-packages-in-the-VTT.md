@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@Mochi'
 created_date: '2026-11-01 11:30'
-updated_date: '2026-11-01 11:52'
+updated_date: '2026-11-01 12:08'
 labels:
   - mvp
   - data
@@ -36,6 +36,17 @@ The VTT is the viewer for core data (see package-format). Load all packages from
 <!-- SECTION:PLAN:BEGIN -->
 PackageDB loads data/packages on a WorkerThreadPool task (index by kind + by lowercased name for wikilinks). Markdown->BBCode converter (from Tamago's markdown.gd) + [[wikilinks]] as wiki: meta links. StatBlock formats monsters, spells and a generic layout for other kinds. Compendium scene: kinds list | filters + sortable Tree | detail (image + RichTextLabel, back history). Headless test formats every entry.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-11-01 12:10 (Mochi): Redesigned the compendium as a card collection book with Nico's sprite sheet `assets/ui_sprites.png`.
+- `UISkin` (`scripts/ui/ui_skin.gd`) holds the sprite regions, 9-slices, palette and one shared Theme.
+- Bookmark tabs per kind sit on the wine cover. The middle is a binder page: a grid of `EntryCard`s showing the picture, a hex badge (CR tier colour, spell level, rarity or hit die), name and subtitle. The grid pages with arrows or PgUp/PgDn and resizes to the window.
+- The open card shows a title plate, a big framed picture, stat chips with icons, ability hexes, the source, and the full StatBlock text folded under "Full text".
+- Entries without art get a fallback (`CardArt`): a plate coloured by type or school, with a ring and the initial.
+- Images load on worker threads (`ImageCache`). Text colours are switched to ink on paper.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

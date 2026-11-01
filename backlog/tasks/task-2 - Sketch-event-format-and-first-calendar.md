@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@Mochi'
 created_date: '2026-11-01 11:17'
-updated_date: '2026-11-01 11:41'
+updated_date: '2026-11-01 12:50'
 labels:
   - decision
   - events
@@ -27,7 +27,7 @@ Design the event record (type, entity, in-world day + time of day, real date, se
 - [x] #1 Event format documented with field list and 3+ example events (move, item gained, HP change)
 - [x] #2 Storage decision (JSONL or SQLite) recorded with reasoning
 - [x] #3 First calendar definition file formats a day number into a readable date
-- [ ] #4 List of MVP event types agreed
+- [x] #4 List of MVP event types agreed
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -40,4 +40,6 @@ Write backlog/docs/event-format.md (fields, examples, storage choice, MVP event 
 
 <!-- SECTION:NOTES:BEGIN -->
 Proposal in doc-1 "Event format": the record fields (id, type, entity, day, time, real, session, by, data, optional undoes), 4 examples, JSONL per campaign (`<campaign>/events.jsonl`) with reasoning, and 13 MVP event types. Calendar: `calendars/default.json` (placeholder "Dragoon Reckoning", 335 days, festivals, eras) and `WorldCalendar` in `scripts/timeline/calendar.gd`. `tools/test_calendar.gd` passes headless. AC4 ("agreed") is waiting for Nico or the group to confirm the type list.
+
+2026-11-01: Nico approved the 13 MVP event types as a starting set ("we definitely need to extend later"). `entity.sent` source now names the package: `core:<package>/<kind>/<id>`. Follow-up for more event types: TASK-17.
 <!-- SECTION:NOTES:END -->

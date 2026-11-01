@@ -12,7 +12,7 @@ updated_date: '2026-11-01 11:41'
 
 How the VTT records changes on the world timeline (concept: *Timeline and calendars*, [[Dragoon Concept]]). Result of [[TASK-2]].
 
-**Status:** proposal by Mochi, 2026-11-01. The storage decision and the MVP event types are open for the group to confirm.
+**Status:** proposal by Mochi, 2026-11-01. MVP event types approved by Nico on 2026-11-01 as a starting set. They will be extended for many more scenarios later. The storage decision is still open for the group to confirm.
 
 ## The rule: event or entity?
 
@@ -72,7 +72,7 @@ Revisit when the log passes about 50 MB or startup replay gets slow. The fix the
 | `item.gained` / `item.lost` | holder | `item` (entity id, `core:` prefix for core data), `qty`, `from` / `to` (optional) |
 | `sheet.changed` | creature | `path` (dotted, e.g. `stats.str`, `ac`), `from`, `to`, `reason`. Any other sheet field. |
 | `level.gained` | PC | `class`, `level` (new class level) |
-| `entity.sent` | the new campaign copy | `source` (e.g. `core:monsters/goblin`, `world:npc/mira`), `layer` |
+| `entity.sent` | the new campaign copy | `source` (e.g. `core:5e-core-rules/monsters/goblin` = package/kind/id, `world:npc/mira`), `layer` |
 | `time.advanced` | `""` | `from_day`, `from_time`, `reason`. The event's own `day`/`time` are the new clock. |
 | `note.added` | entity or `""` | `note` (path of the session note), `text` (short summary) |
 | `session.started` / `session.ended` | `""` | `{}`. `session` holds the number. |

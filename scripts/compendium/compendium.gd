@@ -42,6 +42,8 @@ var _status: Label
 var _progress: ProgressBar
 var _tabs: VBoxContainer
 var _tab_group := ButtonGroup.new()
+var _packages_button: Button  ## the one Packages entry, below the bookmarks (TASK-36)
+var _package_tools: HBoxContainer  ## Import... / Import from link..., over the package cards
 var _search: LineEdit
 var _in_text: Button
 var _package: OptionButton
@@ -174,18 +176,17 @@ func _build() -> void:
 		close.text = "Back to the table"
 		close.pressed.connect(func() -> void: close_requested.emit())
 		side.add_child(close)
-	var credits := Button.new()
-	credits.name = "Credits"
-	credits.text = "Credits"
-	credits.tooltip_text = "Who made the icons and art we use"
-	credits.pressed.connect(show_credits)
-	side.add_child(credits)
-	var manage := Button.new()
-	manage.text = "Packages..."
-	manage.tooltip_text = "Import, export, switch on/off or remove source packages"
-	manage.icon = UISkin.tex("icon_chest")
-	manage.pressed.connect(_open_packages)
-	side.add_child(manage)
+	_packages_button = Button.new()
+	_packages_button.name = "Packages"
+	_packages_button.theme_type_variation = UISkin.V_TAB
+	_packages_button.toggle_mode = true
+	_packages_button.button_group = _tab_group
+	_packages_button.text = "Packages"
+	_packages_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_packages_button.icon = UISkin.tex("icon_chest")
+	_packages_button.tooltip_text = "All packages as cards: import, export, switch on/off, unlock or remove them"
+	_packages_button.pressed.connect(open_packages)
+	side.add_child(_packages_button)
 
 	# Right of the cover: the document tabs over the binder (Browse) or a full view.
 	var main := VBoxContainer.new()
@@ -337,6 +338,23 @@ func _build_filters() -> Control:
 	_type = _filter_button("Type")
 	for b in [_package, _level, _type]:
 		filters.add_child(b)
+	_package_tools = HBoxContainer.new()
+	_package_tools.name = "PackageTools"
+	_package_tools.add_theme_constant_override("separation", 8)
+	_package_tools.visible = false
+	filters.add_child(_package_tools)
+	var imp := Button.new()
+	imp.name = "ImportPackage"
+	imp.text = "Import..."
+	imp.tooltip_text = "Install a package file (.%s)" % PackageManager.EXTENSION
+	imp.pressed.connect(import_package_dialog)
+	_package_tools.add_child(imp)
+	var link := Button.new()
+	link.name = "ImportLink"
+	link.text = "Import from link..."
+	link.tooltip_text = "Turn a PDF, image or web page into entries with the import agent"
+	link.pressed.connect(func() -> void: open_import(""))
+	_package_tools.add_child(link)
 	return box
 
 
@@ -405,7 +423,7 @@ func _on_loaded() -> void:
 	_build_package_cards()
 	_build_bookmarks()
 	if _kind == PACKAGES:  # after switching a package on/off: stay on the packages
-		(_tabs.get_node("Bookmark_packages") as Button).button_pressed = true
+		_packages_button.button_pressed = true
 		_select_kind(PACKAGES)
 	elif _tabs.get_child_count() > 2:
 		var kinds := db.kinds_with(show_drafts)
@@ -436,16 +454,8 @@ func _build_bookmarks() -> void:
 		tab.pressed.connect(_select_kind.bind(k))
 		tab.button_pressed = k == _kind
 		_tabs.add_child(tab)
-	var pk := Button.new()
-	pk.name = "Bookmark_packages"
-	pk.theme_type_variation = UISkin.V_TAB
-	pk.toggle_mode = true
-	pk.button_group = _tab_group
-	pk.text = "Packages  %d" % package_cards.size()
-	pk.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	pk.pressed.connect(_select_kind.bind(PACKAGES))
-	pk.button_pressed = _kind == PACKAGES
-	_tabs.add_child(pk)
+	_packages_button.text = "Packages  %d" % package_cards.size()
+	_packages_button.set_pressed_no_signal(_kind == PACKAGES)
 	var dr := Button.new()
 	dr.name = "Bookmark_drafts"
 	dr.theme_type_variation = UISkin.V_TAB
@@ -456,13 +466,95 @@ func _build_bookmarks() -> void:
 	_tabs.add_child(dr)
 
 
-## The Packages window; after changes the book reloads.
-func _open_packages() -> void:
-	var panel := PackagesPanel.new()
-	panel.manager = PackageManager.new(db.root)
-	panel.changed.connect(_reload)
-	panel.import_requested.connect(func(input: String) -> void: open_import(input))
-	add_child(panel)
+## The package cards (TASK-23/36): everything about packages happens there; a card's full
+## view has on/off, Export, Unlock and Remove.
+func open_packages() -> void:
+	_packages_button.button_pressed = true  # the bookmarks of the kinds let go (one group)
+	_select_kind(PACKAGES)
+
+
+## Import...: a .dragoonpkg file; shows what is in it, then installs it.
+func import_package_dialog() -> FileDialog:
+	var d := FileDialog.new()
+	d.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	d.access = FileDialog.ACCESS_FILESYSTEM
+	d.use_native_dialog = true
+	d.title = "Import package"
+	d.filters = PackedStringArray(["*.%s ; Dragoon package" % PackageManager.EXTENSION])
+	d.file_selected.connect(func(path: String) -> void:
+		confirm_import_package(path)
+		d.queue_free())
+	d.canceled.connect(d.queue_free)
+	add_child(d)
+	d.popup_centered_ratio(0.6)
+	return d
+
+
+## Asks how to install a package file (Install, or Replace / Keep both if it is there).
+func confirm_import_package(path: String) -> ConfirmationDialog:
+	var info := manager.inspect(path)
+	if not info.ok:
+		_status.text = "Can't import: %s" % info.error
+		return null
+	var m: Dictionary = info.manifest
+	var d := ConfirmationDialog.new()
+	d.name = "ImportPackageDialog"
+	d.title = "Import package"
+	d.dialog_text = "%s  v%s\n%s" % [m.get("name", m.id), m.get("version", "?"), PackageManager.counts_text(m.get("counts", {}))]
+	var install := func(choice: int) -> void:
+		var r := manager.install(path, choice)
+		_status.text = "Installed %s" % r.id if r.ok else "Not installed: %s" % r.error
+		d.queue_free()
+		if r.ok:
+			_reload()
+	if info.exists:
+		d.dialog_text += "\n\nA package with the id \"%s\" is already installed." % m.id
+		d.ok_button_text = "Replace"
+		d.add_button("Keep both", false, "keep")
+		d.custom_action.connect(func(_a: StringName) -> void: install.call(PackageManager.Conflict.KEEP_BOTH))
+		d.confirmed.connect(func() -> void: install.call(PackageManager.Conflict.REPLACE))
+	else:
+		d.ok_button_text = "Install"
+		d.confirmed.connect(func() -> void: install.call(PackageManager.Conflict.CANCEL))
+	d.canceled.connect(d.queue_free)
+	add_child(d)
+	d.popup_centered()
+	return d
+
+
+## Remove...: asks, then moves the package to data/removed.
+func remove_package_dialog(package_id: String) -> ConfirmationDialog:
+	var d := ConfirmationDialog.new()
+	d.name = "RemovePackageDialog"
+	d.title = "Remove package"
+	d.dialog_text = "Remove \"%s\"?\nIt is moved to data/removed, so it can be put back by hand." % db.package_name(package_id)
+	d.ok_button_text = "Remove"
+	d.confirmed.connect(func() -> void:
+		remove_package(package_id)
+		d.queue_free())
+	d.canceled.connect(d.queue_free)
+	add_child(d)
+	d.popup_centered()
+	return d
+
+
+func remove_package(package_id: String) -> Error:
+	var err := manager.remove(package_id)
+	_status.text = "Removed %s" % package_id if err == OK else "Can't remove: %s" % error_string(err)
+	if err == OK:
+		for k: String in _open_views.keys():
+			if str(_open_views[k].entry.get("_package", _open_views[k].entry.get("id", ""))) == package_id:
+				close_tab(_tab_index(k))
+		_reload()
+	return err
+
+
+## Unlock: a source package becomes editable (its entries can be changed in place).
+func unlock_package(package_id: String) -> void:
+	var store := EntryStore.open(manager.folder_of(package_id))
+	store.unlock()
+	_status.text = "%s can be edited now" % db.package_name(package_id)
+	_reload()
 
 
 ## The import window (TASK-28), with a dropped file or a link filled in.
@@ -510,6 +602,7 @@ func _select_kind(kind: String) -> void:
 	_kind = kind
 	var list: Array = list_of(kind)
 	_package.visible = kind != PACKAGES
+	_package_tools.visible = kind == PACKAGES
 	var pkgs := {}
 	for e: Dictionary in list:
 		pkgs[e["_package"]] = pkgs.get(e["_package"], 0) + 1
@@ -1347,43 +1440,6 @@ func _on_deleted(view: EntryView, store: EntryStore, kind: String) -> void:
 	close_tab(_tab_index(view.key))
 	_after_db_change(kind)
 	_status.text = "Deleted %s" % view.entry.get("name", "?")
-
-
-# --- Credits (TASK-26) ----------------------------------------------------------------------
-
-const CREDITS := ["res://assets/creature_types/CREDITS.md"]
-
-
-## The credits as Markdown (the creature type icons are CC BY 3.0, game-icons.net).
-static func credits_text() -> String:
-	var parts := PackedStringArray()
-	for file: String in CREDITS:
-		if FileAccess.file_exists(file):
-			parts.append(FileAccess.get_file_as_string(file))
-		else:  # an export without the .md files
-			parts.append("# Creature type icons
-
-From https://game-icons.net (lorc, delapouite), licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/).")
-	return "
-
-".join(parts)
-
-
-func show_credits() -> AcceptDialog:
-	var dialog := AcceptDialog.new()
-	dialog.name = "CreditsDialog"
-	dialog.title = "Credits"
-	var text := RichTextLabel.new()
-	text.bbcode_enabled = true
-	text.custom_minimum_size = Vector2(640, 460)
-	text.text = Markdown.to_bbcode(credits_text())
-	text.meta_clicked.connect(func(meta: Variant) -> void: OS.shell_open(str(meta)))
-	dialog.add_child(text)
-	dialog.confirmed.connect(dialog.queue_free)
-	dialog.canceled.connect(dialog.queue_free)
-	add_child(dialog)
-	dialog.popup_centered()
-	return dialog
 
 
 # --- Packages as cards (TASK-23) --------------------------------------------------------------

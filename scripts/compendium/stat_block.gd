@@ -11,7 +11,7 @@ const XP := {0.0: 10, 0.125: 25, 0.25: 50, 0.5: 100, 1: 200, 2: 450, 3: 700, 4: 
 	23: 50000, 24: 62000, 25: 75000, 26: 90000, 27: 105000, 28: 120000, 29: 135000, 30: 155000}
 ## Keys that are shown elsewhere or are bookkeeping.
 const HIDDEN := ["id", "name", "source", "image", "description", "origin",
-	"_kind", "_package", "_package_name", "_dir", "_key"]
+	"_kind", "_package", "_package_name", "_dir", "_key", "draft", "edited", "copy_of", "copy_number"]
 const SINGULAR := {"classes": "Class", "subclasses": "Subclass", "races": "Race", "subraces": "Subrace",
 	"items": "Item", "feats": "Feat", "backgrounds": "Background", "invocations": "Invocation",
 	"infusions": "Infusion", "conditions": "Condition", "diseases": "Disease", "rules": "Rule",
@@ -41,7 +41,9 @@ static func to_bbcode(e: Dictionary) -> String:
 # --- Shared pieces -----------------------------------------------------------------
 
 static func _title(e: Dictionary, subtitle: String) -> String:
-	var bb := "[font_size=26][b][color=#%s]%s[/color][/b][/font_size]\n" % [ACCENT.to_html(), Markdown.escape(str(e.get("name", "?")))]
+	var draft := EntryStore.is_draft(e)  # drafts: italic, grey title (TASK-36)
+	var bb := "[font_size=26][b]%s[color=#%s]%s[/color]%s[/b][/font_size]\n" % ["[i]" if draft else "", (UISkin.DRAFT_INK if draft else ACCENT).to_html(),
+		Markdown.escape(str(e.get("name", "?"))), "[/i]" if draft else ""]
 	if subtitle != "":
 		bb += "[i]%s[/i]\n" % Markdown.escape(subtitle)
 	return bb
@@ -392,7 +394,7 @@ static func table(e: Dictionary) -> String:
 static func generic(e: Dictionary) -> String:
 	var kind := str(e.get("_kind", ""))
 	var bb := _title(e, SINGULAR.get(kind, kind.capitalize())) + _rule()
-	var keys: Array = e.keys().filter(func(k: Variant) -> bool: return str(k) not in HIDDEN)
+	var keys: Array = e.keys().filter(func(k: Variant) -> bool: return str(k) not in HIDDEN and not str(k).begins_with("_"))
 	var long_text := []
 	for k: Variant in keys:
 		var v: Variant = e[k]

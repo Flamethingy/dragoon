@@ -151,10 +151,10 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 	_check(book.current_tab_key() == "/drafts/drafts", "Show drafts opens the Drafts page (%s)" % book.current_tab_key())
-	book._open_packages()
+	book.open_packages()
 	await process_frame
 	var link := book.find_child("ImportLink", true, false) as Button
-	_check(link != null, "Import from link in the Packages window")
+	_check(link != null and link.is_visible_in_tree(), "Import from link over the package cards")
 	if link:
 		link.pressed.emit()
 	await process_frame

@@ -76,6 +76,29 @@ static func sheet() -> Texture2D:
 
 
 ## One sprite as an AtlasTexture (cached).
+## Drafts (TASK-36): no "Draft" field or tag; the title is italic and the text grey.
+const DRAFT_INK := Color8(140, 128, 124)
+static var _italic: FontVariation
+
+
+## A slanted version of the theme font (for draft titles).
+static func italic_font() -> FontVariation:
+	if _italic == null:
+		_italic = FontVariation.new()
+		_italic.base_font = ThemeDB.fallback_font if theme().default_font == null else theme().default_font
+		_italic.variation_transform = Transform2D(Vector2(1, 0), Vector2(0.22, 1), Vector2.ZERO)
+	return _italic
+
+
+## Marks a label as a draft's title or text: italic (titles) and grey.
+static func mark_draft(label: Control, title := true) -> void:
+	if title:
+		label.add_theme_font_override("font" if label is Label else "normal_font", italic_font())
+	label.add_theme_color_override("font_color" if label is Label else "default_color", DRAFT_INK)
+	if title:
+		label.tooltip_text = "Draft: not in the book or shown to players until it is published"
+
+
 static func tex(name: String) -> Texture2D:
 	if not _atlas.has(name):
 		var a := AtlasTexture.new()

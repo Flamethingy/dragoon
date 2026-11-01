@@ -303,3 +303,15 @@ static func _delete_tree(path: String) -> void:
 	for d in DirAccess.get_directories_at(path):
 		_delete_tree(path.path_join(d))
 	DirAccess.remove_absolute(path)
+
+
+## "322 monsters, 349 spells, ..." from a manifest's counts.
+static func counts_text(counts: Variant) -> String:
+	if not counts is Dictionary or counts.is_empty():
+		return "no entries"
+	var parts := PackedStringArray()
+	var keys: Array = counts.keys()
+	keys.sort_custom(func(a: Variant, b: Variant) -> bool: return int(counts[a]) > int(counts[b]))
+	for k: Variant in keys:
+		parts.append("%d %s" % [int(counts[k]), k])
+	return ", ".join(parts)

@@ -1,7 +1,7 @@
 extends SceneTree
 ## Headless check of monster pictures (TASK-26): the entry's image when it loads (also JPEGs
 ## named .png), else the creature type icon (unknown.svg for other types), missing or broken
-## files fall back quietly; the icon credits are in the app.
+## files fall back quietly; the icon credits are in CREDITS.md, not in the app.
 ## godot --headless --path . -s tools/test_monster_art.gd
 
 const DIR := "user://test_monster_art"
@@ -53,9 +53,9 @@ func _init() -> void:
 	_check(none.icon.resource_path.ends_with("unknown.svg"), "no image, odd type: unknown icon")
 	_check(spell.icon == null, "other kinds keep the initial")
 
-	# --- Credits --------------------------------------------------------------------------------------
-	var credits := Compendium.credits_text()
-	_check(credits.contains("game-icons.net") and credits.contains("CC BY 3.0") and credits.contains("delapouite"), "credits text")
+	# --- Credits: a file in the project, not in the app (TASK-36) ------------------------------------
+	var credits := FileAccess.get_file_as_string("res://CREDITS.md")
+	_check(credits.contains("assets/creature_types/CREDITS.md") and credits.contains("CC BY 3.0"), "CREDITS.md lists the icon credits")
 	var screen := SubViewport.new()
 	screen.size = Vector2i(1600, 950)
 	root.add_child(screen)
@@ -63,10 +63,7 @@ func _init() -> void:
 	book.tabs_file = ""
 	screen.add_child(book)
 	await book.db.loaded
-	_check(book.find_child("Credits", true, false) is Button, "a Credits button on the cover")
-	var dialog := book.show_credits()
-	await process_frame
-	_check(dialog.visible and _dialog_text(dialog).contains("CC BY 3.0"), "the credits dialog shows them")
+	_check(book.find_child("Credits", true, false) == null and not book.has_method("show_credits"), "no credits in the compendium")
 
 	print("monster art: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))
 	quit(1 if _failed > 0 else 0)
@@ -78,12 +75,6 @@ func _art(e: Dictionary) -> CardArt:
 	root.add_child(art)
 	art.show_entry(e)
 	return art
-
-
-func _dialog_text(dialog: AcceptDialog) -> String:
-	for c in dialog.find_children("*", "RichTextLabel", true, false):
-		return (c as RichTextLabel).get_parsed_text()
-	return ""
 
 
 func _check(ok: bool, what: String) -> void:

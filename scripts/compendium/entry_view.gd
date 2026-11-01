@@ -125,6 +125,20 @@ func _setup_package(e: Dictionary, box: VBoxContainer) -> void:
 		if book:
 			book.export_package_dialog(id))
 	left.add_child(export_button)
+	if book and book.manager != null:
+		if EntryStore.open(book.manager.folder_of(id)).is_read_only():
+			var unlock := Button.new()
+			unlock.name = "Unlock"
+			unlock.text = "Unlock for editing"
+			unlock.tooltip_text = "Let its entries be changed in place (source packages are read only)"
+			unlock.pressed.connect(func() -> void: book.unlock_package(id))
+			left.add_child(unlock)
+		var remove := Button.new()
+		remove.name = "Remove"
+		remove.text = "Remove..."
+		remove.tooltip_text = "Move the package to data/removed"
+		remove.pressed.connect(func() -> void: book.remove_package_dialog(id))
+		left.add_child(remove)
 
 	var right := VBoxContainer.new()
 	right.add_theme_constant_override("separation", 10)
@@ -254,7 +268,7 @@ func _header(e: Dictionary) -> Control:
 	var sub := Label.new()
 	sub.text = "%s  ·  %s" % [CardData.subtitle(e), e.get("_package_name", "")]
 	if EntryStore.is_draft(e):
-		sub.text = "Draft  ·  " + sub.text
+		UISkin.mark_draft(title)
 	if e.get("_kind") == Compendium.DRAFTS:
 		sub.text = "Unfinished entries of every package and the timeline"
 	sub.add_theme_color_override("font_color", UISkin.TAN)
@@ -325,4 +339,6 @@ func _text(bb: String) -> RichTextLabel:
 			link_background.emit(_hovered_meta)
 			text.accept_event())
 	text.text = bb
+	if EntryStore.is_draft(entry):
+		UISkin.mark_draft(text, false)
 	return text

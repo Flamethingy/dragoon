@@ -85,19 +85,9 @@ func setup(e: Dictionary) -> void:
 			warn.tooltip_text = warn.text
 			warn.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			box.add_child(warn)
-	if EntryStore.is_draft(e):
-		var tag := Label.new()
-		tag.name = "DraftTag"
-		tag.text = " Draft "
-		tag.add_theme_color_override("font_color", Color.WHITE)
-		tag.add_theme_font_size_override("font_size", 11)
-		var bg := StyleBoxFlat.new()
-		bg.bg_color = Color(0.45, 0.3, 0.22, 0.9)
-		bg.set_corner_radius_all(4)
-		tag.add_theme_stylebox_override("normal", bg)
-		tag.position = Vector2(SIZE.x - 58, 4)
-		tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		art.add_child(tag)
+	if EntryStore.is_draft(e):  # italic, grey (TASK-36)
+		UISkin.mark_draft(name)
+		UISkin.mark_draft(sub, false)
 
 	if e.get("_kind") == "packages":
 		var on := CheckButton.new()

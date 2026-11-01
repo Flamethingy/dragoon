@@ -30,11 +30,13 @@ func _init() -> void:
 	await process_frame
 
 	# --- Cards ------------------------------------------------------------------------------------
-	var bookmark := book._tabs.get_node_or_null("Bookmark_packages") as Button
-	_check(bookmark != null and bookmark.text == "Packages  2", "a Packages bookmark (%s)" % (bookmark.text if bookmark else "none"))
+	_check(book._tabs.get_node_or_null("Bookmark_packages") == null, "no Packages bookmark at the top (TASK-36)")
+	var bookmark := book.find_child("Packages", true, false) as Button
+	_check(bookmark != null and bookmark.text == "Packages  2" and bookmark.get_index() > book._tabs.get_parent().get_index(), "one Packages entry, below the bookmarks (%s)" % (bookmark.text if bookmark else "none"))
 	bookmark.pressed.emit()
 	await process_frame
 	_check(book._matches.size() == 2 and not book._package.visible, "both packages as cards")
+	_check(book._package_tools.visible and book.find_child("ImportPackage", true, false) is Button and book.find_child("ImportLink", true, false) is Button, "Import and Import from link over the cards")
 	var mini := book.entry_for("mini-source", "packages", "mini-source")
 	_check(CardData.badge(mini) == ["S", "tan"] and CardData.subtitle(mini) == "Source · 3 entries", "badge and count (%s)" % CardData.subtitle(mini))
 	_check(CardData.badge(book.entry_for("westmarch", "packages", "westmarch"))[0] == "W", "world badge")
@@ -114,6 +116,16 @@ func _init() -> void:
 	DirAccess.make_dir_recursive_absolute(other.root)
 	_check(other.install(file).ok and FileAccess.file_exists(other.root.path_join("mini-source/docs/Mini Rules.pdf")), "import unpacks docs/")
 	_check(other.documents("mini-source").all(func(d: Dictionary) -> bool: return d.exists), "and the documents are there")
+
+	# --- The former Packages window, now in the overview (TASK-36) ------------------------------------
+	_check(book.confirm_import_package(file) != null and book.find_child("ImportPackageDialog", true, false) != null, "Import asks how to install (Replace / Keep both)")
+	var pkg_view := book.open_tab(book.entry_for("mini-source", "packages", "mini-source"))
+	await process_frame
+	_check(pkg_view.find_child("Unlock", true, false) is Button and pkg_view.find_child("Remove", true, false) is Button and pkg_view.find_child("Export", true, false) is Button, "the package view has Export, Unlock and Remove")
+	book.unlock_package("mini-source")
+	_check(not EntryStore.open(manager.folder_of("mini-source")).is_read_only(), "unlocked")
+	await book.db.loaded
+	_check(book.remove_package("mini-source") == OK and not DirAccess.dir_exists_absolute(root.path_join("mini-source")), "removed")
 
 	print("package cards: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))
 	quit(1 if _failed > 0 else 0)

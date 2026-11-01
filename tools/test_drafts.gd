@@ -71,7 +71,9 @@ func _init() -> void:
 	book.set_show_drafts(true)
 	_check(book._matches.size() == 2, "Show drafts brings them in")
 	var hag_card := _card(book, "hag")
-	_check(hag_card != null and hag_card.find_child("DraftTag", true, false) != null, "marked as Draft")
+	_check(hag_card != null and hag_card.find_child("DraftTag", true, false) == null, "no Draft tag on the card (TASK-36)")
+	var hag_title: Label = hag_card.find_children("*", "Label", true, false).filter(func(l: Label) -> bool: return l.text == "Bog Hag")[0] if hag_card != null else null
+	_check(hag_title != null and hag_title.get_theme_font("font") is FontVariation and hag_title.get_theme_color("font_color") == UISkin.DRAFT_INK, "a draft's card title is italic and grey")
 	_check(book._tabs.get_children().any(func(b: Button) -> bool: return b.text.begins_with("Spells")), "kinds with only drafts get a bookmark while shown")
 	book.set_show_drafts(false)
 	_check(book._matches.size() == 1, "and leave again")

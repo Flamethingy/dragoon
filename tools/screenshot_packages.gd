@@ -8,7 +8,7 @@ func _init() -> void:
 	root.add_child(book)
 	while not book.db.is_loaded:
 		await process_frame
-	book._open_packages()
+	book.open_packages()
 	for i in 10:
 		await process_frame
 	await RenderingServer.frame_post_draw

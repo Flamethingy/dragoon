@@ -90,6 +90,11 @@ var _hovered_meta := ""
 ## The running campaign's log, if any: editor saves during a session become events.
 var event_log: EventLog
 var _stores := {}  ## package id -> EntryStore
+## Packages as cards (TASK-23): every installed package (on or off) as an entry of kind
+## "packages", with _enabled, _count, _counts (entries loaded per kind).
+const PACKAGES := "packages"
+var manager: PackageManager
+var package_cards: Array = []
 
 
 func _ready() -> void:
@@ -379,8 +384,12 @@ func _on_loaded() -> void:
 		_status.text += "\n%d problems (see Output)" % db.errors.size()
 		for e in db.errors:
 			push_warning(e)
+	_build_package_cards()
 	_build_bookmarks()
-	if _tabs.get_child_count() > 0:
+	if _kind == PACKAGES:  # after switching a package on/off: stay on the packages
+		(_tabs.get_child(_tabs.get_child_count() - 1) as Button).button_pressed = true
+		_select_kind(PACKAGES)
+	elif _tabs.get_child_count() > 1:
 		var keep := db.kinds().find(_kind)  # after a reload, stay on the same kind
 		var i := keep if keep >= 0 else 0
 		(_tabs.get_child(i) as Button).button_pressed = true
@@ -408,6 +417,16 @@ func _build_bookmarks() -> void:
 		tab.pressed.connect(_select_kind.bind(k))
 		tab.button_pressed = k == _kind
 		_tabs.add_child(tab)
+	var pk := Button.new()
+	pk.name = "Bookmark_packages"
+	pk.theme_type_variation = UISkin.V_TAB
+	pk.toggle_mode = true
+	pk.button_group = _tab_group
+	pk.text = "Packages  %d" % package_cards.size()
+	pk.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	pk.pressed.connect(_select_kind.bind(PACKAGES))
+	pk.button_pressed = _kind == PACKAGES
+	_tabs.add_child(pk)
 
 
 ## The Packages window; after changes the book reloads.
@@ -433,7 +452,8 @@ func _reload() -> void:
 func _select_kind(kind: String) -> void:
 	show_browse()
 	_kind = kind
-	var list: Array = db.entries.get(kind, [])
+	var list: Array = list_of(kind)
+	_package.visible = kind != PACKAGES
 	var pkgs := {}
 	for e: Dictionary in list:
 		pkgs[e["_package"]] = pkgs.get(e["_package"], 0) + 1
@@ -455,7 +475,7 @@ func _select_kind(kind: String) -> void:
 	_type_values = _distinct(list, _types_of)
 	_type_values.sort_custom(func(a: String, b: String) -> bool: return a.to_lower() < b.to_lower())
 	_type.clear()
-	_type.add_item("Any school" if kind == "spells" else "Any type")
+	_type.add_item("Any school" if kind == "spells" else "Anything" if kind == PACKAGES else "Any type")
 	for v: String in _type_values:
 		_type.add_item(v)
 	_type.visible = not _type_values.is_empty()
@@ -477,6 +497,11 @@ func _level_of(e: Dictionary) -> Array:
 
 
 func _types_of(e: Dictionary) -> Array:
+	if e["_kind"] == PACKAGES:  # one filter for kind, on/off and PDFs
+		var out := ["World" if str(e.get("kind", "")) == "world" else "Source", "On" if e._enabled else "Off"]
+		if e.get("documents") is Array and not e.documents.is_empty():
+			out.append("Has PDFs")
+		return out
 	var v: Variant = e.get("school") if e["_kind"] == "spells" else e.get("type")
 	if v is Array:
 		return v.map(func(x: Variant) -> String: return str(x).strip_edges()).filter(func(s: String) -> bool: return s != "")
@@ -495,7 +520,7 @@ func _refresh_list() -> void:
 	var level: Variant = _level_values[_level.selected - 1] if _level.visible and _level.selected > 0 else null
 	var type: String = _type_values[_type.selected - 1] if _type.visible and _type.selected > 0 else ""
 	_matches = []
-	for e: Dictionary in db.entries.get(_kind, []):
+	for e: Dictionary in list_of(_kind):
 		if pkg != "" and e["_package"] != pkg:
 			continue
 		if level != null and _level_of(e) != [level]:
@@ -503,7 +528,7 @@ func _refresh_list() -> void:
 		if type != "" and type not in _types_of(e):
 			continue
 		if query != "" and not e["_key"].contains(query):
-			if not in_text or not _text_of(e).contains(query):
+			if not (in_text or _kind == PACKAGES) or not _text_of(e).contains(query):
 				continue
 		_matches.append(e)
 	_sort_matches()
@@ -586,13 +611,14 @@ func _render_page() -> void:
 		card.pressed.connect(_show)
 		card.open_requested.connect(open_tab)
 		card.background_requested.connect(func(entry: Dictionary) -> void: open_tab(entry, true))
+		card.package_toggled.connect(func(entry: Dictionary, on: bool) -> void: set_package_enabled(str(entry.id), on))
 		_grid.add_child(card)
 	_center_grid()
 	_prev.disabled = _page == 0
 	_next.disabled = _page >= _pages() - 1
 	_prev.modulate.a = 0.3 if _prev.disabled else 1.0
 	_next.modulate.a = 0.3 if _next.disabled else 1.0
-	var total: int = db.entries.get(_kind, []).size()
+	var total: int = list_of(_kind).size()
 	if _matches.is_empty():
 		_page_label.text = "No cards match" if total > 0 else ""
 	else:
@@ -787,6 +813,14 @@ func _on_meta(meta: Variant) -> void:
 func _follow(link: String, from: Dictionary, in_tab: bool, background := false) -> void:
 	if RollTables.handle_meta(link):
 		return
+	if link.begins_with("pdf:"):
+		var rest := link.substr(4)
+		open_document(rest.get_slice("/", 0), rest.substr(rest.find("/") + 1).uri_decode())
+		return
+	if link.begins_with("pkgkind:"):
+		var rest := link.substr(8)
+		browse_package(rest.get_slice("/", 0), rest.get_slice("/", 1))
+		return
 	var e := {}
 	if link.begins_with("entry:"):
 		var parts := link.substr(6).split("/")
@@ -830,6 +864,7 @@ func open_tab(e: Dictionary, background := false) -> EntryView:
 			_on_tab_changed(_tab_bar.current_tab)
 		return _open_views[key]
 	var view := EntryView.new()
+	view.book = self
 	view.setup(e)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	view.hide()
@@ -936,7 +971,8 @@ func _on_tab_changed(_index: int) -> void:
 		_last_key = key
 	for k: String in _open_views:
 		_open_views[k].back_button.disabled = _back_target(k) == null
-		_open_views[k].send_button.visible = campaign_dir != "" and _open_views[k].entry.get("_layer") != "campaign"
+		_open_views[k].send_button.visible = campaign_dir != "" and _open_views[k].entry.get("_layer") != "campaign" \
+			and _open_views[k].entry.get("_kind") != PACKAGES
 	_browse.visible = key == ""
 	_browse_button.set_pressed_no_signal(key == "")
 	for k: String in _open_views:
@@ -1073,7 +1109,7 @@ func _restore_tabs(state: Variant) -> void:
 		var parts := str(t.get("key", "")).split("/")
 		if parts.size() != 3:
 			continue
-		var view := open_tab(db.get_entry(parts[0], parts[1], parts[2]))
+		var view := open_tab(entry_for(parts[0], parts[1], parts[2]))
 		if view:
 			scrolls[view] = int(t.get("scroll", 0))
 	var current := str(state.get("current", ""))
@@ -1085,9 +1121,9 @@ func _restore_tabs(state: Variant) -> void:
 	# Scroll once the views have their size (texts lay out over a frame or two).
 	for i in 3:
 		await get_tree().process_frame
-	for view: EntryView in scrolls:
+	for view: Variant in scrolls:  # a quick second reload may have closed them already
 		if is_instance_valid(view):
-			view.scroll_vertical = scrolls[view]
+			(view as EntryView).scroll_vertical = scrolls[view]
 	_restoring = false
 	_save_tabs()
 	tabs_restored.emit()
@@ -1289,6 +1325,140 @@ func _on_deleted(view: EntryView, store: EntryStore, kind: String) -> void:
 	close_tab(_tab_index(view.key))
 	_after_db_change(kind)
 	_status.text = "Deleted %s" % view.entry.get("name", "?")
+
+
+# --- Packages as cards (TASK-23) --------------------------------------------------------------
+
+func _build_package_cards() -> void:
+	manager = PackageManager.new(db.root)
+	var loaded := {}  ## package id -> {kind: count} of what is in the book
+	for kind: String in db.kinds():
+		for e: Dictionary in db.entries[kind]:
+			var c: Dictionary = loaded.get_or_add(e["_package"], {})
+			c[kind] = int(c.get(kind, 0)) + 1
+	package_cards = []
+	for m: Dictionary in manager.list():
+		var id := str(m._folder)
+		var e := m.duplicate(true)
+		e["id"] = id
+		e["_kind"] = PACKAGES
+		e["_package"] = id
+		e["_package_name"] = str(m.get("name", id))
+		e["_dir"] = db.root.path_join(id)
+		e["_key"] = str(m.get("name", id)).to_lower()
+		e["_text"] = (str(m.get("name", id)) + "\n" + str(m.get("description", ""))).to_lower()
+		e["_layer"] = "world" if str(m.get("kind", "")) == "world" else "core"
+		e["image"] = str(m.get("cover", m.get("image", "")))
+		var counts: Dictionary = loaded.get(id, m.get("counts", {}) if m.get("counts") is Dictionary else {})
+		e["_counts"] = counts
+		var total := 0
+		for k: Variant in counts:
+			total += int(counts[k])
+		e["_count"] = total
+		package_cards.append(e)
+
+
+## The entries of a kind in the binder (the package cards for "packages").
+func list_of(kind: String) -> Array:
+	return package_cards if kind == PACKAGES else db.entries.get(kind, [])
+
+
+## An entry by package, kind and id (package cards too).
+func entry_for(package_id: String, kind: String, id: String) -> Dictionary:
+	if kind == PACKAGES:
+		for e: Dictionary in package_cards:
+			if e.id == id:
+				return e
+		return {}
+	return db.get_entry(package_id, kind, id)
+
+
+## Switches a package on or off (card switch, full view) and re-reads the book.
+func set_package_enabled(id: String, on: bool) -> void:
+	if manager == null or manager.is_enabled(id) == on:
+		return
+	manager.set_enabled(id, on)
+	_status.text = "%s switched %s" % [id, "on" if on else "off"]
+	_reload()
+
+
+## Browse, filtered to one package and kind (the counts in a package's full view).
+func browse_package(package_id: String, kind: String) -> void:
+	if not db.entries.has(kind):
+		return
+	var i := db.kinds().find(kind)
+	if i >= 0 and i < _tabs.get_child_count():
+		(_tabs.get_child(i) as Button).button_pressed = true
+	_select_kind(kind)
+	var p := _package_values.find(package_id)
+	_package.selected = p + 1 if p >= 0 else 0
+	_refresh_list()
+
+
+func _doc_path(package_id: String, file: String) -> String:
+	return db.root.path_join(package_id).path_join(file)
+
+
+## Opens a package's PDF in the system's viewer.
+func open_document(package_id: String, file: String) -> void:
+	var path := _doc_path(package_id, file)
+	if not FileAccess.file_exists(path):
+		_status.text = "Missing: %s" % file
+		return
+	OS.shell_open(path)
+
+
+func show_document(package_id: String, file: String) -> void:
+	OS.shell_show_in_file_manager(_doc_path(package_id, file))
+
+
+func add_pdf_dialog(package_id: String) -> void:
+	var dialog := FileDialog.new()
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.title = "Add a PDF to the package"
+	dialog.filters = PackedStringArray(["*.pdf ; PDF documents", "* ; All files"])
+	dialog.use_native_dialog = true
+	dialog.file_selected.connect(func(path: String) -> void:
+		add_pdf(package_id, path)
+		dialog.queue_free())
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered_ratio(0.6)
+
+
+## Copies a PDF into the package and shows it in the package's view.
+func add_pdf(package_id: String, path: String) -> Dictionary:
+	var doc := manager.add_document(package_id, path)
+	if doc.has("error"):
+		_status.text = str(doc.error)
+		return doc
+	var card := entry_for(package_id, PACKAGES, package_id)
+	if not card.is_empty():
+		card["documents"] = manager.manifest(package_id).get("documents", [])
+		var view: EntryView = _open_views.get(EntryView.key_of(card))
+		if view and view.documents_box:
+			view._fill_documents(card)
+	_status.text = "Added %s" % doc.title
+	return doc
+
+
+## Export with the size first (PDFs can be large).
+func export_package_dialog(package_id: String) -> void:
+	var docs := manager.documents(package_id).size()
+	var dialog := FileDialog.new()
+	dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.title = "Export package (%s%s)" % [PackageManager.size_text(manager.package_size(package_id)), ", %d PDFs" % docs if docs > 0 else ""]
+	dialog.filters = PackedStringArray(["*.%s ; Dragoon package" % PackageManager.EXTENSION])
+	dialog.current_file = "%s.%s" % [package_id, PackageManager.EXTENSION]
+	dialog.file_selected.connect(func(path: String) -> void:
+		var err := manager.export_package(package_id, path)
+		_status.text = "Exported to %s" % path if err == OK else "Export failed: %s" % error_string(err)
+		dialog.queue_free())
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered_ratio(0.6)
 
 
 # --- Rollable tables (TASK-25) -------------------------------------------------------------

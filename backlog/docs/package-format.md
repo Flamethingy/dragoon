@@ -15,7 +15,25 @@ data/packages/<package-id>/
   items.json ...
   assets/           images referenced by entries (relative paths)
   docs/             PDFs of the source (rulebooks, homebrew), part of import/export
+  art/              monster art cut out of the PDFs (tools/extract_pdf_art.py), kept on re-import
 ```
+
+## Monster images
+
+1. The vault's image, if the file exists (`assets/...`).
+2. Otherwise art from the package's PDFs: `python tools/extract_pdf_art.py data/packages
+   [--package ID] [--any-package] [--dry-run]` finds pictures (not page backgrounds or
+   ornaments repeated on many pages) and matches them to a monster heading on the same page
+   (or the next page). The page region is rendered as `art/<id>.jpg` (150 dpi), listed in
+   `art/index.json` (name → file, pdf, page), and the importer re-applies it on every run.
+   Works for normal book layouts (tested on Monsters of the Multiverse). Full-page painted
+   layouts (Fools Gold) can't be split. Slow: a few minutes per big PDF.
+3. Otherwise the VTT shows the creature type icon from `res://assets/creature_types/<type>.svg`
+   (game-icons.net, CC BY 3.0, credits in that folder; `unknown.svg` for other types). These
+   icons are in git; the PDF art is not.
+
+The big monster books (Tome of Beasts 1-3, Creature Codex, Monstrous Menagerie, Monster Manual)
+have no PDF in their package yet, so for now most monsters fall back to the type icon.
 
 `data/` is git-ignored (copyrighted book content) and has a `.gdignore`, so Godot does not
 import it. The VTT loads packages at runtime with `FileAccess`.
@@ -36,6 +54,14 @@ invocations, infusions, rules, conditions, diseases, features, tables (rollable)
 | `counts` | entries per kind |
 | `documents` | PDFs of the package: `[{file, title, size}]`, `file` relative to the package folder (`docs/Players Handbook.pdf`), `size` in bytes |
 | `created`, `imported_from` | provenance |
+| `cover` | *optional* cover image for the package card, relative to the package folder |
+| `dependencies` | *optional* list of package ids (empty for now) |
+
+In the compendium (TASK-23) every installed package is a card under **Packages** (badge S/W, entry count,
+on/off switch; filter: Source/World/On/Off/Has PDFs; search over name and description). Its full view shows
+the manifest, the counts per kind (links to Browse filtered to the package), the `documents` (Open in the
+system viewer, Show in folder, **Add PDF...** copies into `docs/` and adds the entry) and a card overview of
+its contents. Export/import pack the whole folder including `docs/`; the export dialog shows the size first.
 
 The importer takes the PDFs linked in the vault's source page (`Sources/<Source>.md`, links like
 `[[Players Handbook.pdf|Player's Handbook]]`), copies them into `docs/` (only new or changed

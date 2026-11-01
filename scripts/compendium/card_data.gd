@@ -32,6 +32,8 @@ static func badge(e: Dictionary) -> Array:
 			return ["d" + StatBlock._num(hd), "wine"] if hd != null else []
 		"tables":
 			return [str(e.get("dice", "?")), "tan" if bool(e.get("complete", true)) else "red"]
+		"packages":
+			return ["W", "green"] if str(e.get("kind", "")) == "world" else ["S", "tan"]
 	return []
 
 
@@ -43,6 +45,7 @@ static func badge_label(e: Dictionary) -> String:
 		"classes": return "Hit die"
 		"features": return "Monsters using it"
 		"tables": return "Die to roll" + ("" if bool(e.get("complete", true)) else " (gaps in the table)")
+		"packages": return "World package" if str(e.get("kind", "")) == "world" else "Source package"
 	return ""
 
 
@@ -67,6 +70,9 @@ static func subtitle(e: Dictionary) -> String:
 		"tables":
 			var n: int = e.rows.size() if e.get("rows") is Array else 0
 			return "Rollable table, %d rows" % n
+		"packages":
+			return "%s · %s entries%s" % ["World" if str(e.get("kind", "")) == "world" else "Source",
+				StatBlock._thousands(int(e.get("_count", 0))), "" if bool(e.get("_enabled", true)) else " · off"]
 	return StatBlock.SINGULAR.get(str(e.get("_kind", "")), str(e.get("_kind", "")).capitalize())
 
 
@@ -101,6 +107,13 @@ static func chips(e: Dictionary) -> Array:
 				out.append(["icon_shield", "Save", "DC %s %s" % [StatBlock._num(e.save.get("dc")), str(e.save.get("ability", "")).to_upper()]])
 			if e.get("uses") != null and str(e.uses) != "":
 				out.append(["", "Uses", str(e.uses)])
+		"packages":
+			out.append(["", "Version", str(e.get("version", "?"))])
+			out.append(["icon_chest", "Entries", StatBlock._thousands(int(e.get("_count", 0)))])
+			var docs: int = e.documents.size() if e.get("documents") is Array else 0
+			if docs > 0:
+				out.append(["", "PDFs", str(docs)])
+			out.append(["", "State", "On" if bool(e.get("_enabled", true)) else "Off"])
 		"tables":
 			out.append(["icon_dagger", "Die", str(e.get("dice", "?"))])
 			out.append(["", "Rows", str(e.rows.size() if e.get("rows") is Array else 0)])

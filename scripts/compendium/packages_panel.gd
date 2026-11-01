@@ -130,7 +130,9 @@ static func counts_text(counts: Variant) -> String:
 # --- Export --------------------------------------------------------------------------
 
 func _pick_export(id: String) -> void:
-	var dialog := _file_dialog(FileDialog.FILE_MODE_SAVE_FILE, "Export package")
+	var docs := manager.documents(id).size()
+	var dialog := _file_dialog(FileDialog.FILE_MODE_SAVE_FILE, "Export package (%s%s)" % [
+		PackageManager.size_text(manager.package_size(id)), ", %d PDFs" % docs if docs > 0 else ""])
 	dialog.current_file = "%s.%s" % [id, PackageManager.EXTENSION]
 	dialog.file_selected.connect(func(path: String) -> void:
 		var err := manager.export_package(id, path)

@@ -23,6 +23,10 @@ var back_button: Button
 var send_button: Button
 var _hovered_meta := ""
 var editor: EntryEditor  ## while editing (TASK-21)
+## The book (set before setup): packages need it for their contents, PDFs and switch.
+var book: Compendium
+var contents: PackageContents
+var documents_box: VBoxContainer
 
 
 static func key_of(e: Dictionary) -> String:
@@ -51,6 +55,9 @@ func setup(e: Dictionary) -> void:
 	var cols := HBoxContainer.new()
 	cols.add_theme_constant_override("separation", 22)
 	box.add_child(cols)
+	if e.get("_kind") == "packages":
+		_setup_package(e, box)
+		return
 	var monster: bool = e.get("_kind") == "monsters"
 	var left := VBoxContainer.new()
 	left.add_theme_constant_override("separation", 10)
@@ -74,6 +81,110 @@ func setup(e: Dictionary) -> void:
 		left.add_child(_art(e))
 		left.add_child(_chips(e))
 		right.add_child(_text(StatBlock.to_bbcode(e)))
+
+
+## A package (TASK-23): picture, chips, on/off and Export on the left; text, documents and
+## the contents overview on the right.
+func _setup_package(e: Dictionary, box: VBoxContainer) -> void:
+	edit_button.visible = false
+	var cols := HBoxContainer.new()
+	cols.add_theme_constant_override("separation", 22)
+	box.add_child(cols)
+	var left := VBoxContainer.new()
+	left.add_theme_constant_override("separation", 10)
+	left.custom_minimum_size = Vector2(SIDE_WIDTH, 0)
+	cols.add_child(left)
+	left.add_child(_art(e))
+	left.add_child(_chips(e))
+	var id := str(e.get("id", ""))
+	var on := CheckButton.new()
+	on.name = "PackageSwitch"
+	on.text = "Shown in the book"
+	on.button_pressed = bool(e.get("_enabled", true))
+	on.toggled.connect(func(pressed: bool) -> void:
+		if book:
+			book.set_package_enabled(id, pressed))
+	left.add_child(on)
+	var export_button := Button.new()
+	export_button.name = "Export"
+	export_button.text = "Export..."
+	export_button.tooltip_text = "Save the package (with its PDFs) as one file"
+	export_button.pressed.connect(func() -> void:
+		if book:
+			book.export_package_dialog(id))
+	left.add_child(export_button)
+
+	var right := VBoxContainer.new()
+	right.add_theme_constant_override("separation", 10)
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cols.add_child(right)
+	right.add_child(_text(StatBlock.package(e)))
+	documents_box = VBoxContainer.new()
+	documents_box.name = "Documents"
+	right.add_child(documents_box)
+	_fill_documents(e)
+	if book:
+		contents = PackageContents.new()
+		contents.name = "Contents"
+		contents.setup(book.db, id)
+		contents.open_requested.connect(func(entry_to_open: Dictionary) -> void: book.open_tab(entry_to_open))
+		contents.background_requested.connect(func(entry_to_open: Dictionary) -> void: book.open_tab(entry_to_open, true))
+		box.add_child(contents)
+
+
+func _fill_documents(e: Dictionary) -> void:
+	for c in documents_box.get_children():
+		documents_box.remove_child(c)
+		c.queue_free()
+	var id := str(e.get("id", ""))
+	var head := HBoxContainer.new()
+	documents_box.add_child(head)
+	var title := Label.new()
+	title.text = "Documents"
+	title.theme_type_variation = UISkin.V_HEADING
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(title)
+	var add := Button.new()
+	add.name = "AddPdf"
+	add.text = "Add PDF..."
+	add.tooltip_text = "Copy a PDF into the package's docs/ folder"
+	add.pressed.connect(func() -> void:
+		if book:
+			book.add_pdf_dialog(id))
+	head.add_child(add)
+	var docs: Array = book.manager.documents(id) if book and book.manager else []
+	if docs.is_empty():
+		var none := Label.new()
+		none.theme_type_variation = UISkin.V_MUTED
+		none.text = "No PDFs in this package."
+		documents_box.add_child(none)
+	for d: Dictionary in docs:
+		var row := HBoxContainer.new()
+		row.name = "Doc_" + str(d.file).get_file().validate_node_name()
+		row.add_theme_constant_override("separation", 8)
+		documents_box.add_child(row)
+		var name_label := Label.new()
+		name_label.text = str(d.get("title", d.file))
+		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		name_label.tooltip_text = str(d.file)
+		row.add_child(name_label)
+		var size_label := Label.new()
+		size_label.theme_type_variation = UISkin.V_MUTED
+		size_label.text = PackageManager.size_text(int(d.get("size", 0))) + ("" if d.exists else " · missing")
+		if d.get("pages") != null:
+			size_label.text += " · %d pages" % int(d.pages)
+		row.add_child(size_label)
+		var open_button := Button.new()
+		open_button.text = "Open"
+		open_button.disabled = not d.exists
+		open_button.pressed.connect(func() -> void: book.open_document(id, str(d.file)))
+		row.add_child(open_button)
+		var folder := Button.new()
+		folder.text = "Show in folder"
+		folder.disabled = not d.exists
+		folder.pressed.connect(func() -> void: book.show_document(id, str(d.file)))
+		row.add_child(folder)
 
 
 ## Swaps the view for the editor (same tab); end_edit() swaps back.
@@ -171,7 +282,9 @@ func _chips(e: Dictionary) -> Control:
 	flow.add_theme_constant_override("h_separation", 8)
 	flow.add_theme_constant_override("v_separation", 8)
 	for t in CardData.tags(e):
-		flow.add_child(Compendium.chip("", "", t))
+		var tag := Compendium.chip("", "", t)
+		tag.custom_minimum_size = Vector2(120, 0)  # keeps "Concentration" on one line
+		flow.add_child(tag)
 	for c: Array in CardData.chips(e):
 		var chip := Compendium.chip(c[0], c[1], c[2])
 		chip.custom_minimum_size = Vector2(150, 0)

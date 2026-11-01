@@ -26,6 +26,13 @@ func _init() -> void:
 	await _shot(out.path_join("compendium_table_embed.png"))
 	book.open_tab(book.db.resolve_ref("tables/confusion-behavior"))
 	await _shot(out.path_join("compendium_table.png"))
+	book.show_browse()
+	(book._tabs.get_node("Bookmark_packages") as Button).pressed.emit()
+	await _shot(out.path_join("compendium_packages.png"))
+	book.open_tab(book.entry_for("tome-of-beasts-3", "packages", "tome-of-beasts-3"))
+	await _shot(out.path_join("compendium_package_view.png"))
+	book.open_tab(book.entry_for("5e-core-rules", "packages", "5e-core-rules"))
+	await _shot(out.path_join("compendium_package_docs.png"))
 	quit()
 
 

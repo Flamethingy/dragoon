@@ -200,3 +200,17 @@ See the "Open questions" section of the concept (secrets marking, event log form
   highlighted for everyone; Shift+click = hidden for the DM. `tables` cards: die badge (red if incomplete),
   "Rollable table, N rows", chips Die/Rows/From; the full view links back to the parent entry.
   Test: `tools/test_roll_tables.gd`; screenshots `compendium_table_embed.png`, `compendium_table.png`.
+
+- 2026-11-01: TASK-23 (Mochi): packages as cards. A **Packages** bookmark lists every installed package (on or
+  off) as a card: cover (`cover`/`image` in the manifest) or fallback art, badge S/W, "Source · 1,928 entries",
+  an on/off switch on the card (switched-off cards are dimmed, their entries leave the book). One filter covers
+  Source/World/On/Off/Has PDFs; the search covers name and description. The full view (own tab, survives
+  reloads) shows version, kind, description (its PDF links open the PDFs), the counts per kind as links to Browse
+  filtered to the package and kind, import origin, dependencies, "Shown in the book" switch, Export... (dialog
+  title shows the size incl. PDFs, also in the Packages window), **Documents** (title, size, Open in the default
+  viewer, Show in folder, Add PDF... -> `docs/` + manifest) and **Contents**: the package's entries as cards
+  grouped by kind with counts, collapsible (features start collapsed), 24 at a time with "Show more", a search
+  inside the package; cards open in their own tab. `PackageManager`: `manifest`, `package_size`, `documents`,
+  `add_document`, `size_text`. Fixes: tag chips ("Concentration") no longer wrap letter by letter; a quick
+  second reload no longer crashes the tab restore. Test: `tools/test_package_cards.gd`; screenshots
+  `compendium_packages.png`, `compendium_package_view.png`, `compendium_package_docs.png`.

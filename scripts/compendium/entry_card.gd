@@ -5,6 +5,7 @@ extends PanelContainer
 signal pressed(entry: Dictionary)
 signal open_requested(entry: Dictionary)  ## double-click: own tab
 signal background_requested(entry: Dictionary)  ## middle-click: tab in the background
+signal package_toggled(entry: Dictionary, on: bool)  ## packages: the small on/off switch (TASK-23)
 
 const SIZE := Vector2(150, 204)
 
@@ -60,6 +61,15 @@ func setup(e: Dictionary) -> void:
 	sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_child(sub)
 
+	if e.get("_kind") == "packages":
+		var on := CheckButton.new()
+		on.name = "Switch"
+		on.button_pressed = bool(e.get("_enabled", true))
+		on.tooltip_text = "Show this package's entries in the book"
+		on.position = Vector2(SIZE.x - 64, 2)
+		on.toggled.connect(func(pressed: bool) -> void: package_toggled.emit(entry, pressed))
+		art.add_child(on)
+
 	mouse_entered.connect(func() -> void: _hover = true; _restyle())
 	mouse_exited.connect(func() -> void: _hover = false; _restyle())
 
@@ -67,6 +77,8 @@ func setup(e: Dictionary) -> void:
 func _restyle() -> void:
 	theme_type_variation = UISkin.V_CARD_SELECTED if selected or _hover else UISkin.V_CARD
 	modulate = Color(1.04, 1.04, 1.04) if _hover and not selected else Color.WHITE
+	if entry.get("_kind") == "packages" and not bool(entry.get("_enabled", true)):
+		modulate.a = 0.5  # switched off: dimmed
 
 
 func _gui_input(event: InputEvent) -> void:

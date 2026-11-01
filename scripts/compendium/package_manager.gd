@@ -213,6 +213,73 @@ func list() -> Array[Dictionary]:
 	return out
 
 
+# --- Manifest, size, documents (TASK-23) ------------------------------------------------
+
+func manifest(id: String) -> Dictionary:
+	var m: Variant = JSON.parse_string(FileAccess.get_file_as_string(root.path_join(id).path_join("package.json")))
+	return m if m is Dictionary else {}
+
+
+## Bytes of everything in the package folder (what an export packs, PDFs included).
+func package_size(id: String) -> int:
+	var folder := root.path_join(id)
+	var total := 0
+	for rel in _files_under(folder, ""):
+		var f := FileAccess.open(folder.path_join(rel), FileAccess.READ)
+		if f:
+			total += f.get_length()
+	return total
+
+
+## The manifest's documents: [{file, title, size, pages?, exists}] (exists: the file is there).
+func documents(id: String) -> Array:
+	var out := []
+	for d: Variant in manifest(id).get("documents", []):
+		if d is Dictionary and str(d.get("file", "")) != "":
+			var doc: Dictionary = d.duplicate()
+			doc["exists"] = FileAccess.file_exists(root.path_join(id).path_join(str(d.file)))
+			out.append(doc)
+	return out
+
+
+## Copies a PDF (or any document) into the package's docs/ folder and lists it in the
+## manifest. Returns the new document entry, or {"error": text}.
+func add_document(id: String, path: String, title := "") -> Dictionary:
+	var folder := root.path_join(id)
+	if not FileAccess.file_exists(folder.path_join("package.json")):
+		return {"error": "No package \"%s\"" % id}
+	if not FileAccess.file_exists(path):
+		return {"error": "No file %s" % path}
+	DirAccess.make_dir_recursive_absolute(folder.path_join("docs"))
+	var file_name := path.get_file()
+	var n := 2
+	while FileAccess.file_exists(folder.path_join("docs").path_join(file_name)):
+		file_name = "%s (%d).%s" % [path.get_file().get_basename(), n, path.get_extension()]
+		n += 1
+	var err := DirAccess.copy_absolute(path, folder.path_join("docs").path_join(file_name))
+	if err != OK:
+		return {"error": "Can't copy the file: %s" % error_string(err)}
+	var doc := {"file": "docs/" + file_name, "title": title if title != "" else path.get_file().get_basename(),
+		"size": FileAccess.open(folder.path_join("docs").path_join(file_name), FileAccess.READ).get_length()}
+	var m := manifest(id)
+	var list: Array = m.get("documents", []) if m.get("documents") is Array else []
+	list.append(doc)
+	m["documents"] = list
+	EntryStore._write(folder.path_join("package.json"), m)
+	return doc
+
+
+## "1.2 GB", "340 KB".
+static func size_text(bytes: int) -> String:
+	if bytes >= 1 << 30:
+		return "%.1f GB" % (bytes / float(1 << 30))
+	if bytes >= 1 << 20:
+		return "%.1f MB" % (bytes / float(1 << 20))
+	if bytes >= 1 << 10:
+		return "%d KB" % (bytes >> 10)
+	return "%d bytes" % bytes
+
+
 static func _delete_tree(path: String) -> void:
 	if not DirAccess.dir_exists_absolute(path):
 		return

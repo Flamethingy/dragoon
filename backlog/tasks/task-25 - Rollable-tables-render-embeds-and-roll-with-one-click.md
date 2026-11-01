@@ -1,9 +1,10 @@
 ---
 id: TASK-25
 title: 'Rollable tables: render embeds and roll with one click'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-01 13:52'
+updated_date: '2026-11-01 14:15'
 labels:
   - mvp
   - dice
@@ -28,9 +29,15 @@ Needed in the VTT:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ![[tables/<id>]] embeds render as a table with a Roll button in every Markdown view (preview, full view, notes)
-- [ ] #2 Roll rolls the table's dice, highlights the row and shows value + text; clicking a row selects it manually
-- [ ] #3 Rolls are logged as dice.rolled events with table ref, value and row; the DM can roll hidden
-- [ ] #4 tables is a compendium kind with cards and a full view linking to its parent entry; incomplete tables show a hint
-- [ ] #5 Missing table ids render a warning, no crash
+- [x] #1 ![[tables/<id>]] embeds render as a table with a Roll button in every Markdown view (preview, full view, notes)
+- [x] #2 Roll rolls the table's dice, highlights the row and shows value + text; clicking a row selects it manually
+- [x] #3 Rolls are logged as dice.rolled events with table ref, value and row; the DM can roll hidden
+- [x] #4 tables is a compendium kind with cards and a full view linking to its parent entry; incomplete tables show a hint
+- [x] #5 Missing table ids render a warning, no crash
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+RollTables renders ![[tables/<id>]] embeds in every Markdown view: ranges, Markdown cells, formula roll links, a Roll button and the result. The rolled row is highlighted, clicking a range picks a row, missing tables show a warning and incomplete tables show a gaps hint. In the compendium rolls happen locally and go into the campaign log if one is picked. At the table the host rolls and logs dice.rolled with table/value/row; everyone sees the row text in the roll log and the highlight; Shift+click gives the DM a hidden roll. tables is a card kind (die badge, rows, parent link). Test: tools/test_roll_tables.gd. Commit: ca55c16.
+<!-- SECTION:FINAL_SUMMARY:END -->

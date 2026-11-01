@@ -32,6 +32,8 @@ static func to_bbcode(e: Dictionary) -> String:
 			return feature(e)
 		"tables":
 			return table(e)
+		"packages":
+			return package(e)
 		_:
 			return generic(e)
 
@@ -328,6 +330,45 @@ static func _components(c: Variant) -> String:
 
 
 # --- Everything else ---------------------------------------------------------------
+
+## A package (TASK-23): kind, version, description (its PDF links open the PDFs), the counts per
+## kind (each a link to Browse filtered to this package and kind), origin and dependencies.
+static func package(e: Dictionary) -> String:
+	var id := str(e.get("id", ""))
+	var kind := "World package" if str(e.get("kind", "")) == "world" else "Source package"
+	var bb := _title(e, "%s · version %s" % [kind, e.get("version", "?")]) + _rule()
+	if not bool(e.get("_enabled", true)):
+		bb += "[color=#%s][i]Switched off: its entries don't show in the book.[/i][/color]\n" % Markdown.MUTED.to_html()
+	var desc := str(e.get("description", "")).strip_edges()
+	if desc != "":
+		bb += _md(pdf_links(desc, id)) + "\n"
+	var counts: Variant = e.get("_counts", e.get("counts", {}))
+	if counts is Dictionary and not counts.is_empty():
+		bb += _heading("Entries")
+		var keys: Array = counts.keys()
+		keys.sort_custom(func(a: Variant, b: Variant) -> bool: return int(counts[a]) > int(counts[b]))
+		var parts := PackedStringArray()
+		for k: Variant in keys:
+			parts.append("[url=pkgkind:%s/%s][color=#%s]%s %s[/color][/url]" % [id, k, Markdown.LINK.to_html(), str(k).capitalize(), _thousands(int(counts[k]))])
+		bb += ", ".join(parts) + "\n"
+	var origin := str(e.get("imported_from", e.get("origin", "")))
+	if origin != "" or str(e.get("created", "")) != "":
+		bb += _field("\nImported from", Markdown.escape(origin if origin != "" else "—") + (" (%s)" % str(e.created).replace("T", " ") if str(e.get("created", "")) != "" else ""))
+	var deps: Variant = e.get("dependencies", [])
+	bb += _field("Dependencies", Markdown.escape(_join(deps)) if deps is Array and not deps.is_empty() else "none")
+	return bb
+
+
+## The description's PDF links "[Title](<docs/x.pdf>)" become "pdf:" links the book opens.
+static func pdf_links(md: String, package_id: String) -> String:
+	var re := RegEx.create_from_string("\\]\\(\\s*<?(docs/[^)>]+?)>?\\s*\\)")
+	var out := ""
+	var from := 0
+	for m in re.search_all(md):
+		out += md.substr(from, m.get_start() - from) + "](pdf:%s/%s)" % [package_id, m.get_string(1).uri_encode().replace("%2F", "/")]
+		from = m.get_end()
+	return out + md.substr(from)
+
 
 ## A rollable table (TASK-25): the table with its Roll button and a link to where it comes from.
 static func table(e: Dictionary) -> String:

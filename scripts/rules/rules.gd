@@ -600,6 +600,18 @@ static func spell_attack_of(entry: Dictionary, caster: Dictionary) -> Dictionary
 	return {"name": str(entry.get("name", "")), "to_hit": spell_attack(caster), "damage": damage, "ranged": "ranged spell attack" in lower}
 
 
+## A range in metres (TASK-67): "1.5 m" (reach) -> {normal 1.5, long 1.5}, "24.4/97.5 m" ->
+## {normal 24.4, long 97.5}, a number as it is; {} for none.
+static func range_of(v: Variant) -> Dictionary:
+	if v is int or v is float:
+		return {"normal": float(v), "long": float(v)} if float(v) > 0 else {}
+	var m := RegEx.create_from_string("(\\d+(?:\\.\\d+)?)(?:\\s*/\\s*(\\d+(?:\\.\\d+)?))?\\s*m").search(str(v))
+	if m == null:
+		return {}
+	var normal := float(m.get_string(1))
+	return {"normal": normal, "long": float(m.get_string(2)) if m.get_string(2) != "" else normal}
+
+
 ## How a spell is cast at the table: "attack" (a spell attack: pick targets), "save" (targets
 ## save), else "other" (rolled into the chat).
 static func spell_kind(entry: Dictionary) -> String:

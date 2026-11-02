@@ -15,6 +15,7 @@ const INK := Color8(74, 34, 46)
 const INK_SOFT := Color8(128, 92, 96)
 const RED := Color8(190, 62, 59)
 const GREEN := Color8(90, 136, 100)
+const ORANGE := Color8(214, 128, 52)  ## warnings (out of range, TASK-67)
 const GOLD := Color8(201, 160, 95)
 
 ## name -> Rect2i on the sheet.

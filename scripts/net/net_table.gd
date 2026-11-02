@@ -28,6 +28,8 @@ signal roll_shown(entry: Dictionary)  ## a new roll card with dice in my feed: t
 signal entry_imported(entry: Dictionary)
 signal condition_menu_requested(ref: String)
 signal concentration_confirm(ref: String, old_name: String, new_name: String, go: Callable)  ## a second concentration spell (TASK-59)
+signal templates_changed  ## the area templates on the map (TASK-67)
+signal area_placed(template: Dictionary)  ## I placed one (the attack bar takes its targets)
 signal attack_requested(ref: String, query: String, multi: bool, kind: String, opts: Dictionary)  ## a sheet's attack or save link: pick targets (TASK-54/55)  ## a token's right click, a sheet's or roll card's link (TASK-56)  ## DM: a core entry was copied into the world
 
 const DEFAULT_PORT := 7777
@@ -104,6 +106,9 @@ func _ready() -> void:
 	grid.step_requested.connect(_on_step_requested)
 	grid.token_clicked.connect(_on_token_clicked)
 	grid.token_menu.connect(func(entity: String) -> void: condition_menu_requested.emit(entity))
+	grid.areas.placed.connect(func(t: Dictionary) -> void:  # TASK-67: share it, the attack bar may take its targets
+		place_template(t)
+		area_placed.emit(t))
 	grid.budget = func(id: String) -> Dictionary:  # TASK-62: the trail's budget in a combat
 		for c: Dictionary in combat_view().get("order", []):
 			if c.get("usage") is Dictionary and (c.entity == id or (c.get("members", []) as Array).any(func(m: Dictionary) -> bool: return m.entity == id)):
@@ -243,7 +248,7 @@ func view_for(player: String) -> Dictionary:
 			t["cell"] = start + Vector2i(newcomers, 0)
 			newcomers += 1
 		tokens.append(t)
-	return {"map": map, "tokens": tokens, "rules": rules_settings(), "combat": combat_view()}
+	return {"map": map, "tokens": tokens, "rules": rules_settings(), "combat": combat_view(), "templates": templates}
 
 
 ## HP and AC on a token as they are now (the events), not as in the file.
@@ -401,6 +406,116 @@ func combat_state() -> Dictionary:
 	if is_dm() and event_log != null:
 		return Replay.world_state(event_log.effective()).combat
 	return _combat if not _combat.is_empty() else {"active": false, "order": [], "round": 0, "turn": 0}
+
+
+# --- Area templates and range (TASK-67) -------------------------------------------------------------
+
+var templates: Array = []  ## the map's area templates (the host's; everyone gets them)
+var _template_id := 0
+
+
+## Places an area template ({shape, size, width, origin: [x, y], angle} in cell units) for everyone.
+func place_template(t: Dictionary) -> void:
+	if is_dm():
+		_handle_template(1, "place", t)
+	elif is_online():
+		request_template.rpc_id(1, "place", t)
+
+
+## Takes one away (its placer or the DM); "" = all of mine (the DM: all).
+func remove_template(id: String) -> void:
+	if is_dm():
+		_handle_template(1, "remove", {"id": id})
+	elif is_online():
+		request_template.rpc_id(1, "remove", {"id": id})
+
+
+## Turns one by `degrees`.
+func rotate_template(id: String, degrees: float) -> void:
+	if is_dm():
+		_handle_template(1, "rotate", {"id": id, "by": degrees})
+	elif is_online():
+		request_template.rpc_id(1, "rotate", {"id": id, "by": degrees})
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_template(action: String, t: Dictionary) -> void:
+	if is_dm():
+		_handle_template(multiplayer.get_remote_sender_id(), action.left(10), t)
+
+
+func _handle_template(sender: int, action: String, t: Dictionary) -> void:
+	var player := _sender_player(sender)
+	if player == "":
+		return
+	match action:
+		"place":
+			var o: Variant = t.get("origin", [0, 0])
+			if not o is Array or (o as Array).size() < 2 or str(t.get("shape", "")) not in AreaLayer.SHAPES:
+				return
+			_template_id += 1
+			var acc: Dictionary = accounts.get(player, {})
+			templates.append({"id": str(_template_id), "shape": str(t.shape), "size": clampf(float(t.get("size", 1)), 0.2, 200.0),
+				"width": clampf(float(t.get("width", 1)), 0.0, 50.0), "origin": [float(o[0]), float(o[1])], "angle": float(t.get("angle", 0.0)),
+				"by": player, "color": str(acc.get("color", ""))})
+		"remove":
+			var id := str(t.get("id", ""))
+			templates = templates.filter(func(x: Dictionary) -> bool:
+				var mine: bool = player == Reveal.DM or str(x.by) == player
+				return not (mine and (id == "" or str(x.id) == id)))
+		"rotate":
+			for x: Dictionary in templates:
+				if str(x.id) == str(t.get("id", "")) and (player == Reveal.DM or str(x.by) == player):
+					x["angle"] = float(x.angle) + deg_to_rad(float(t.get("by", 0.0)))
+		_:
+			return
+	grid.areas.set_templates(templates)
+	for peer_id: int in peers:
+		templates_set.rpc_id(peer_id, templates)
+	templates_changed.emit()
+
+
+@rpc("authority", "call_remote", "reliable")
+func templates_set(list: Array) -> void:
+	templates = list.duplicate(true)
+	grid.areas.set_templates(templates)
+	templates_changed.emit()
+
+
+## Metres between two tokens on the map, edge to edge like moving (-1 if one isn't on it).
+func distance_m(a: String, b: String) -> float:
+	if not grid.tokens.has(a) or not grid.tokens.has(b):
+		return -1.0
+	var ra := _footprint(a)
+	var rb := _footprint(b)
+	var gx := maxi(0, maxi(rb.position.x - ra.end.x + 1, ra.position.x - rb.end.x + 1))
+	var gy := maxi(0, maxi(rb.position.y - ra.end.y + 1, ra.position.y - rb.end.y + 1))
+	return maxi(gx, gy) * TokenGrid.METRES_PER_CELL
+
+
+func _footprint(id: String) -> Rect2i:
+	var at: Vector2i = grid.tokens[id].get_meta("cell", Vector2i.ZERO)
+	var n := maxi(1, ceili(float(grid.tokens[id].get_meta("cells", 1.0))))
+	return Rect2i(at, Vector2i(n, n))
+
+
+## A target's range note (TASK-67): {m, normal, long, far: beyond long, long_range: beyond
+## normal}; {} if fine or unknown. Only a warning: the roll happens anyway.
+func _range_note(ref: String, tref: String, rng_m: Dictionary) -> Dictionary:
+	if rng_m.is_empty():
+		return {}
+	var d := distance_m(ref, tref)
+	if d < 0 or d <= float(rng_m.normal) + 0.01:
+		return {}
+	return {"m": d, "normal": float(rng_m.normal), "long": float(rng_m.long), "far": d > float(rng_m.long) + 0.01}
+
+
+static func _range_text(note: Dictionary) -> String:
+	if note.is_empty():
+		return ""
+	if bool(note.far):
+		return " [color=#%s](out of range: %s m > %s m)[/color]" % [UISkin.ORANGE.to_html(false), MovePlans._num(float(note.m)), MovePlans._num(float(note.long))]
+	return " [color=#%s](long range %s m: disadvantage)[/color]" % [UISkin.ORANGE.to_html(false), MovePlans._num(float(note.m))]
 
 
 # --- Action economy (TASK-62) ---------------------------------------------------------------------
@@ -1341,6 +1456,9 @@ func _apply_state(view: Dictionary) -> void:
 		_rules = Rules.settings_of(view.rules)
 	if view.has("combat") and not is_dm():
 		_combat = view.combat
+	if view.has("templates") and not is_dm():
+		templates = (view.templates as Array).duplicate(true)
+		grid.areas.set_templates(templates)
 	var map: Dictionary = view.map
 	var map_image: String = map.get("image", "")
 	if grid.map_id != map.id or grid.get_meta("image", "") != map_image:
@@ -1764,7 +1882,8 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 		for v: Variant in sheet.get("spells", []):
 			var e := catalog_entry(str(v))
 			refs[str(v)] = {"name": str(e.get("name", HudWidgets._name_of(v))), "level": int(e.get("level", 0)),
-				"cast": Rules.spell_kind(e), "ritual": bool(e.get("ritual", false))}  # TASK-49
+				"cast": Rules.spell_kind(e), "ritual": bool(e.get("ritual", false)),  # TASK-49
+				"range_m": float(e.get("range_m", 0)), "area": _area_of(e)}  # TASK-67
 		for it: Variant in sheet.get("inventory", []):
 			var r := str(it.get("item", "")) if it is Dictionary else str(it)
 			refs[r] = {"name": str(catalog_entry(r).get("name", HudWidgets._name_of(r)))}
@@ -2397,6 +2516,8 @@ func _handle_attack(sender: int, ref: String, query: String, targets: Array, opt
 	if query.begins_with("spells/"):  # TASK-49: a spell attack
 		var entry := catalog_entry(query)
 		var atk := Rules.spell_attack_of(entry, sheet)
+		if not atk.is_empty():
+			atk["range"] = Rules.range_of(float(entry.get("range_m", 0)))
 		if atk.is_empty():
 			_deny_roll(sender, "%s has no spell attack" % str(entry.get("name", query)))
 			return []
@@ -2452,6 +2573,9 @@ func _attack_card(player: String, ref: String, sheet: Dictionary, atk: Dictionar
 				row["applied"] = int(e.get("id", 0))
 			elif mode == "assist" and int(row.amount) > 0:
 				row["pending"] = true
+		var far := _range_note(ref, tref, atk.get("range", {}) if atk.get("range") is Dictionary else {})  # TASK-67
+		if not far.is_empty():
+			row["range"] = far
 		rows.append(row)
 	var data := {"roll": "%s attack" % atk.name, "formula": results[0].formula if not results.is_empty() else "", "result": results[0].total if not results.is_empty() else 0,
 		"dice": results[0].dice if not results.is_empty() else [], "results": results, "who": str(sheet.get("name", "")),
@@ -2681,6 +2805,11 @@ func _handle_save_action(sender: int, ref: String, what: String, targets: Array,
 		else:
 			waiting.append(tref)
 			card.targets.append({"ref": tref, "name": timeline.name_of(tref), "waiting": true})
+	var reach := Rules.range_of(float(entry.get("range_m", 0))) if _is_ref(what) else {}  # TASK-67: beyond the spell's range
+	for row: Dictionary in card.targets:
+		var far := _range_note(ref, str(row.ref), reach)
+		if not far.is_empty() and bool(far.far):
+			row["range"] = far
 	var data := {"roll": "%s (DC %d %s save)" % [fx.name, fx.dc, str(fx.ability).to_upper()], "results": [], "who": str(sheet.get("name", "")),
 		"hidden": false, "save": card}
 	var ev := event_log.append("dice.rolled", ref, data, player)
@@ -2913,6 +3042,14 @@ func request_use(ref: String, what: String, opts: Dictionary) -> void:
 		_handle_use(multiplayer.get_remote_sender_id(), ref.left(200), what.left(200), opts)
 
 
+## A spell's or feature's area: its effects', else the text's.
+static func _area_of(e: Dictionary) -> Dictionary:
+	for fx: Variant in e.get("effects", []):
+		if fx is Dictionary and fx.get("area") is Dictionary:
+			return fx.area
+	return Effects.area_of(str(e.get("description", e.get("text", ""))).to_lower())
+
+
 ## Casts `spell` of `ref` at `level` (-1: its own; a ritual spends no slot) (TASK-49): a spell
 ## attack or a save picks its targets first (the attack bar), anything else goes to the chat.
 func cast(ref: String, spell: String, level := -1, ritual := false) -> void:
@@ -2920,7 +3057,8 @@ func cast(ref: String, spell: String, level := -1, ritual := false) -> void:
 	if is_dm() and s.is_empty():
 		s = sheet_for(Reveal.DM, ref)
 	var info: Dictionary = (s.get("_refs", {}) as Dictionary).get(spell, {}) if s.get("_refs") is Dictionary else {}
-	var opts := {"level": level if level > 0 else int(info.get("level", 0)), "ritual": ritual}
+	var opts := {"level": level if level > 0 else int(info.get("level", 0)), "ritual": ritual,
+		"area": info.get("area", {}), "range_m": float(info.get("range_m", 0))}
 	match str(info.get("cast", "other")):
 		"attack", "save":
 			attack_requested.emit(ref, spell, false, str(info.cast), opts)
@@ -3318,7 +3456,8 @@ static func _save_lines(entry: Dictionary) -> PackedStringArray:
 			out.append("→ %s: [i]waiting for the save[/i]" % Markdown.escape(str(row.name)))
 			continue
 		var verdict := "[color=#%s][b]saved[/b][/color]" % UISkin.GREEN.to_html(false) if bool(row.get("success", false)) else "[color=#%s][b]failed[/b][/color]" % UISkin.RED.to_html(false)
-		var line := "→ %s: %s %d [color=#%s]%s[/color] %s" % [Markdown.escape(str(row.name)), str(s.ability).to_upper(), int(row.total), muted, Markdown.escape(str(row.formula)), verdict]
+		var line := "→ %s: %s %d [color=#%s]%s[/color] %s%s" % [Markdown.escape(str(row.name)), str(s.ability).to_upper(), int(row.total), muted, Markdown.escape(str(row.formula)), verdict,
+			_range_text(row.get("range", {}) if row.get("range") is Dictionary else {})]
 		var bits := PackedStringArray()
 		for d: Dictionary in row.get("damage", []):
 			var t := "%d %s" % [int(d.rolled), str(d.type)]
@@ -3356,7 +3495,8 @@ static func _attack_lines(entry: Dictionary) -> PackedStringArray:
 		elif bool(row.get("fumble", false)):
 			verdict += " (nat 1)"
 		var adv := " [color=#%s](%s)[/color]" % [muted, "adv" if int(row.advantage) > 0 else "dis"] if int(row.get("advantage", 0)) != 0 else ""
-		var line := "→ %s: %d%s [color=#%s]%s[/color] %s" % [Markdown.escape(str(row.name)), int(row.total), adv, muted, Markdown.escape(str(row.formula)), verdict]
+		var line := "→ %s: %d%s [color=#%s]%s[/color] %s%s" % [Markdown.escape(str(row.name)), int(row.total), adv, muted, Markdown.escape(str(row.formula)), verdict,
+			_range_text(row.get("range", {}) if row.get("range") is Dictionary else {})]
 		var bits := PackedStringArray()
 		for d: Dictionary in row.get("damage", []):
 			var t := "%d %s" % [int(d.rolled), str(d.type)] if str(d.type) != "" else str(int(d.rolled))

@@ -57,6 +57,7 @@ var condition_menu: PopupMenu  ## a creature's conditions to tick (TASK-56)
 var tracker: CombatTracker  ## the initiative order while a combat runs (TASK-58)
 var attack_bar: PanelContainer  ## picking targets for an attack (TASK-54)
 var dice_tray: DiceTray  ## 3D dice over the table (TASK-61)
+var _area_button: Button
 var attack := {}  ## {ref, query, multi, targets: []} while picking
 var _attack_label: Label
 var _cover: OptionButton
@@ -112,6 +113,7 @@ func _ready() -> void:
 	table.rolls_changed.connect(_show_rolls)
 	table.condition_menu_requested.connect(func(ref: String) -> void: open_condition_menu(ref))
 	table.attack_requested.connect(begin_attack)
+	table.area_placed.connect(_on_area_placed)
 	table.concentration_confirm.connect(confirm_concentration)
 	table.grid.token_clicked.connect(_on_target_clicked)
 	RollTables.resolver = func(id: String) -> Dictionary: return table.tables.get(id, {})
@@ -377,6 +379,15 @@ func _build_attack_bar(root: Control) -> void:
 		_adv.set_item_metadata(_adv.item_count - 1, c[1])
 	_adv.tooltip_text = "Conditions preselect advantage or disadvantage; pick one to decide yourself"
 	row.add_child(_adv)
+	_area_button = Button.new()  # TASK-67: the spell's area: its tokens become the targets
+	_area_button.name = "PlaceArea"
+	_area_button.text = "Place area"
+	_area_button.tooltip_text = "Put the area on the map; the creatures in it become the targets (click one to add or drop it)"
+	_area_button.pressed.connect(func() -> void:
+		var a: Dictionary = (attack.get("opts", {}) as Dictionary).get("area", {})
+		if not a.is_empty():
+			table.grid.areas.start_place(str(a.get("shape", "sphere")), float(a.get("size_m", 6)), float(a.get("width_m", 1.5))))
+	row.add_child(_area_button)
 	var go := Button.new()
 	go.name = "Roll"
 	go.text = "Roll"
@@ -395,6 +406,7 @@ func begin_attack(ref: String, query: String, multi := false, kind := "attack", 
 	cancel_attack()
 	attack = {"ref": ref, "query": query, "multi": multi, "targets": [], "kind": kind, "opts": opts}
 	_adv.visible = kind == "attack"  # a save: the targets' own conditions decide
+	_area_button.visible = not ((opts.get("area", {}) as Dictionary).is_empty())
 	attack_bar.visible = true
 	_update_attack_label()
 
@@ -403,6 +415,18 @@ func _on_target_clicked(entity: String) -> void:
 	if attack.is_empty() or entity == str(attack.ref) or not "/" in entity:
 		return
 	_toggle_target(entity)
+	_update_attack_label()
+
+
+## An area placed while picking targets: the creatures in it are the targets (TASK-67).
+func _on_area_placed(t: Dictionary) -> void:
+	if attack.is_empty():
+		return
+	for id: Variant in (attack.targets as Array).duplicate():
+		_toggle_target(str(id))
+	for id: String in AreaLayer.tokens_in(t, table.grid):
+		if id != str(attack.ref) and "/" in id:
+			_toggle_target(id)
 	_update_attack_label()
 
 
@@ -419,6 +443,11 @@ func _update_attack_label() -> void:
 	var what := "Multiattack" if bool(attack.get("multi", false)) else HudWidgets._name_of(str(attack.get("query", ""))).capitalize()
 	var n: int = (attack.get("targets", []) as Array).size()
 	_attack_label.text = "%s: %s" % [what, "click the targets on the map" if n == 0 else "%d target%s" % [n, "" if n == 1 else "s"]]
+	var reach := float((attack.get("opts", {}) as Dictionary).get("range_m", 0))  # TASK-67: a warning, nothing is blocked
+	if reach > 0:
+		var far := (attack.get("targets", []) as Array).filter(func(id: Variant) -> bool: return table.distance_m(str(attack.ref), str(id)) > reach + 0.01).size()
+		if far > 0:
+			_attack_label.text += "  (%d out of range: %s m)" % [far, MovePlans._num(reach)]
 
 
 ## Rolls the attack at the picked targets (cover and advantage as chosen on the bar).
@@ -509,6 +538,10 @@ func _on_condition_picked(id: int) -> void:
 
 # --- Top bar ---------------------------------------------------------------------------------
 
+const AREA_PRESETS := [["Sphere 6 m (radius)", "sphere", 6.0, 0.0], ["Sphere 3 m", "sphere", 3.0, 0.0], ["Cone 4.5 m", "cone", 4.5, 0.0],
+	["Cone 9 m", "cone", 9.0, 0.0], ["Line 9 m × 1.5 m", "line", 9.0, 1.5], ["Line 30 m × 1.5 m", "line", 30.0, 1.5],
+	["Cube 3 m", "cube", 3.0, 0.0], ["Cube 6 m", "cube", 6.0, 0.0], ["Cylinder 6 m", "cylinder", 6.0, 0.0]]
+
 func _build_bar(root: Control) -> void:
 	_bar = PanelContainer.new()
 	_bar.theme_type_variation = UISkin.V_PAGE
@@ -535,6 +568,23 @@ func _build_bar(root: Control) -> void:
 	_combat_button.name = "Combat"
 	_turn_button = _bar_button(row, "Next turn", "The next creature's turn (a new round after the last)", func() -> void: table.next_turn())
 	_turn_button.name = "NextTurn"
+	var ruler := _bar_button(row, "Ruler", "Measure on the map: drag (metres, like moving); Esc ends it", func() -> void: table.grid.areas.start_ruler())
+	ruler.name = "Ruler"
+	var areas := MenuButton.new()  # TASK-67: an area template, placed by hand
+	areas.name = "AreaMenu"
+	areas.text = "Area"
+	areas.flat = false
+	areas.tooltip_text = "Put an area on the map (everyone sees it); a sphere at a grid corner, the others: origin, then aim"
+	for i in AREA_PRESETS.size():
+		areas.get_popup().add_item(str(AREA_PRESETS[i][0]), i)
+	areas.get_popup().add_separator()
+	areas.get_popup().add_item("Remove my areas (DM: all)", 100)
+	areas.get_popup().id_pressed.connect(func(i: int) -> void:
+		if i == 100:
+			table.remove_template("")
+		else:
+			table.grid.areas.start_place(str(AREA_PRESETS[i][1]), float(AREA_PRESETS[i][2]), float(AREA_PRESETS[i][3])))
+	row.add_child(areas)
 	_book_button = Button.new()
 	_book_button.text = "Compendium"
 	_book_button.tooltip_text = "Core, world and this timeline's entries; edit them (session edits become events)"

@@ -209,7 +209,7 @@ static func attack_of(sheet: Dictionary, name: String, features := {}) -> Dictio
 		if d is Dictionary and is_formula(str(d.get("dice", ""))):
 			dmg.append({"dice": str(d.dice).replace(" ", ""), "type": str(d.get("type", ""))})
 	return {"name": str(f.get("name", name)), "to_hit": int(a.get("to_hit", 0)), "damage": dmg,
-		"ranged": "ranged" in str(a.get("kind", "")).to_lower()}
+		"ranged": "ranged" in str(a.get("kind", "")).to_lower(), "range": Rules.range_of(a.get("range", ""))}
 
 
 const _COUNTS := {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "twice": 2, "thrice": 3}

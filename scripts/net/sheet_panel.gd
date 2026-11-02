@@ -125,6 +125,12 @@ func _on_meta(meta: Variant) -> void:
 			table.flag_item(ref, p[3], p[1], p[2] == "on")
 	elif m.begins_with("res:") and table != null:  # TASK-64: a use spent / back
 		table.use_resource(ref, m.substr(8), 1 if m.begins_with("res:use:") else -1)
+	elif m == "form:end" and table != null:  # TASK-74
+		table.end_form(ref)
+	elif (m == "form:wild_shape" or m == "form:polymorph" or m == "summon") and table != null:
+		creature_picker(m.trim_prefix("form:"))
+	elif m == "dismiss" and table != null:
+		table.dismiss(ref)
 	elif m == "levelup" and table != null:  # TASK-71
 		level_up_dialog()
 	elif m == "rest:short" and table != null:
@@ -162,6 +168,7 @@ func add_entry(e: Dictionary) -> bool:
 
 var rest_dialog: ConfirmationDialog
 var level_dialog: ConfirmationDialog
+var picker: ConfirmationDialog
 
 ## The short rest (TASK-64): how many of each hit die to spend.
 func short_rest_dialog() -> ConfirmationDialog:
@@ -309,6 +316,56 @@ func level_up_dialog(cls := "") -> ConfirmationDialog:
 	return level_dialog
 
 
+## Picks a creature (TASK-74): "wild_shape" (beasts up to the Wild Shape CR), "polymorph"
+## (beasts up to the target's level or CR) or "summon" (any creature), filtered by name.
+func creature_picker(mode: String) -> ConfirmationDialog:
+	if picker != null:
+		picker.queue_free()
+	picker = ConfirmationDialog.new()
+	picker.name = "CreaturePicker"
+	picker.title = {"wild_shape": "Wild Shape", "polymorph": "Polymorph", "summon": "Summon"}.get(mode, mode)
+	var box := VBoxContainer.new()
+	box.custom_minimum_size = Vector2(340, 300)
+	picker.add_child(box)
+	var filter := LineEdit.new()
+	filter.name = "Filter"
+	filter.placeholder_text = "Name..."
+	box.add_child(filter)
+	var list := ItemList.new()
+	list.name = "Creatures"
+	list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(list)
+	var limit := Rules.wild_shape_cr(sheet) if mode == "wild_shape" else (float(maxi(Rules.level(sheet), 0)) if mode == "polymorph" else 99.0)
+	if mode == "polymorph" and limit <= 0:
+		limit = Rules.cr_of(sheet)
+	var all := table.catalog_list("creatures").filter(func(e: Variant) -> bool:
+		return e is Dictionary and not EntryStore.is_draft(e) and str((e as Dictionary).get("copy_of", "")) == "" \
+			and (mode == "summon" or "beast" in str(e.get("type", "")).to_lower()) and Rules.cr_of(e) <= limit + 0.001)
+	all.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return str(a.name) < str(b.name))
+	var fill := func(text: String) -> void:
+		list.clear()
+		for e: Dictionary in all:
+			if text == "" or text.to_lower() in str(e.name).to_lower():
+				list.add_item("%s (CR %s)" % [str(e.name), Rules.cr_text(Rules.cr_of(e))])
+				list.set_item_metadata(list.item_count - 1, "creatures/" + str(e.id))
+				if list.item_count >= 200:
+					break
+	filter.text_changed.connect(func(t: String) -> void: fill.call(t))
+	fill.call("")
+	picker.confirmed.connect(func() -> void:
+		var sel := list.get_selected_items()
+		if sel.is_empty():
+			return
+		var creature := str(list.get_item_metadata(sel[0]))
+		if mode == "summon":
+			table.summon(ref, creature)
+		else:
+			table.assume_form(ref, creature, mode))
+	add_child(picker)
+	picker.popup_centered(Vector2i(380, 380))
+	return picker
+
+
 func close_sheet() -> void:
 	if ref != "":
 		table.close_sheet(ref)
@@ -414,6 +471,19 @@ static func _resources(s: Dictionary) -> String:
 		bb += StatBlock._field("Uses", " · ".join(parts))
 	if str(s.get("_kind", "")) == "characters":
 		bb += StatBlock._field("Rest", "[url=rest:short]Short rest[/url] · [url=rest:long]Long rest (party, DM)[/url]")
+	var shapes := PackedStringArray()  # TASK-74
+	if s.get("_form") is Dictionary:
+		var f: Dictionary = s._form
+		shapes.append("%s%s · [url=form:end]Back to own shape[/url]" % [Markdown.escape(str(f.name)), " (own HP %d/%d)" % [int(f.own.hp), int(f.own.max)] if f.has("hp") else ""])
+	elif str(s.get("_kind", "")) == "characters":
+		if Rules.wild_shape_cr(s) > 0:
+			shapes.append("[url=form:wild_shape]Wild Shape...[/url]")
+		shapes.append("[url=form:polymorph]Polymorph...[/url]")
+		shapes.append("[url=summon]Summon...[/url]")
+	if str(s.get("summoned_by", "")) != "":
+		shapes.append("summoned by %s · [url=dismiss]Dismiss[/url]" % Markdown.escape(HudWidgets._name_of(s.summoned_by)))
+	if not shapes.is_empty():
+		bb += StatBlock._field("Shape", " · ".join(shapes))
 	var lv: Dictionary = s.get("_level", {})
 	if not lv.is_empty():  # TASK-71
 		var xp := "XP %d / %d · " % [int(lv.xp), int(lv.next)] if str(lv.mode) == "xp" else ""

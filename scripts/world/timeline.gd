@@ -435,6 +435,10 @@ func owners() -> Dictionary:
 		var o := owners_of(entry(ref))
 		if not o.is_empty():
 			out[ref] = o
+	for id: String in created("creatures"):  # TASK-74: a summon is its caster's players'
+		var e: Dictionary = created("creatures")[id]
+		if e.get("owners") is Array and not (e.owners as Array).is_empty():
+			out["creatures/" + id] = (e.owners as Array).duplicate()
 	return out
 
 

@@ -348,6 +348,60 @@ static func encounter_difficulty(party: Array, foes: Array, edition := "2014") -
 	return out
 
 
+## The highest CR a druid's Wild Shape takes (TASK-74): level 2 1/4, 4 1/2, 8 1; Circle of
+## the Moon: 1 from level 2, then level / 3 from 6. 0: no Wild Shape.
+static func wild_shape_cr(s: Dictionary) -> float:
+	var lvl := class_level(s, "druid")
+	if lvl < 2:
+		return 0.0
+	var moon := false
+	for c: Variant in s.get("classes", []):
+		if c is Dictionary and _class_id(str(c.get("class", ""))) == "druid" and "moon" in str(c.get("subclass", "")).to_lower():
+			moon = true
+	if moon:
+		return maxf(1.0, floorf(lvl / 3.0)) if lvl >= 6 else 1.0
+	return 1.0 if lvl >= 8 else (0.5 if lvl >= 4 else 0.25)
+
+
+## A CR as written: 0.25 -> "1/4", 2.0 -> "2".
+static func cr_text(cr: float) -> String:
+	for pair: Array in [[0.125, "1/8"], [0.25, "1/4"], [0.5, "1/2"]]:
+		if is_equal_approx(cr, float(pair[0])):
+			return str(pair[1])
+	return str(int(cr)) if is_equal_approx(cr, roundf(cr)) else str(cr)
+
+
+## A creature's CR as a number ("1/4" -> 0.25).
+static func cr_of(creature: Dictionary) -> float:
+	var t := str(creature.get("cr", creature.get("challenge", "0"))).strip_edges()
+	if "/" in t:
+		return float(t.get_slice("/", 0)) / maxf(float(t.get_slice("/", 1)), 1.0)
+	return float(t)
+
+
+## A sheet in a beast's shape (TASK-74). Wild Shape: the beast's STR, DEX, CON, AC, speed,
+## senses, size, defences and actions; the character keeps INT, WIS, CHA, its proficiencies
+## and features. Polymorph: all of the beast's statistics, no features or spells of its own.
+static func form_sheet(own: Dictionary, beast: Dictionary, kind: String) -> Dictionary:
+	var out := own.duplicate(true)
+	var bs: Dictionary = beast.get("stats", {}) if beast.get("stats") is Dictionary else {}
+	var stats: Dictionary = (own.get("stats", {}) as Dictionary).duplicate() if own.get("stats") is Dictionary else {}
+	for ab: String in (ABILITIES if kind == "polymorph" else ["str", "dex", "con"]):
+		if bs.has(ab):
+			stats[ab] = bs[ab]
+	out["stats"] = stats
+	for k: String in ["ac", "speed", "size", "senses", "resistances", "immunities", "vulnerabilities", "condition_immunities"]:
+		if beast.has(k):
+			out[k] = beast[k]
+	for k: String in ["traits", "actions", "bonus_actions", "reactions"]:
+		out[k] = beast.get(k, []) if beast.get(k) is Array else []
+	if kind == "polymorph":
+		for k: String in ["features", "spells", "skills", "saves"]:
+			out[k] = beast.get(k, [] if k in ["features", "spells"] else {})
+		out["_no_class_features"] = true
+	return out
+
+
 ## "xp" or "milestone" (the world's house rule).
 static func levelling(settings: Dictionary) -> String:
 	return str((settings_of(settings).house_rules as Dictionary).get("levelling", "xp"))

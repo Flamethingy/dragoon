@@ -33,6 +33,22 @@ static func entity_state(base: Dictionary, events: Array) -> Dictionary:
 static func apply(s: Dictionary, e: Dictionary) -> void:
 	var d: Dictionary = e.get("data", {})
 	match str(e.type):
+		"hp.changed" when bool(d.get("form", false)) and s.get("form") is Dictionary:  # TASK-74: the beast's HP
+			(s.form as Dictionary)["hp"] = int(d.get("hp", 0))
+			if d.has("temp"):
+				s["temp_hp"] = int(d.temp)
+		"form.assumed":  # Wild Shape / Polymorph
+			var form := {"creature": str(d.get("creature", "")), "kind": str(d.get("kind", "wild_shape")), "name": str(d.get("name", ""))}
+			if d.has("hp"):
+				form["hp"] = int(d.hp)
+				form["hp_max"] = int(d.get("hp_max", d.hp))
+			if d.get("source") is Dictionary:
+				form["source"] = d.source
+			s["form"] = form
+			if int(d.get("temp", 0)) > int(s.get("temp_hp", 0)):
+				s["temp_hp"] = int(d.temp)
+		"form.ended":
+			s.erase("form")
 		"hp.changed":
 			if d.has("hp"):
 				s["hp"] = int(d.hp)
@@ -241,6 +257,19 @@ static func world_state(events: Array) -> Dictionary:
 						out.append(c)
 				combat["order"] = out
 				combat["manual"] = true
+				_fix_turn(combat)
+			"combat.left":  # TASK-74: a summon dismissed, out of the order
+				var cur := str(combat.get("current", ""))
+				combat.order = (combat.order as Array).filter(func(c: Dictionary) -> bool: return c.entity != e.entity)
+				for c: Dictionary in combat.order:
+					if c.has("members"):
+						(c.members as Array).erase(str(e.entity))
+				var at := -1
+				for i in (combat.order as Array).size():
+					if str(combat.order[i].entity) == cur:
+						at = i
+				if at >= 0:
+					combat["turn"] = at
 				_fix_turn(combat)
 			"combat.grouped":  # creatures share one roll and one turn
 				var members: Array = (clean(d.get("members", [])) as Array) if d.get("members") is Array else []

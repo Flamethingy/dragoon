@@ -222,7 +222,7 @@ func view_for(player: String) -> Dictionary:
 			ids.append(id)
 	var start: Vector2i = map.party_start
 	var newcomers := 0
-	var members: Array = owners.keys()  # the party: every PC someone plays
+	var members: Array = owners.keys().filter(func(r: String) -> bool: return r.begins_with("characters/"))  # the party: every PC someone plays (not their summons, TASK-74)
 	members.sort()
 	var world: bool = map.kind == "world" and not members.is_empty()
 	for pc: String in members:
@@ -1481,7 +1481,7 @@ func _send_pc_lists() -> void:
 
 func _pc_of(player: String) -> String:
 	for pc: String in owners:
-		if player in owners[pc]:
+		if player in owners[pc] and pc.begins_with("characters/"):  # a summon isn't their PC
 			return pc
 	return ""
 
@@ -2155,9 +2155,22 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 	if full:
 		sheet = Replay.entity_state(view, events)
 		sheet["_hp_max"] = int(timeline.entry(ref).get("hp", 0)) + int(sheet.get("hp_max_gain", 0))  # TASK-71: levels add to it
+		var beast := {}
+		if sheet.get("form") is Dictionary:  # TASK-74: Wild Shape / Polymorph
+			var form: Dictionary = sheet.form
+			beast = catalog_entry(str(form.creature))
+			if not beast.is_empty():
+				var own_hp := {"hp": int(sheet.get("hp", 0)), "max": int(sheet._hp_max)}
+				sheet = Rules.form_sheet(sheet, beast, str(form.kind))
+				sheet["_form"] = {"creature": str(form.creature), "kind": str(form.kind), "name": str(form.get("name", beast.get("name", ""))), "own": own_hp}
+				if form.has("hp"):
+					sheet["hp"] = int(form.hp)
+					sheet["_hp_max"] = int(form.get("hp_max", form.hp))
+					sheet._form["hp"] = int(form.hp)
+					sheet._form["hp_max"] = int(form.get("hp_max", form.hp))
 		if sheet.has("classes"):
 			sheet["_class"] = timeline.class_text(sheet)
-		var auto := class_features_of(sheet) if sheet.get("classes") is Array else []  # TASK-69
+		var auto := class_features_of(sheet) if sheet.get("classes") is Array and not bool(sheet.get("_no_class_features", false)) else []  # TASK-69
 		if not auto.is_empty():
 			var own: Array = (sheet.get("features", []) as Array).duplicate() if sheet.get("features") is Array else []
 			var mine := own.map(func(v: Variant) -> String: return str(v).trim_prefix("features/"))
@@ -2179,7 +2192,7 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 					profs.append(m.get_string(1) + m.get_string(2))
 		if not profs.is_empty():
 			sheet["_weapon_profs"] = profs
-		sheet["_weapon_attacks"] = Rules.weapon_attacks(sheet)
+		sheet["_weapon_attacks"] = Rules.weapon_attacks(sheet) if beast.is_empty() else _form_attacks(beast)  # a beast has no weapons
 		sheet["_attunement"] = Rules.attunement(sheet)
 		if str(sheet.get("_kind", ref.get_slice("/", 0))) == "characters" and sheet.get("classes") is Array:  # TASK-71
 			sheet["_level"] = {"level": Rules.level(sheet), "xp": int(sheet.get("xp", 0)), "next": Rules.xp_for_level(Rules.level(sheet) + 1),
@@ -2571,6 +2584,8 @@ func _handle_hp(sender: int, ref: String, delta: int, reason: String, crit := fa
 	var sheet := sheet_for(Reveal.DM, ref)
 	if sheet.is_empty() or delta == 0:
 		return {}
+	if sheet.get("_form") is Dictionary and (sheet._form as Dictionary).has("hp"):  # TASK-74
+		return _handle_form_hp(player, ref, sheet, delta, reason, crit)
 	var hp := int(sheet.get("hp", 0))
 	var temp := int(sheet.get("temp_hp", 0))
 	var hp_max: int = sheet._hp_max if int(sheet._hp_max) > 0 else 1 << 30
@@ -2587,6 +2602,233 @@ func _handle_hp(sender: int, ref: String, delta: int, reason: String, crit := fa
 	_after_hp(ref, sheet, hp, after, delta, crit)
 	_after_change(ref, e)
 	return e
+
+
+# --- Summons and forms (TASK-74) ---------------------------------------------------------------
+
+## The beast's attacks (its actions with an attack), for the attack bar.
+func _form_attacks(beast: Dictionary) -> Array:
+	var out := []
+	var all := _features()
+	for key: String in ["actions", "bonus_actions"]:
+		for fid: Variant in beast.get(key, []):
+			var f: Dictionary = all.get(str(fid), catalog_entry("features/" + str(fid)))
+			if f.get("attack") is Dictionary:
+				out.append(f)
+	return out
+
+
+## Damage and healing in a form with its own HP (2014, Polymorph): the beast's HP; at 0 the
+## character is back, and what is left of the damage carries over to its own HP.
+func _handle_form_hp(player: String, ref: String, sheet: Dictionary, delta: int, reason: String, crit: bool) -> Dictionary:
+	var form: Dictionary = sheet._form
+	var hp := int(form.hp)
+	var temp := int(sheet.get("temp_hp", 0))
+	var data := {"reason": reason, "form": true}
+	if delta < 0 and temp > 0:
+		var absorbed := mini(temp, -delta)
+		temp -= absorbed
+		data["temp"] = temp
+		delta += absorbed
+	var after := clampi(hp + delta, 0, int(form.hp_max))
+	data["delta"] = after - hp
+	data["hp"] = after
+	var e := event_log.append("hp.changed", ref, data, player)
+	_after_change(ref, e)
+	if delta < 0 and after > 0 and sheet.get("concentration") is Dictionary and automation("concentration") != "off":
+		_concentration_check(ref, -delta)
+	if delta < 0 and after == 0:
+		var left := -delta - hp
+		_end_form(ref, "0 HP")
+		if left > 0 and Rules.edition_of(sheet, rules_settings()) == "2014" or left > 0 and str(form.kind) == "polymorph":
+			_handle_hp(1, ref, -left, "%s (carried over)" % reason, crit)
+	return e
+
+
+## Takes a beast's shape (TASK-74): kind "wild_shape" or "polymorph" (`source`: {caster, spell}
+## for a spell on someone else). 2014 (and Polymorph): the beast's own HP. 2024: Wild Shape
+## gives temporary HP (the druid level), Polymorph the beast's HP as temporary HP. A beast
+## beyond the Wild Shape CR, or no use left, is warned about (warn, never block).
+func assume_form(ref: String, creature: String, kind := "wild_shape", source := {}) -> void:
+	if is_dm():
+		_handle_form(1, ref, creature, kind, source)
+	elif is_online():
+		request_form.rpc_id(1, ref, creature, kind, source)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_form(ref: String, creature: String, kind: String, source: Dictionary) -> void:
+	if is_dm():
+		_handle_form(multiplayer.get_remote_sender_id(), ref.left(200), creature.left(200), kind.left(20), source)
+
+
+func _handle_form(sender: int, ref: String, creature: String, kind: String, source: Dictionary) -> Dictionary:
+	var sheet := _editable_sheet(sender, ref)
+	var beast := catalog_entry(creature)
+	if sheet.is_empty() or beast.is_empty() or kind not in ["wild_shape", "polymorph"]:
+		_deny_sheet(sender, "no such creature")
+		return {}
+	var player := _sender_player(sender)
+	if sheet.get("_form") is Dictionary:
+		_end_form(ref, "a new shape")
+		sheet = sheet_for(Reveal.DM, ref)
+	var edition := Rules.edition_of(sheet, rules_settings())
+	var data := {"creature": creature, "kind": kind, "name": str(beast.get("name", creature.get_file()))}
+	if kind == "wild_shape" and edition == "2024":
+		data["temp"] = Rules.class_level(sheet, "druid")
+	elif kind == "polymorph" and edition == "2024":
+		data["temp"] = int(beast.get("hp", 0))
+	else:
+		data["hp"] = int(beast.get("hp", 1))
+		data["hp_max"] = int(beast.get("hp", 1))
+	if not source.is_empty():
+		data["source"] = source
+	if kind == "wild_shape":
+		var limit := Rules.wild_shape_cr(sheet)
+		if Rules.cr_of(beast) > limit + 0.001:
+			_dm_line(ref, "Wild Shape into CR %s (the limit is %s)" % [Rules.cr_text(Rules.cr_of(beast)), Rules.cr_text(limit)])
+		if not "beast" in str(beast.get("type", "")).to_lower():
+			_dm_line(ref, "Wild Shape into a %s, not a beast" % str(beast.get("type", "?")))
+		if automation("resources") == "auto":
+			for r: Dictionary in resources_of(sheet):
+				if r.id == "wild_shape":
+					if int(r.used) >= int(r.max):
+						_dm_line(ref, "no Wild Shape use left (changed anyway)")
+					_after_change(ref, event_log.append("resource.used", ref, {"resource": "wild_shape", "amount": 1}, player))
+	var e := event_log.append("form.assumed", ref, data, player)
+	_after_change(ref, e)
+	_post_roll({"id": int(e.id), "by": player, "who": timeline.name_of(ref), "ref": ref, "results": [], "hidden": false, "action": "log",
+		"text": "becomes %s (%s)" % [str(data.name), "Wild Shape" if kind == "wild_shape" else "Polymorph"]})
+	return e
+
+
+## Back to its own shape (the owner or the DM).
+func end_form(ref: String) -> void:
+	if is_dm():
+		if not _editable_sheet(1, ref).is_empty():
+			_end_form(ref, "")
+	elif is_online():
+		request_end_form.rpc_id(1, ref)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_end_form(ref: String) -> void:
+	if is_dm() and not _editable_sheet(multiplayer.get_remote_sender_id(), ref.left(200)).is_empty():
+		_end_form(ref.left(200), "")
+
+
+func _end_form(ref: String, reason: String) -> void:
+	var s := sheet_for(Reveal.DM, ref)
+	if not s.get("_form") is Dictionary:
+		return
+	var e := event_log.append("form.ended", ref, {"reason": reason} if reason != "" else {})
+	_after_change(ref, e)
+	_post_roll({"id": int(e.id), "by": Reveal.DM, "who": timeline.name_of(ref), "ref": ref, "results": [], "hidden": false, "action": "log",
+		"text": "is back in their own shape%s" % (" (%s)" % reason if reason != "" else "")})
+
+
+## Summons a creature from the compendium next to its caster (TASK-74): a copy in this
+## timeline, owned by the caster's players, on the caster's side, sorted into a running
+## combat. Its caster's concentration on `spell` ending, or 0 HP, dismisses it.
+func summon(caster: String, creature: String, spell := "", cell := Vector2i(-1, -1)) -> void:
+	if is_dm():
+		_handle_summon(1, caster, creature, spell, cell)
+	elif is_online():
+		request_summon.rpc_id(1, caster, creature, spell, cell)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_summon(caster: String, creature: String, spell: String, cell: Vector2i) -> void:
+	if is_dm():
+		_handle_summon(multiplayer.get_remote_sender_id(), caster.left(200), creature.left(200), spell.left(200), cell)
+
+
+func _handle_summon(sender: int, caster: String, creature: String, spell: String, cell: Vector2i) -> String:
+	var sheet := _editable_sheet(sender, caster)
+	var e := catalog_entry(creature)
+	if sheet.is_empty() or e.is_empty() or creature.get_slice("/", 0) != "creatures":
+		_deny_sheet(sender, "no such creature")
+		return ""
+	if map_id == "" or not grid.tokens.has(caster):
+		_deny_sheet(sender, "the caster isn't on this map")
+		return ""
+	var by := _sender_player(sender)
+	var copy := e.duplicate(true)
+	copy.erase("id")
+	copy["copy_of"] = creature
+	copy["summoned_by"] = caster
+	copy["summon_spell"] = spell
+	copy["owners"] = (owners.get(caster, []) as Array).duplicate()
+	copy["attitude"] = "friendly" if _side(caster) == "party" else "hostile"
+	copy["name"] = "%s (%s)" % [str(e.get("name", creature.get_file())), timeline.name_of(caster)]
+	copy.erase("draft")
+	var made := timeline.add_entry("creatures", copy, "", by)
+	var ref := "creatures/" + str(made.id)
+	var at := cell if cell.x >= 0 and cell.y >= 0 else _free_cell_near(grid.token_cell(caster))
+	event_log.place_token(ref, map_id, at, by)
+	_update_owners()
+	join_combat(ref)
+	_apply_state(view_for(""))
+	_send_tables()
+	_send_pc_lists()
+	_post_roll({"id": 0, "by": by, "who": timeline.name_of(caster), "ref": caster, "results": [], "hidden": false, "action": "log",
+		"text": "summons %s%s" % [str(e.get("name", "")), " (%s)" % HudWidgets._name_of(spell) if spell != "" else ""]})
+	return ref
+
+
+## The nearest square around `c` with no token on it.
+func _free_cell_near(c: Vector2i) -> Vector2i:
+	var taken := {}
+	for id: String in grid.tokens:
+		var r := _footprint(id)
+		for y in range(r.position.y, r.end.y):
+			for x in range(r.position.x, r.end.x):
+				taken[Vector2i(x, y)] = true
+	for ring in range(1, 8):
+		for dy in range(-ring, ring + 1):
+			for dx in range(-ring, ring + 1):
+				var p := c + Vector2i(dx, dy)
+				if maxi(absi(dx), absi(dy)) == ring and p.x >= 0 and p.y >= 0 and not taken.has(p):
+					return p
+	return c + Vector2i(1, 0)
+
+
+## A summon goes (its owner, the DM, its caster's concentration ending, 0 HP): its token
+## leaves the map and the combat.
+func dismiss(ref: String) -> void:
+	if is_dm():
+		_dismiss(ref, "")
+	elif is_online():
+		request_dismiss.rpc_id(1, ref)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_dismiss(ref: String) -> void:
+	if is_dm() and not _editable_sheet(multiplayer.get_remote_sender_id(), ref.left(200)).is_empty():
+		_dismiss(ref.left(200), "")
+
+
+func _dismiss(ref: String, reason: String) -> void:
+	if str(timeline.entry(ref).get("summoned_by", "")) == "" or not grid.tokens.has(ref):
+		return
+	if in_combat():
+		event_log.append("combat.left", ref, {})
+	event_log.append("token.removed", ref, {"map": map_id})
+	_apply_state(view_for(""))
+	_send_tables()
+	table_changed.emit()
+	_post_roll({"id": 0, "by": Reveal.DM, "who": timeline.name_of(ref), "ref": ref, "results": [], "hidden": false, "action": "log",
+		"text": "vanishes%s" % (" (%s)" % reason if reason != "" else "")})
+
+
+## The summons of `caster` (by `spell`; "" = any) still on the map.
+func summons_of(caster: String, spell := "") -> Array:
+	var out := []
+	for id: String in grid.tokens:
+		var e := timeline.entry(id) if "/" in id else {}
+		if str(e.get("summoned_by", "")) == caster and (spell == "" or str(e.get("summon_spell", "")) == spell):
+			out.append(id)
+	return out
 
 
 # --- 0 HP, death saves, defeated creatures (TASK-57) ---------------------------------------------
@@ -2609,6 +2851,11 @@ func _after_hp(ref: String, sheet: Dictionary, before: int, after: int, delta: i
 		var left := -delta - before  # what is left after reaching 0
 		if pc and hp_max > 0 and left >= hp_max and "dead" not in conds:
 			_dm_line(ref, "massive damage: %d left after 0 HP is at least the HP maximum (%d), instant death by the rules · your call" % [left, hp_max])
+		if sheet.get("_form") is Dictionary:  # 2024 Wild Shape (no HP of its own): 0 HP ends it
+			_end_form(ref, "0 HP")
+		if before > 0 and str(timeline.entry(ref).get("summoned_by", "")) != "":  # TASK-74
+			_dismiss(ref, "0 HP")
+			return
 		if before > 0:
 			if pc:
 				_handle_condition(1, ref, "unconscious", true, 0, {})
@@ -3019,6 +3266,13 @@ func end_concentration(ref: String, reason := "") -> void:
 		if cond in (sheet_for(Reveal.DM, target).get("conditions", []) as Array):
 			_handle_condition(1, target, cond, false, 0, {})
 			ended.append("%s no longer %s" % [timeline.name_of(target), cond])
+	for s: Variant in summons_of(ref, str(c.spell)):  # TASK-74
+		_dismiss(str(s), "concentration ended")
+	for id: String in grid.tokens:
+		var fs := sheet_for(Reveal.DM, id) if "/" in id else {}
+		var src: Variant = (fs.get("form", {}) as Dictionary).get("source") if fs.get("form") is Dictionary else null
+		if src is Dictionary and str(src.get("caster", "")) == ref and str(src.get("spell", "")) == str(c.spell):
+			_end_form(id, "concentration ended")
 	_dm_line(ref, "concentration on %s ends%s%s" % [c.get("name", c.spell), " (%s)" % reason if reason != "" else "",
 		" · " + ", ".join(ended) if not ended.is_empty() else ""])
 

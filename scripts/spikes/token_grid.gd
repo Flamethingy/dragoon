@@ -360,6 +360,9 @@ func set_token_cell(id: String, at: Vector2i, animate := true) -> void:
 		var cells: float = token.get_meta("cells")
 		tween.set_trans(Tween.TRANS_LINEAR)
 		for i in range(1, trail.size()):
+			var face := facing_of(Vector2i(trail[i]) - Vector2i(trail[i - 1]))  # TASK-76: it turns along each step
+			if face != "":
+				tween.tween_callback(set_token_facing.bind(id, face))
 			tween.tween_property(token, "position", cell_center(trail[i], cells), MOVE_SECONDS_PER_CELL)
 			tween.tween_callback(plans.advance.bind(id, i))
 		return
@@ -379,6 +382,12 @@ func go_planned() -> bool:
 ## The trail the next confirmed move of `id` glides along ([] if none): sent with the move.
 func trail_of(id: String) -> Array:
 	return _glide.get(id, [])
+
+
+## The next move of `id` glides along `trail` (from the host: everyone sees the same way).
+func glide_along(id: String, trail: Array) -> void:
+	if trail.size() >= 2:
+		_glide[id] = trail
 
 
 ## Difficult squares for a move of `id`: the map's terrain and other creatures' squares.

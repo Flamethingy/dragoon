@@ -1993,16 +1993,20 @@ func _crowd_side(ref: String) -> String:
 	return "party" if ref.begins_with("characters/") else "foes"
 
 
-## The squares a move costs (TASK-73, TASK-79): along `path` if it is a real trail from `from`
-## to `to` (one square per step), else the straight line; difficult squares count twice.
-func _move_cost(entity: String, from: Vector2i, to: Vector2i, path: Array) -> int:
-	var cells: Array = []
+## True if `path` is a trail from `from` to `to`, one square per step.
+static func _valid_trail(from: Vector2i, to: Vector2i, path: Array) -> bool:
 	var ok: bool = path.size() >= 2 and path[0] is Vector2i and path[0] == from and path[path.size() - 1] == to
 	for i in range(1, path.size()):
 		if not ok:
 			break
 		ok = path[i] is Vector2i and maxi(absi((path[i] as Vector2i).x - (path[i - 1] as Vector2i).x), absi((path[i] as Vector2i).y - (path[i - 1] as Vector2i).y)) == 1
-	cells = path.slice(1) if ok else Vision.path_cells(from, to)
+	return ok
+
+
+## The squares a move costs (TASK-73, TASK-79): along `path` if it is a real trail from `from`
+## to `to` (one square per step), else the straight line; difficult squares count twice.
+func _move_cost(entity: String, from: Vector2i, to: Vector2i, path: Array) -> int:
+	var cells: Array = path.slice(1) if _valid_trail(from, to, path) else Vision.path_cells(from, to)
 	var hard := grid.difficult_for(entity)
 	var cost := 0
 	for i in cells.size():
@@ -2033,8 +2037,11 @@ func _handle_move(sender: int, entity: String, cell: Vector2i, path: Array = [])
 	var from := grid.token_cell(entity)
 	var by := "dm" if sender == 1 else str(peers[sender])
 	_opportunity_hints(entity, from, cell)  # TASK-72
-	var facing := TokenGrid.facing_of(cell - from)  # moving turns the token that way (TASK-42)
+	var trail := path if _valid_trail(from, cell, path) else []
+	# moving turns the token that way (TASK-42); along a trail: its last step (TASK-76)
+	var facing := TokenGrid.facing_of(cell - from if trail.is_empty() else Vector2i(trail[trail.size() - 1]) - Vector2i(trail[trail.size() - 2]))
 	var e := event_log.move_token(entity, grid.map_id, from, cell, by, "", facing, _move_cost(entity, from, cell, path))
+	grid.glide_along(entity, trail)
 	grid.set_token_cell(entity, cell)
 	if facing != "":
 		grid.set_token_facing(entity, facing)
@@ -2042,7 +2049,7 @@ func _handle_move(sender: int, entity: String, cell: Vector2i, path: Array = [])
 	for peer_id: int in peers:
 		if fogged:
 			break
-		token_moved.rpc_id(peer_id, entity, cell, int(e.get("id", 0)))
+		token_moved.rpc_id(peer_id, entity, cell, int(e.get("id", 0)), trail)
 		if facing != "":
 			token_turned.rpc_id(peer_id, entity, facing)
 	if fogged:
@@ -2069,7 +2076,7 @@ func _handle_party_move(sender: int, cell: Vector2i) -> void:
 		last = event_log.move_token(pc, grid.map_id, from, cell, by, PARTY)
 	grid.set_token_cell(PARTY, cell)
 	for peer_id: int in peers:
-		token_moved.rpc_id(peer_id, PARTY, cell, int(last.get("id", 0)))
+		token_moved.rpc_id(peer_id, PARTY, cell, int(last.get("id", 0)), [])
 	_set_status("The party travels to %s (%d events)" % [cell, info.members.size()])
 
 
@@ -2117,7 +2124,8 @@ func token_turned(entity: String, facing: String) -> void:
 
 ## DM -> players: a move happened.
 @rpc("authority", "call_remote", "reliable")
-func token_moved(entity: String, cell: Vector2i, event_id: int) -> void:
+func token_moved(entity: String, cell: Vector2i, event_id: int, trail: Array = []) -> void:
+	grid.glide_along(entity, trail)  # TASK-76: everyone sees it go (and turn) along the trail
 	grid.set_token_cell(entity, cell)
 	_set_status("%s moved to %s (event %d)" % [_name_of(entity), cell, event_id])
 

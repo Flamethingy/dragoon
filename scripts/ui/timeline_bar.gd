@@ -7,8 +7,10 @@ extends DockPanel
 ## The head shows the cursor's moment and "Now" to go back to the present; "Fit" shows it all.
 
 signal cursor_changed(at: int)  ## the moment looked at, in seconds; -1 = now (live)
-signal list_requested(first_id: int, last_id: int)
-signal show_toggled(on: bool)  ## DM: Show everyone (TASK-84)  ## DM: that moment's events in the Timeline list
+signal list_requested(ids: Array)  ## DM: that moment's events in the Timeline list
+signal show_toggled(on: bool)  ## DM: Show everyone (TASK-84)
+signal rewind_requested(upto: int)  ## DM: set the timeline back to this moment (TASK-86), confirmed
+signal restore_requested(rewind_id: int)  ## DM: bring a cut-off branch back, confirmed  ## DM: that moment's events in the Timeline list
 
 var sync: TimelineSync
 var line: TimelineLine
@@ -16,6 +18,10 @@ var when_label: Label
 var now_button: Button
 var show_button: Button  ## DM: everyone's timeline follows mine (TASK-84)
 var shown := false  ## a player: the DM is showing me a moment (no cursor of my own)
+var dm := false  ## the DM's bar: set back, restore, change the past
+var back_button: Button  ## DM looking back: set the timeline back to here (TASK-86)
+var confirm: ConfirmationDialog
+var _confirmed := Callable()
 
 
 func _init() -> void:
@@ -45,6 +51,16 @@ func _init() -> void:
 	show_button.visible = false
 	_head.add_child(show_button)
 	_head.move_child(show_button, 3)
+	back_button = _small_button("Set back to here", "Cut off everything after this moment (it can be restored from the faded branch)", _ask_rewind)
+	back_button.visible = false
+	_head.add_child(back_button)
+	_head.move_child(back_button, 2)
+	confirm = ConfirmationDialog.new()
+	confirm.name = "Confirm"
+	confirm.confirmed.connect(func() -> void:
+		if _confirmed.is_valid():
+			_confirmed.call())
+	add_child(confirm)
 	var fit := _small_button("Fit", "Show the whole timeline", func() -> void: line.fit())
 	_head.add_child(fit)
 	_head.move_child(fit, 4)
@@ -53,8 +69,12 @@ func _init() -> void:
 	line.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	line.cursor_moved.connect(_on_cursor)
-	line.list_requested.connect(func(m: Dictionary) -> void: list_requested.emit(int(m.first_id), int(m.last_id)))
+	line.list_requested.connect(func(m: Dictionary) -> void: list_requested.emit(m.get("events", [])))
 	body.add_child(line)
+	line.restore_requested.connect(func(id: int, cut: int) -> void:
+		if dm:
+			_ask("Bring back the %d cut-off moment%s? They count again, after what happened since." % [cut, "" if cut == 1 else "s"],
+				func() -> void: restore_requested.emit(id)))
 
 
 func _small_button(text: String, tip: String, pressed: Callable) -> Button:
@@ -94,8 +114,23 @@ func set_showing(on: bool, dm: bool) -> void:
 	_show_when()
 
 
+func _ask(text: String, then: Callable) -> void:
+	confirm.dialog_text = text
+	_confirmed = then
+	confirm.popup_centered(Vector2i(420, 120))
+
+
+func _ask_rewind() -> void:
+	var upto := cursor_event()
+	if upto < 0:
+		return
+	_ask("Set the timeline back to %s?\nEverything after it is cut off for everyone (the clock goes back too). It stays as a faded branch you can bring back." % when_label.text.trim_prefix("looking back: ").trim_suffix(" · act at Now"),
+		func() -> void: rewind_requested.emit(upto))
+
+
 func _on_cursor(at: int) -> void:
 	now_button.visible = at >= 0 and not shown
+	back_button.visible = at >= 0 and dm
 	_show_when()
 	cursor_changed.emit(at)
 
@@ -122,7 +157,7 @@ func _show_when() -> void:
 		if int(m.at) > line.cursor_at:
 			break
 		i = int(m.index)
-	when_label.text = ("The DM is showing: %s" if shown else "looking back: %s · act at Now") % (line.moment_text(ms[i]).get_slice("\n", 0) if i >= 0 else "before the beginning")
+	when_label.text = ("The DM is showing: %s" if shown else ("looking back: %s · changes go here" if dm else "looking back: %s · act at Now")) % (line.moment_text(ms[i]).get_slice("\n", 0) if i >= 0 else "before the beginning")
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

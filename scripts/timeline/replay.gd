@@ -10,7 +10,15 @@ static func before(a: Dictionary, b: Dictionary) -> bool:
 		return a.day < b.day
 	if a.time != b.time:
 		return a.time < b.time
-	return a.id < b.id
+	if not a.has("after") and not b.has("after"):
+		return a.id < b.id
+	# TASK-85: an event put into the past comes right after its `after` chain
+	var ka: Array = (a.get("after", []) as Array) + [int(a.id)]
+	var kb: Array = (b.get("after", []) as Array) + [int(b.id)]
+	for i in mini(ka.size(), kb.size()):
+		if int(ka[i]) != int(kb[i]):
+			return int(ka[i]) < int(kb[i])
+	return ka.size() < kb.size()
 
 
 ## True if (day_a, time_a) is after (day_b, time_b).

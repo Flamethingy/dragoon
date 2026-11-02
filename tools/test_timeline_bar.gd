@@ -103,9 +103,9 @@ func _init() -> void:
 	bar.now_button.pressed.emit()
 	_check(int(seen.back()) == -1 and not bar.now_button.visible, "Now goes back to the present")
 	var asked := []
-	bar.list_requested.connect(func(f: int, l: int) -> void: asked.append([f, l]))
+	bar.list_requested.connect(func(ids: Array) -> void: asked.append(ids))
 	line.list_requested.emit(b)
-	_check(asked.size() == 1 and asked[0][0] == int(b.first_id), "a box asks for its events in the list")
+	_check(asked.size() == 1 and asked[0] == b.events, "a box asks for its events in the list")
 
 	dm.multiplayer.multiplayer_peer.close()
 	await process_frame

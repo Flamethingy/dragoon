@@ -10,9 +10,11 @@ extends Control
 
 signal cursor_moved(at: int)  ## -1 = now (live)
 signal list_requested(moment: Dictionary)
+signal restore_requested(rewind_id: int, moments: int)  ## right click on a cut-off branch (DM, TASK-86)
 
 const MARGIN := 18.0
 const BOX := Vector2(12, 18)
+const BRANCH_UP := 17.0  ## cut-off branches float this far above the line
 const SNAP := 8.0  ## pixels: a click this close to a box picks it
 const MIN_SPAN := 30.0  ## seconds across the line, at most zoomed in
 const SHADOW := Color(0, 0, 0, 0.18)
@@ -151,16 +153,50 @@ func _draw() -> void:
 		var r := Rect2(Vector2(x - BOX.x * 0.5, y - BOX.y * 0.5), BOX)
 		draw_rect(r.grow(1.5), ink)
 		draw_rect(r, Color.WHITE if not m.get("combat", false) else Color(1, 0.86, 0.8))
+		if m.get("edited", false):  # the DM changed it afterwards (TASK-85)
+			draw_circle(Vector2(x, r.position.y - 4), 2.5, Color(0.9, 0.5, 0.1))
 		var maps: Array = m.get("maps", [])
 		for i in maps.size():  # the map colour(s) as a strip at the bottom
 			var w := BOX.x / maps.size()
 			draw_rect(Rect2(r.position.x + w * i, r.end.y - 4, w, 4), map_color(str(maps[i])))
+	_draw_branches(y)
 	# now, and the cursor (triangle under the line)
 	var nx := _now_x()
 	draw_line(Vector2(nx, y - 13), Vector2(nx, y + 13), Color(0.9, 0.5, 0.1), 2.0)
 	var cx := x_of(float(cursor_at)) if cursor_at >= 0 else nx
 	var tri := PackedVector2Array([Vector2(cx, y + 11), Vector2(cx - 6, y + 20), Vector2(cx + 6, y + 20)])
 	draw_colored_polygon(tri, ink)
+
+
+## Cut-off branches (TASK-86): faded small boxes above the line, from where it was set back.
+func _draw_branches(y: float) -> void:
+	var by := y - BRANCH_UP
+	for b: Dictionary in data.get("branches", []):
+		var ms: Array = b.moments
+		if ms.is_empty():
+			continue
+		var x0 := x_of(float(b.at))
+		var x1 := x_of(float(ms.back().at))
+		draw_dashed_line(Vector2(x0, y - 2), Vector2(x0 + 6, by), Color(ink, 0.35), 1.0, 3.0)
+		draw_dashed_line(Vector2(x0 + 6, by), Vector2(maxf(x1, x0 + 6), by), Color(ink, 0.35), 1.0, 3.0)
+		for m: Dictionary in ms:
+			var x := x_of(float(m.at))
+			if x < -BOX.x or x > size.x + BOX.x:
+				continue
+			var r := Rect2(Vector2(x - 4, by - 5), Vector2(8, 10))
+			draw_rect(r, Color(1, 1, 1, 0.45))
+			draw_rect(r, Color(ink, 0.35), false, 1.0)
+
+
+## The cut-off box under `at`: {rewind, moment, count} or {}.
+func branch_box_at(at: Vector2) -> Dictionary:
+	if absf(at.y - (_line_y() - BRANCH_UP)) > 8:
+		return {}
+	for b: Dictionary in data.get("branches", []):
+		for m: Dictionary in b.moments:
+			if absf(x_of(float(m.at)) - at.x) <= 6:
+				return {"rewind": int(b.rewind), "moment": m, "count": (b.moments as Array).size()}
+	return {}
 
 
 ## Time labels under the line, as fine as the zoom allows (rounds, minutes, hours, days).
@@ -221,6 +257,9 @@ func moment_text(m: Dictionary) -> String:
 
 
 func _get_tooltip(at: Vector2) -> String:
+	var cut := branch_box_at(at)
+	if not cut.is_empty():
+		return "Cut off (the timeline was set back) · right click: bring it back\n" + moment_text(cut.moment)
 	var i := box_at(at.x)
 	if i < 0 or absf(at.y - _line_y()) > BOX.y:
 		return ""
@@ -244,7 +283,10 @@ func _gui_input(event: InputEvent) -> void:
 				_pan_from = b.position
 				_pan_view = view_from
 			else:
-				if _panning and b.button_index == MOUSE_BUTTON_RIGHT and b.position.distance_to(_pan_from) < 4:
+				var cut := branch_box_at(b.position)
+				if _panning and b.button_index == MOUSE_BUTTON_RIGHT and b.position.distance_to(_pan_from) < 4 and not cut.is_empty():
+					restore_requested.emit(int(cut.rewind), int(cut.count))
+				elif _panning and b.button_index == MOUSE_BUTTON_RIGHT and b.position.distance_to(_pan_from) < 4:
 					var i := box_at(b.position.x)
 					if i >= 0:
 						list_requested.emit(moments()[i])

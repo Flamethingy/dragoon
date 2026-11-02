@@ -60,10 +60,10 @@ func _ready() -> void:
 	table_ui.lobby = false
 	table_ui.packages_root = packages_root
 	table_ui.compendium_opener = func() -> void: show_view("compendium")
-	table_ui.timeline_list_opener = func(first: int, last: int) -> void:  # a box of the timeline bar (TASK-82)
+	table_ui.timeline_list_opener = func(ids: Array) -> void:  # a box of the timeline bar (TASK-82)
 		show_view("timeline")
 		if timeline_view != null:
-			timeline_view.show_range(first, last)
+			timeline_view.show_moment(ids)
 	table.add_child(table_ui)
 	_layer = CanvasLayer.new()
 	_layer.layer = 8
@@ -263,6 +263,7 @@ func _panel(which: String) -> Control:
 			timeline_view.event_log = table.event_log
 			timeline_view.timeline = table.timeline
 			timeline_view.calendar = table.notes.calendar
+			timeline_view.on_changed = table.refresh_tokens  # an undo or correction (TASK-85)
 			c = timeline_view
 		"encounters":
 			encounters_view = EncountersView.new()

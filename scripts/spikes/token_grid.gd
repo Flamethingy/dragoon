@@ -64,6 +64,7 @@ var crowd: Callable
 var past := {}  ## id -> Sprite2D of the moment looked back at (TASK-83); the live tokens are hidden then
 var locked := false  ## no moves, steps, selection or token menus (looking back, TASK-83)
 var _past_layer: Node2D
+var _past_drag: Sprite2D  ## a past token the DM drags (TASK-85)
 var _glide := {}  ## id -> trail (cells) the next confirmed move of it glides along
 var _right_at := Vector2.ZERO  ## where the right button went down (a click opens the token's menu)
 var _box_from := Vector2.ZERO  ## map position where a selection box started
@@ -239,6 +240,27 @@ func end_past() -> void:
 
 func is_past() -> bool:
 	return _past_layer != null
+
+
+## Looking back, not locked (the DM): a past token is dragged straight to a square; the move is
+## asked for (move_requested) and the table puts it into the past.
+func _past_press(event: InputEventMouseButton) -> void:
+	if locked:
+		return
+	var at := get_canvas_transform().affine_inverse() * event.position
+	if event.pressed:
+		_past_drag = _token_under(at)
+		return
+	if _past_drag == null:
+		return
+	var s := _past_drag
+	_past_drag = null
+	var cells: float = s.get_meta("cells")
+	var target := cell_at(s.position - Vector2.ONE * cell * (maxf(cells, 1.0) - 1.0) * 0.5)
+	var was: Vector2i = s.get_meta("cell")
+	s.position = cell_center(was, cells)
+	if target != was:
+		move_requested.emit(str(s.get_meta("entity")), target)
 
 
 ## A past token walks `path` (cells, square by square) to `at`; at most ~1.5 s however far.
@@ -698,6 +720,8 @@ func _unhandled_input(event: InputEvent) -> void:
 					var t := _token_under(get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position)
 					if t != null and not locked:
 						token_menu.emit(str(t.get_meta("entity")))
+		elif event.button_index == MOUSE_BUTTON_LEFT and is_past():
+			_past_press(event as InputEventMouseButton)
 		elif event.button_index == MOUSE_BUTTON_LEFT and not locked:
 			var at := get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position
 			if event.pressed:
@@ -756,7 +780,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion:
 		if _panning:
 			_camera.position -= event.relative / _camera.zoom
-		if _dragging:
+		if _past_drag != null:
+			_past_drag.position += event.relative / _camera.zoom
+		elif _dragging:
 			var lead := str(_dragging.get_meta("entity"))
 			if not _drag_started:
 				_drag_started = true

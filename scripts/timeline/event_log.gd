@@ -23,6 +23,15 @@ var inherited: Array[Dictionary] = []  ## the parent timeline's events up to the
 var _next_id := 1
 var _undone := {}  ## id -> id of the event that undid it
 var _file_len := 0
+## TASK-85, the DM acts in the past: while set, new events go right after this chain's last
+## event (`after`: the chain, the event's day and time) instead of at the clock.
+var insert_after: Array = []
+## Which appends may go into the past while inserting (the host: only the DM's own actions,
+## not the players' at now). Not set: all.
+var insert_filter := Callable()
+var _insert_day := 0
+var _insert_time := -1
+var _rewound := {}  ## TASK-86: id -> the timeline.rewound event that cut it off
 
 
 ## Opens (or creates) the log at `file` and loads it. Bad lines are skipped with a
@@ -64,7 +73,8 @@ func _load() -> void:
 		_add(_normalize(e))
 	# The clock continues where the log stopped.
 	for e in events:
-		_advance_clock(e)
+		if _counts_for_clock(e):
+			_advance_clock(e)
 
 
 ## JSON numbers come back as floats: make the integer fields ints again.
@@ -72,6 +82,8 @@ static func _normalize(e: Dictionary) -> Dictionary:
 	for k in ["id", "day", "time", "session", "undoes"]:
 		if e.has(k) and e[k] != null:
 			e[k] = int(e[k])
+	if e.get("after") is Array:
+		e["after"] = (e.after as Array).map(func(x: Variant) -> int: return int(x))
 	if not e.get("data") is Dictionary:
 		e["data"] = {}
 	return e
@@ -82,10 +94,16 @@ func _add(e: Dictionary) -> void:
 	_next_id = maxi(_next_id, int(e.id) + 1)
 	if e.has("undoes"):
 		_undone[int(e.undoes)] = int(e.id)
+	elif e.type == "timeline.rewound":
+		for x: Variant in e.data.get("ids", []):
+			_rewound[int(x)] = int(e.id)
 
 
 func _advance_clock(e: Dictionary) -> void:
-	if e.type == "time.advanced" or Replay.later(e.day, e.time, day, time):
+	if e.type == "timeline.rewound" and not e.has("undoes"):  # set back: the clock too (TASK-86)
+		day = e.day
+		time = e.time
+	elif e.type == "time.advanced" or Replay.later(e.day, e.time, day, time):
 		day = e.day
 		time = e.time
 	if e.type == "session.started":
@@ -96,12 +114,14 @@ func _advance_clock(e: Dictionary) -> void:
 ## real time, writes it to disk at once, and returns it.
 func append(type: String, entity: String, data := {}, by := "dm", undoes := -1,
 		at_day := CLOCK, at_time := CLOCK) -> Dictionary:
+	var into := not insert_after.is_empty() and undoes < 0 and type != "timeline.rewound" \
+		and (not insert_filter.is_valid() or bool(insert_filter.call()))
 	var e := {
 		"id": _next_id,
 		"type": type,
 		"entity": entity,
-		"day": day if at_day == CLOCK else at_day,
-		"time": time if at_time == CLOCK else at_time,
+		"day": _insert_day if into else (day if at_day == CLOCK else at_day),
+		"time": _insert_time if into else (time if at_time == CLOCK else at_time),
 		"real": Time.get_datetime_string_from_system(true) + "Z",
 		"session": session,
 		"by": by,
@@ -109,6 +129,8 @@ func append(type: String, entity: String, data := {}, by := "dm", undoes := -1,
 	}
 	if undoes >= 0:
 		e["undoes"] = undoes
+	if into:
+		e["after"] = insert_after.duplicate()
 	if _file_size() != _file_len:  # another EventLog on this file wrote meanwhile
 		_load()
 		e.id = _next_id
@@ -121,9 +143,50 @@ func append(type: String, entity: String, data := {}, by := "dm", undoes := -1,
 	_file_len = f.get_position()
 	f.close()
 	_add(e)
-	_advance_clock(e)
+	if into:
+		insert_after = (e.after as Array) + [int(e.id)]  # the next one follows this one
+	elif type == "timeline.rewound":
+		_recompute_clock()
+	else:
+		_advance_clock(e)
 	appended.emit(e)
 	return e
+
+
+## TASK-85: new events go into the past right after event `anchor_id` (its day and time).
+func insert_at(anchor_id: int) -> void:
+	var a := get_event(anchor_id)
+	if a.is_empty():
+		stop_inserting()
+		return
+	insert_after = (a.get("after", []) as Array) + [int(a.id)]
+	_insert_day = int(a.day)
+	_insert_time = int(a.time)
+
+
+func stop_inserting() -> void:
+	insert_after = []
+
+
+## The clock from the events again (after setting the timeline back or restoring it).
+func _recompute_clock() -> void:
+	day = 0
+	time = -1
+	for e in events:
+		if _counts_for_clock(e):
+			_advance_clock(e)
+
+
+## Events put into the past, cut-off ones and a restored set-back don't move the clock.
+func _counts_for_clock(e: Dictionary) -> bool:
+	if e.has("after") or _rewound_now(int(e.id)):
+		return false
+	return not (e.type == "timeline.rewound" and not e.has("undoes") and _undone.has(int(e.id)))
+
+
+func _rewound_now(id: int) -> bool:
+	var r: int = _rewound.get(id, 0)
+	return r != 0 and not _undone.has(r)
 
 
 func _file_size() -> int:
@@ -210,12 +273,36 @@ func end_session() -> Dictionary:
 	return append("session.ended", "")
 
 
+## TASK-85: corrects an event: it is undone and a copy with `data` (and `corrects`: its id)
+## goes in right where it was (its day and time, just after it in timeline order). The
+## original stays in the file. Returns the correction ({} if it can't be corrected).
+func correct(id: int, data: Dictionary, by := "dm") -> Dictionary:
+	var target := get_event(id)
+	if target.is_empty() or target.has("undoes") or is_undone(id) or target.type == "timeline.rewound":
+		return {}
+	var keep := [insert_after.duplicate(), _insert_day, _insert_time, insert_filter]
+	undo(id, by)
+	insert_at(id)
+	insert_filter = Callable()
+	var d := data.duplicate(true)
+	d["corrects"] = id
+	var e := append(str(target.type), str(target.entity), d, by)
+	insert_after = keep[0]
+	_insert_day = keep[1]
+	_insert_time = keep[2]
+	insert_filter = keep[3]
+	return e
+
+
 ## Cancels an earlier event (it stays in the file, replay skips it).
 func undo(id: int, by := "dm") -> Dictionary:
 	var target := get_event(id)
 	if target.is_empty() or is_undone(id):
 		return {}
-	return append(target.type, target.entity, {}, by, id, target.day, target.time)
+	var e := append(target.type, target.entity, {}, by, id, target.day, target.time)
+	if target.type == "timeline.rewound":  # restored: the cut-off events count again
+		_recompute_clock()
+	return e
 
 
 # --- Reading -------------------------------------------------------------------------
@@ -243,8 +330,9 @@ func in_session() -> bool:
 	return false
 
 
+## True if the event was undone, or cut off by setting the timeline back (TASK-86).
 func is_undone(id: int) -> bool:
-	return _undone.has(id)
+	return _undone.has(id) or _rewound_now(id)
 
 
 ## Events that count (not undone, not undo markers), optionally only for one entity and

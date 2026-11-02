@@ -13,7 +13,7 @@ extends RefCounted
 const ROUND_SECONDS := 6
 ## Event types that are history only: they belong to a moment but say nothing in its summary.
 const QUIET := ["dice.rolled", "chat.message", "initiative.rolled", "combat.order_set", "assistant.drafted",
-	"session.started", "session.ended"]
+	"session.started", "session.ended", "timeline.rewound"]
 
 ## [{index, at (s), day, time, round (0 = not in combat), maps [], entities [], events [ids],
 ##   first_id, last_id, session, lines [String] (the summary), combat (bool)}], in order.
@@ -71,6 +71,8 @@ func add(e: Dictionary) -> void:
 		_events[last.index] = []
 	last.events.append(int(e.id))
 	last.last_id = int(e.id)
+	if e.has("after"):
+		last["edited"] = true  # the DM changed this moment afterwards (TASK-85)
 	var map := str(e.data.get("map", ""))
 	if map != "" and map not in last.maps:
 		last.maps.append(map)

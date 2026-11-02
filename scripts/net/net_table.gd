@@ -108,6 +108,8 @@ var looking_back := -1
 var _cut := {}  ## while a past view is built: the event ids up to that moment
 var _cutting := false
 var _backs := {}  ## host: peer id -> the event id that player looks back at (they can't act)
+var _inserted := 0  ## host: the last event the DM put into the past (TASK-85)
+var _insert_queued := false
 var looking_at := -1  ## my cursor in seconds (the bar's), -1 = now
 ## TASK-84, "Show everyone": the DM: on while every player follows my cursor; a player: on while
 ## the DM shows me their moment (I can't look elsewhere then).
@@ -223,6 +225,11 @@ func host(port := DEFAULT_PORT) -> Error:
 	_load_rolls()
 	_apply_state(view_for(""))
 	timeline_sync.follow(event_log)
+	# TASK-85: while the DM looks back, the DM's own actions go into the past; the players'
+	# (their RPCs) stay at now
+	event_log.insert_filter = func() -> bool: return multiplayer.get_remote_sender_id() == 0
+	if not event_log.appended.is_connected(_on_logged):
+		event_log.appended.connect(_on_logged)
 	_set_status("Hosting %s on port %d (%d events in the log)" % [timeline.info.get("name", timeline.id()), port, event_log.events.size()])
 	return OK
 
@@ -2046,13 +2053,16 @@ func _move_cost(entity: String, from: Vector2i, to: Vector2i, path: Array) -> in
 
 ## The DM validates, logs and broadcasts (or tells the player no).
 func _handle_move(sender: int, entity: String, cell: Vector2i, path: Array = []) -> void:
+	if sender == 1 and looking_back >= 0:  # the DM moves it in the past (TASK-85)
+		_past_move(entity, cell)
+		return
 	if not grid.tokens.has(entity):
 		_deny(sender, entity, "unknown token")
 		return
 	if entity == PARTY:
 		_handle_party_move(sender, cell)
 		return
-	if _backs.has(sender) or (sender == 1 and looking_back >= 0):
+	if _backs.has(sender):
 		_deny(sender, entity, "you're looking back in time: go back to now to act")
 		return
 	if sender != 1:
@@ -2263,9 +2273,17 @@ func look_back(upto: int, at := -1) -> void:
 	grid.locked = upto >= 0
 	if upto < 0:
 		grid.end_past()
-		if not is_dm():
+		if is_dm():
+			event_log.stop_inserting()
+		else:
 			request_now.rpc_id(1)
 	elif is_dm():
+		# TASK-85: the DM can act in the past: moves, conditions ... go in after this moment
+		if upto > 0:
+			event_log.insert_at(upto)
+		else:
+			event_log.stop_inserting()
+		grid.locked = upto == 0
 		_show_past(past_view("", upto, from))
 	else:
 		request_past.rpc_id(1, upto, from)
@@ -2342,6 +2360,77 @@ func request_now() -> void:
 func past_shown(view: Dictionary) -> void:
 	if looking_back >= 0:
 		_show_past(view)
+
+
+## The DM moves a token while looking back (TASK-85): from where it stood then, put into the
+## past right after the moment looked at (the log inserts it, see look_back).
+func _past_move(entity: String, cell: Vector2i) -> void:
+	var s: Sprite2D = grid.past.get(entity)
+	if s == null or looking_back <= 0:
+		_set_status("Pick a moment on the timeline to change it")
+		return
+	var from: Vector2i = s.get_meta("cell")
+	var path: Array = [from] + Vision.path_cells(from, cell)
+	if entity == PARTY:
+		for pc: Variant in (s.get_meta("info", {}) as Dictionary).get("members", []):
+			event_log.move_token(str(pc), map_id, from, cell, "dm", PARTY)
+		return
+	var facing := TokenGrid.facing_of(Vector2i(path[path.size() - 1]) - Vector2i(path[path.size() - 2]))
+	event_log.move_token(entity, map_id, from, cell, "dm", "", facing, path.size() - 1, path)
+
+
+## Host: an event went into the past: look at it and show the change everywhere.
+func _on_logged(e: Dictionary) -> void:
+	if e.has("after") and looking_back >= 0 and is_dm():
+		_inserted = int(e.id)
+		if not _insert_queued:
+			_insert_queued = true
+			_after_insert.call_deferred()
+
+
+func _after_insert() -> void:
+	_insert_queued = false
+	if looking_back < 0:
+		return
+	var from := looking_back
+	looking_back = _inserted
+	_show_past(past_view("", looking_back, from))
+	refresh_tokens()  # the present may change too (a token whose last move this is)
+	if showing:
+		_show_everyone()
+	_set_status("Changed the past (event %d)" % _inserted)
+
+
+## DM (TASK-86): sets the timeline back to the moment ending with event `upto` (0 = the
+## beginning): everything after it is cut off (one timeline.rewound event; sessions stay) and
+## the clock goes back there. Restorable (restore). Returns the event ({} if nothing to cut).
+func rewind_to(upto: int) -> Dictionary:
+	if not is_dm():
+		return {}
+	var keep := _ids_upto(upto)
+	var cut := []
+	for e in event_log.effective():
+		if not keep.has(int(e.id)) and not str(e.type).begins_with("session.") and e.type != "timeline.rewound":
+			cut.append(int(e.id))
+	if cut.is_empty():
+		return {}
+	look_back(-1)
+	var anchor := event_log.get_event(upto) if upto > 0 else {}
+	var e := event_log.append("timeline.rewound", "", {"to": upto, "ids": cut}, "dm", -1,
+		int(anchor.get("day", 0)), int(anchor.get("time", -1)))
+	refresh_tokens()
+	_combat_changed()
+	_set_status("Set the timeline back: %d events cut off (restorable)" % cut.size())
+	return e
+
+
+## DM: a set-back undone: the cut-off events count again.
+func restore(rewind_id: int) -> void:
+	if not is_dm() or event_log.undo(rewind_id).is_empty():
+		return
+	refresh_tokens()
+	_combat_changed()
+	_set_status("Restored the cut-off events")
 
 
 func _reshow_past() -> void:

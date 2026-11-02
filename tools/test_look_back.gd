@@ -96,12 +96,9 @@ func _init() -> void:
 	await _until(func() -> bool: return log.events.size() > n)
 	_check(log.events.size() == n + 1, "at now Bob can move again")
 
-	# the DM looking back can't move either (acting in the past: TASK-85)
+	# the DM looks back too (acting there: test_past_edits)
 	dm.look_back(walked)
-	_check(dm.grid.is_past(), "the DM looks back")
-	n = log.events.size()
-	dm._handle_move(1, BORIN, start, [])
-	_check(log.events.size() == n, "and doesn't move tokens then")
+	_check(dm.grid.is_past() and not dm.grid.locked, "the DM looks back (and may change it)")
 	dm.look_back(-1)
 
 	# the bar's cursor turns into a moment's last event

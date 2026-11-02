@@ -105,14 +105,18 @@ func _ready() -> void:
 	timeline_bar.follow(table.timeline_sync, table.notes.calendar)
 	timeline_bar.cursor_changed.connect(func(at: int) -> void: table.look_back(timeline_bar.cursor_event(), at))
 	timeline_bar.show_toggled.connect(func(on: bool) -> void: table.show_everyone(on))
+	timeline_bar.rewind_requested.connect(func(upto: int) -> void:  # TASK-86
+		table.rewind_to(upto)
+		timeline_bar.line.set_cursor(-1))
+	timeline_bar.restore_requested.connect(func(id: int) -> void: table.restore(id))
 	table.showing_changed.connect(func() -> void:
 		timeline_bar.set_showing(table.showing, table.is_dm())
 		if not table.is_dm():
 			timeline_bar.line.set_cursor(table.looking_at))
 	table.past_changed.connect(func() -> void: hud.set_locked(table.looking_back >= 0))
-	timeline_bar.list_requested.connect(func(first: int, last: int) -> void:
+	timeline_bar.list_requested.connect(func(ids: Array) -> void:
 		if table.is_dm() and timeline_list_opener.is_valid():
-			timeline_list_opener.call(first, last))
+			timeline_list_opener.call(ids))
 	hud.pages = SheetPages.new()  # above the chat (TASK-47)
 	hud.pages.hud = hud
 	root.add_child(hud.pages)
@@ -155,6 +159,7 @@ func _refresh() -> void:
 	chat.visible = online and minimal  # the app's calm table; otherwise the session panel has the rolls
 	timeline_bar.visible = online
 	timeline_bar.show_button.visible = dm
+	timeline_bar.dm = dm
 	if not online:
 		sheet.hide()
 	_next_session.visible = dm

@@ -77,7 +77,7 @@ func _init() -> void:
 	while dm.combat_state().current != ARIA and guard < 20:
 		dm.next_turn()
 		guard += 1
-	await _until(func() -> bool: return ann.rolls.any(func(r: Dictionary) -> bool: return r.get("action") == "death_prompt"))
+	await _until(func() -> bool: return ann.rolls.any(func(r: Dictionary) -> bool: return r.get("action") == "death_prompt"), 1500)  # under load the RPC can take a while
 	var prompt: Array = ann.rolls.filter(func(r: Dictionary) -> bool: return r.get("action") == "death_prompt")
 	_check(not prompt.is_empty() and NetTable.roll_bbcode(prompt[0]).contains("[url=death:%s]" % ARIA), "Ann gets her death save prompt on her turn (%s, %s, dm %s, hp %s)" % [dm.combat_state().current, dm.combat_state().order, dm.rolls.filter(func(r: Dictionary) -> bool: return r.get("action") == "death_prompt").size(), dm.sheet_for(Reveal.DM, ARIA).hp])
 	ann.roll_death_save(ARIA)

@@ -6,42 +6,23 @@ extends RefCounted
 ## spell / item entry and rolls what it finds: a spell attack, its first dice (damage or
 ## healing), the save DC.
 
-## Spellcasting ability per class (5e).
-const CASTING := {"bard": "cha", "cleric": "wis", "druid": "wis", "paladin": "cha", "ranger": "wis",
-	"sorcerer": "cha", "warlock": "cha", "wizard": "int", "artificer": "int", "monk": "wis"}
 
 static var _dice_re: RegEx
 
 
-## The sheet's spellcasting ability: its own `spellcasting_ability`, else its first casting
-## class's, else the best of int / wis / cha.
+## The sheet's spellcasting ability, spell attack and save DC: the Rules module (TASK-53).
 static func casting_ability(sheet: Dictionary) -> String:
-	var own := str(sheet.get("spellcasting_ability", "")).to_lower().left(3)
-	if own in HudWidgets.ABILITIES:
-		return own
-	for c: Variant in sheet.get("classes", []):
-		if c is Dictionary:
-			var cls := str(c.get("class", "")).get_file().to_lower()
-			for name: String in CASTING:
-				if cls == name or cls.begins_with(name + "-"):
-					return str(CASTING[name])
-	var best := "int"
-	for ab: String in ["wis", "cha"]:
-		if Dice.modifier(sheet, ab) > Dice.modifier(sheet, best):
-			best = ab
-	return best
+	return Rules.casting_ability(sheet)
+
+
 
 
 static func spell_attack(sheet: Dictionary) -> int:
-	if sheet.has("spell_attack"):
-		return int(sheet.spell_attack)
-	return int(sheet.get("proficiency_bonus", 2)) + Dice.modifier(sheet, casting_ability(sheet))
+	return Rules.spell_attack(sheet)
 
 
 static func save_dc(sheet: Dictionary) -> int:
-	if sheet.has("spell_save_dc"):
-		return int(sheet.spell_save_dc)
-	return 8 + spell_attack(sheet)
+	return Rules.spell_dc(sheet)
 
 
 ## The first dice formula in a text ("... takes 2d6 + 3 fire damage" -> "2d6+3"), "" if none.

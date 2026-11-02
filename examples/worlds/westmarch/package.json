@@ -15,5 +15,11 @@
   "maps": 3
  },
  "created": "2026-11-01T13:10:00",
- "imported_from": ""
+ "imported_from": "",
+ "rules": {
+  "edition": "2014",
+  "house_rules": {
+   "crit": "max_plus_roll"
+  }
+ }
 }

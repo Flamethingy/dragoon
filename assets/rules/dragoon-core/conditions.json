@@ -1,0 +1,102 @@
+[
+ {"id": "blinded", "name": "Blinded", "abbr": "Bli", "color": "#4b4b4b",
+  "editions": {
+   "2014": {"text": "Can't see and automatically fails any ability check that requires sight. Attack rolls against it have advantage, and its attack rolls have disadvantage.",
+    "flags": ["cant_see", "attack_disadvantage", "attacked_advantage"]},
+   "2024": {"text": "Can't see and automatically fails any ability check that requires sight. Attack rolls against it have advantage, and its attack rolls have disadvantage.",
+    "flags": ["cant_see", "attack_disadvantage", "attacked_advantage"]}}},
+ {"id": "charmed", "name": "Charmed", "abbr": "Cha", "color": "#c2569b",
+  "editions": {
+   "2014": {"text": "Can't attack the charmer or target it with harmful abilities or magical effects. The charmer has advantage on ability checks to interact socially with it.",
+    "flags": ["no_attack_source"]},
+   "2024": {"text": "Can't attack the charmer or target it with damaging abilities or magical effects. The charmer has advantage on ability checks to interact socially with it.",
+    "flags": ["no_attack_source"]}}},
+ {"id": "deafened", "name": "Deafened", "abbr": "Dea", "color": "#7a6f5a",
+  "editions": {
+   "2014": {"text": "Can't hear and automatically fails any ability check that requires hearing.", "flags": ["cant_hear"]},
+   "2024": {"text": "Can't hear and automatically fails any ability check that requires hearing.", "flags": ["cant_hear"]}}},
+ {"id": "exhaustion", "name": "Exhaustion", "abbr": "Exh", "color": "#6b4e2e", "levels": 6,
+  "editions": {
+   "2014": {"text": "Levels add up. 1: disadvantage on ability checks. 2: speed halved. 3: disadvantage on attack rolls and saving throws. 4: hit point maximum halved. 5: speed 0. 6: death. A long rest removes one level.",
+    "by_level": {"1": ["check_disadvantage"], "2": ["check_disadvantage", "speed_half"],
+     "3": ["check_disadvantage", "speed_half", "attack_disadvantage", "save_disadvantage"],
+     "4": ["check_disadvantage", "speed_half", "attack_disadvantage", "save_disadvantage", "hp_max_half"],
+     "5": ["check_disadvantage", "speed_zero", "attack_disadvantage", "save_disadvantage", "hp_max_half"],
+     "6": ["dead"]}},
+   "2024": {"text": "Levels add up (1-6). D20 tests are reduced by 2 times the level, speed by 1.5 m times the level. At level 6 the creature dies. A long rest removes one level.",
+    "by_level": {"1": ["d20_minus_level"], "2": ["d20_minus_level"], "3": ["d20_minus_level"], "4": ["d20_minus_level"],
+     "5": ["d20_minus_level"], "6": ["dead"]}, "d20_per_level": -2, "speed_m_per_level": -1.5}}},
+ {"id": "frightened", "name": "Frightened", "abbr": "Fri", "color": "#8a3fbf",
+  "editions": {
+   "2014": {"text": "Disadvantage on ability checks and attack rolls while the source of its fear is within line of sight. Can't willingly move closer to the source.",
+    "flags": ["attack_disadvantage", "check_disadvantage"]},
+   "2024": {"text": "Disadvantage on ability checks and attack rolls while the source of fear is within line of sight. Can't willingly move closer to the source.",
+    "flags": ["attack_disadvantage", "check_disadvantage"]}}},
+ {"id": "grappled", "name": "Grappled", "abbr": "Gra", "color": "#a0662b",
+  "editions": {
+   "2014": {"text": "Speed becomes 0. Ends if the grappler is incapacitated or it is moved out of the grappler's reach.",
+    "flags": ["speed_zero"]},
+   "2024": {"text": "Speed 0. Disadvantage on attack rolls against any target other than the grappler. The grappler can drag or carry it (extra movement cost).",
+    "flags": ["speed_zero"]}}},
+ {"id": "incapacitated", "name": "Incapacitated", "abbr": "Inc", "color": "#5f6b7a",
+  "editions": {
+   "2014": {"text": "Can't take actions or reactions.", "flags": ["incapacitated"]},
+   "2024": {"text": "Can't take any action, bonus action or reaction. Concentration is broken. Can't speak. Rolls initiative with disadvantage.",
+    "flags": ["incapacitated", "breaks_concentration"]}}},
+ {"id": "invisible", "name": "Invisible", "abbr": "Inv", "color": "#5aa7c7",
+  "editions": {
+   "2014": {"text": "Impossible to see without magic or a special sense; heavily obscured for hiding. Attack rolls against it have disadvantage, and its attack rolls have advantage.",
+    "flags": ["attack_advantage", "attacked_disadvantage"]},
+   "2024": {"text": "Surprise: advantage on initiative. Concealed: not affected by effects that need sight. Attack rolls against it have disadvantage, its attack rolls have advantage.",
+    "flags": ["attack_advantage", "attacked_disadvantage"]}}},
+ {"id": "paralyzed", "name": "Paralyzed", "abbr": "Par", "color": "#c9a227",
+  "editions": {
+   "2014": {"text": "Incapacitated, can't move or speak. Automatically fails Strength and Dexterity saves. Attack rolls against it have advantage; a hit from within 1.5 m is a critical hit.",
+    "flags": ["incapacitated", "speed_zero", "auto_fail_str_dex", "attacked_advantage", "melee_crit"]},
+   "2024": {"text": "Incapacitated, speed 0. Automatically fails Strength and Dexterity saves. Attack rolls against it have advantage; a hit from within 1.5 m is a critical hit.",
+    "flags": ["incapacitated", "speed_zero", "auto_fail_str_dex", "attacked_advantage", "melee_crit", "breaks_concentration"]}}},
+ {"id": "petrified", "name": "Petrified", "abbr": "Pet", "color": "#8c8c80",
+  "editions": {
+   "2014": {"text": "Turned to stone: incapacitated, can't move or speak, unaware. Attack rolls against it have advantage. Fails Strength and Dexterity saves. Resistance to all damage, immune to poison and disease.",
+    "flags": ["incapacitated", "speed_zero", "auto_fail_str_dex", "attacked_advantage", "resist_all"]},
+   "2024": {"text": "Turned to stone: incapacitated, speed 0. Attack rolls against it have advantage. Fails Strength and Dexterity saves. Resistance to all damage, immune to the Poisoned condition.",
+    "flags": ["incapacitated", "speed_zero", "auto_fail_str_dex", "attacked_advantage", "resist_all", "breaks_concentration"]}}},
+ {"id": "poisoned", "name": "Poisoned", "abbr": "Poi", "color": "#3f8f3f",
+  "editions": {
+   "2014": {"text": "Disadvantage on attack rolls and ability checks.", "flags": ["attack_disadvantage", "check_disadvantage"]},
+   "2024": {"text": "Disadvantage on attack rolls and ability checks.", "flags": ["attack_disadvantage", "check_disadvantage"]}}},
+ {"id": "prone", "name": "Prone", "abbr": "Pro", "color": "#8a6d3b",
+  "editions": {
+   "2014": {"text": "Can only crawl unless it stands up (half its speed). Disadvantage on attack rolls. Attacks against it have advantage within 1.5 m, otherwise disadvantage.",
+    "flags": ["attack_disadvantage", "prone"]},
+   "2024": {"text": "Can only crawl or stand up (half its speed). Disadvantage on attack rolls. Attacks against it have advantage within 1.5 m, otherwise disadvantage.",
+    "flags": ["attack_disadvantage", "prone"]}}},
+ {"id": "restrained", "name": "Restrained", "abbr": "Res", "color": "#9b5c2e",
+  "editions": {
+   "2014": {"text": "Speed 0. Attack rolls against it have advantage, its attack rolls have disadvantage. Disadvantage on Dexterity saves.",
+    "flags": ["speed_zero", "attacked_advantage", "attack_disadvantage", "dex_save_disadvantage"]},
+   "2024": {"text": "Speed 0. Attack rolls against it have advantage, its attack rolls have disadvantage. Disadvantage on Dexterity saves.",
+    "flags": ["speed_zero", "attacked_advantage", "attack_disadvantage", "dex_save_disadvantage"]}}},
+ {"id": "stunned", "name": "Stunned", "abbr": "Stu", "color": "#d1802c",
+  "editions": {
+   "2014": {"text": "Incapacitated, can't move, can speak only falteringly. Fails Strength and Dexterity saves. Attack rolls against it have advantage.",
+    "flags": ["incapacitated", "speed_zero", "auto_fail_str_dex", "attacked_advantage"]},
+   "2024": {"text": "Incapacitated. Fails Strength and Dexterity saves. Attack rolls against it have advantage.",
+    "flags": ["incapacitated", "auto_fail_str_dex", "attacked_advantage", "breaks_concentration"]}}},
+ {"id": "unconscious", "name": "Unconscious", "abbr": "Unc", "color": "#2f3a5a",
+  "editions": {
+   "2014": {"text": "Incapacitated, can't move or speak, unaware. Drops what it holds and falls prone. Fails Strength and Dexterity saves. Attack rolls against it have advantage; a hit from within 1.5 m is a critical hit.",
+    "flags": ["incapacitated", "speed_zero", "auto_fail_str_dex", "attacked_advantage", "melee_crit", "prone"]},
+   "2024": {"text": "Incapacitated, prone, speed 0, unaware. Fails Strength and Dexterity saves. Attack rolls against it have advantage; a hit from within 1.5 m is a critical hit.",
+    "flags": ["incapacitated", "speed_zero", "auto_fail_str_dex", "attacked_advantage", "melee_crit", "prone", "breaks_concentration"]}}},
+ {"id": "concentrating", "name": "Concentrating", "abbr": "Con", "color": "#3b7dd8", "marker": true,
+  "editions": {
+   "2014": {"text": "Keeps a spell going. Taking damage: Constitution save (DC 10 or half the damage, whichever is higher) or the spell ends. A new concentration spell ends the old one.", "flags": []},
+   "2024": {"text": "Keeps a spell going. Taking damage: Constitution save (DC 10 or half the damage, max DC 30) or the spell ends. A new concentration spell ends the old one.", "flags": []}}},
+ {"id": "dying", "name": "Dying", "abbr": "Dyi", "color": "#b03030", "marker": true,
+  "editions": {
+   "2014": {"text": "At 0 hit points: death saving throw at the start of each turn. Three successes: stable. Three failures: dead.", "flags": []},
+   "2024": {"text": "At 0 hit points: death saving throw at the start of each turn. Three successes: stable. Three failures: dead.", "flags": []}}},
+ {"id": "dead", "name": "Dead", "abbr": "†", "color": "#1a1a1a", "marker": true,
+  "editions": {"2014": {"text": "Dead.", "flags": ["incapacitated", "speed_zero"]}, "2024": {"text": "Dead.", "flags": ["incapacitated", "speed_zero"]}}}
+]

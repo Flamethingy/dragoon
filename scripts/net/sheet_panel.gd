@@ -158,10 +158,13 @@ static func to_bbcode(s: Dictionary) -> String:
 		if int(s.get("temp_hp", 0)) > 0:
 			hp += " (+%d temp)" % int(s.temp_hp)
 		bb += StatBlock._field("Hit Points", hp)
-		bb += StatBlock._field("Armor Class", StatBlock._num(s.get("ac")))
+		var d := Rules.derived(s)  # TASK-53: computed; a stored value wins and gets a marker
+		bb += StatBlock._field("Armor Class", _derived(d, "ac", false))
 		bb += StatBlock._field("Speed", StatBlock._speed(s))
-		if s.get("proficiency_bonus") != null:
-			bb += StatBlock._field("Proficiency", StatBlock._signed(int(s.proficiency_bonus)))
+		bb += StatBlock._field("Proficiency", _derived(d, "proficiency"))
+		bb += StatBlock._field("Initiative", "[url=roll:initiative]%s[/url]" % _derived(d, "initiative"))
+		if d.has("spell_dc"):
+			bb += StatBlock._field("Spellcasting", "DC %s · attack %s · %s" % [_derived(d, "spell_dc", false), _derived(d, "spell_attack"), Rules.casting_ability(s).to_upper()])
 		# State from the TASK-17 events.
 		if s.get("conditions") is Array and not s.conditions.is_empty():
 			bb += StatBlock._field("Conditions", Markdown.escape(", ".join(s.conditions.map(func(c: Variant) -> String: return str(c).capitalize()))))
@@ -187,12 +190,20 @@ static func to_bbcode(s: Dictionary) -> String:
 			var score := int(stats.get(a, 10))
 			bb += "[cell padding=2,0,2,2][center]%d (%s)[/center][/cell]" % [score, StatBlock._signed(floori((score - 10) / 2.0))]
 		bb += "[/table]\n" + StatBlock._rule()
-		bb += _roll_list("Saving Throws", s.get("saves"), " save")
-		bb += _roll_list("Skills", s.get("skills"), "")
+		var saves := PackedStringArray()
+		for a: String in StatBlock.ABILITIES:
+			saves.append("[url=roll:%s save]%s %s[/url]" % [a, a.to_upper(), _derived(d, "save_" + a)])
+		bb += StatBlock._field("Saving Throws", ", ".join(saves))
+		var skills := PackedStringArray()
+		for sk: String in Dice.SKILLS:  # the ones it is good at (proficient, expertise, stored)
+			if Rules._has(s, "skills", sk) or sk in Rules._list(s, "expertise") or bool(d["skill_" + sk].override):
+				skills.append("[url=roll:%s]%s %s[/url]" % [sk.replace("_", " "), sk.replace("_", " ").capitalize(), _derived(d, "skill_" + sk)])
+		if not skills.is_empty():
+			bb += StatBlock._field("Skills", ", ".join(skills))
 		bb += StatBlock._field("Rolls", "[url=roll:initiative]Initiative[/url]" + _attacks(s))
 		var senses := StatBlock._join(s.get("senses", []))
-		if s.get("passive_perception") != null:
-			senses += ("" if senses == "" else ", ") + "passive Perception %s" % StatBlock._num(s.passive_perception)
+		senses += ("" if senses == "" else ", ") + "passive Perception %s, Insight %s, Investigation %s" % [_derived(d, "passive_perception", false),
+			_derived(d, "passive_insight", false), _derived(d, "passive_investigation", false)]
 		if senses != "":
 			bb += StatBlock._field("Senses", Markdown.inline(senses))
 		if s.get("languages") is Array and not s.languages.is_empty():
@@ -215,6 +226,13 @@ static func to_bbcode(s: Dictionary) -> String:
 	if not bool(s.get("_full", false)):
 		bb += "\n\n[color=#%s][i]Only its player and the DM see the stats.[/i][/color]" % Markdown.MUTED.to_html(false)
 	return bb
+
+
+## A derived number as text ("+5"), with a marker (*) where a stored value overrides it.
+static func _derived(d: Dictionary, key: String, signed := true) -> String:
+	var v: Dictionary = d.get(key, {"value": 0, "override": false})
+	var text := StatBlock._signed(int(v.value)) if signed else str(int(v.value))
+	return text + ("[color=#%s]*[/color]" % UISkin.WINE.to_html(false) if bool(v.override) else "")
 
 
 ## "Saving Throws DEX +5, WIS +2" with each one a roll link.

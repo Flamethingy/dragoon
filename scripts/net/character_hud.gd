@@ -15,14 +15,6 @@ signal active_changed(ref: String)
 signal shown  ## the HUD was (re)built or hidden: the app checks whether it shows its buttons
 
 const SLIDE := 0.18  ## seconds of the change animation
-## Spell slots per character level of a full caster (5e), level 1 slots first.
-const FULL_CASTER := [[2], [3], [4, 2], [4, 3], [4, 3, 2], [4, 3, 3], [4, 3, 3, 1], [4, 3, 3, 2],
-	[4, 3, 3, 3, 1], [4, 3, 3, 3, 2], [4, 3, 3, 3, 2, 1], [4, 3, 3, 3, 2, 1], [4, 3, 3, 3, 2, 1, 1],
-	[4, 3, 3, 3, 2, 1, 1], [4, 3, 3, 3, 2, 1, 1, 1], [4, 3, 3, 3, 2, 1, 1, 1], [4, 3, 3, 3, 2, 1, 1, 1, 1],
-	[4, 3, 3, 3, 3, 1, 1, 1, 1], [4, 3, 3, 3, 3, 2, 1, 1, 1], [4, 3, 3, 3, 3, 2, 2, 1, 1]]
-const FULL := ["bard", "cleric", "druid", "sorcerer", "wizard"]
-const HALF := ["paladin", "ranger"]
-const HALF_UP := ["artificer"]
 
 var table: NetTable
 var active := ""  ## the active entity's ref ("" = none)
@@ -360,41 +352,11 @@ func use_slots(level: int, spent: int) -> void:
 		table.use_resource(active, "spell_slots.%d" % level, delta)
 
 
-## Spell slots per level (level 1 first): the sheet's own `spell_slots` list, else from
-## its classes (full casters, half casters; warlock pact slots added at their level).
+## Spell slots per level (level 1 first): Rules.slots (TASK-53).
 static func spell_slots(s: Dictionary) -> Array:
-	if s.get("spell_slots") is Array and not (s.spell_slots as Array).is_empty():
-		return (s.spell_slots as Array).map(func(n: Variant) -> int: return int(n))
-	var caster := 0.0
-	var pact_level := 0
-	for c: Variant in s.get("classes", []):
-		if not c is Dictionary:
-			continue
-		var cls := str(c.get("class", "")).get_file().to_lower()
-		var lvl := int(c.get("level", 0))
-		if _is(cls, FULL):
-			caster += lvl
-		elif _is(cls, HALF):
-			caster += floorf(lvl / 2.0)
-		elif _is(cls, HALF_UP):
-			caster += ceilf(lvl / 2.0)
-		elif _is(cls, ["warlock"]):
-			pact_level = lvl
-	var out: Array = []
-	var n := clampi(int(caster), 0, 20)
-	if n > 0:
-		out = (FULL_CASTER[n - 1] as Array).duplicate()
-	if pact_level > 0:
-		var count := 1 if pact_level == 1 else (2 if pact_level < 11 else (3 if pact_level < 17 else 4))
-		var at := mini((pact_level + 1) / 2, 5)
-		while out.size() < at:
-			out.append(0)
-		out[at - 1] = int(out[at - 1]) + count
-	return out
+	return Rules.slots(s)
 
 
-static func _is(cls: String, names: Array) -> bool:
-	return names.any(func(n: String) -> bool: return cls == n or cls.begins_with(n + "-"))
 
 
 static func _roman(n: int) -> String:

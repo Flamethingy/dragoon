@@ -544,9 +544,9 @@ static func quick_amount(kind: String, ref: String, s: Dictionary) -> String:
 				return ""
 			var words := ref.split(" ")
 			if words.size() == 2 and words[0] in ABILITIES:
-				return _signed(Dice._bonus(s, "saves", words[0], words[0]) if words[1] == "save" else Dice.modifier(s, words[0]))
+				return _signed(Rules.save(s, words[0]) if words[1] == "save" else Rules.check(s, words[0]))
 			var sk := ref.replace(" ", "_")
-			return _signed(Dice._bonus(s, "skills", sk, str(Dice.SKILLS.get(sk, "dex"))))
+			return _signed(Rules.skill(s, sk))
 	return ""
 
 
@@ -597,7 +597,7 @@ static func _checks(s: Dictionary, hud: CharacterHud, which: String, size: Vecto
 		for ab: String in ABILITIES:
 			if which == "abilities":
 				var score := int((stats as Dictionary).get(ab, 10))
-				_button(grid, hud, "%s  %d  %s" % [ab.to_upper(), score, _signed(Dice.modifier(s, ab))], "%s check" % ab, false)
+				_button(grid, hud, "%s  %d  %s" % [ab.to_upper(), score, _signed(Rules.check(s, ab))], "%s check" % ab, false)
 			else:
 				_button(grid, hud, "%s  %s" % [ab.to_upper(), _signed(Dice._bonus(s, "saves", ab, ab))], "%s save" % ab, _lists(s, "saves", ab))
 	return col
@@ -648,13 +648,13 @@ static func _info_bbcode(s: Dictionary) -> String:
 	if sub != "":
 		lines.append(Markdown.escape(sub))
 	var bits := PackedStringArray()
-	if s.has("ac"):
-		bits.append("AC %s" % _num(s.ac))
+	if s.has("ac") or s.has("stats"):
+		bits.append("AC %d" % Rules.ac(s))
 	var speed: Variant = s.get("speed")
 	if speed is Dictionary and float(speed.get("walk", 0)) > 0:
 		bits.append("Speed %s m" % _num(speed.walk))
-	if s.has("proficiency_bonus"):
-		bits.append("Prof +%s" % _num(s.proficiency_bonus))
+	if s.has("stats"):
+		bits.append("Prof +%d" % Rules.proficiency(s))
 	if not bits.is_empty():
 		lines.append(" · ".join(bits))
 	return "\n".join(lines)

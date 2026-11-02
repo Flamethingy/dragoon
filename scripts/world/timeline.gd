@@ -126,6 +126,22 @@ func world_manifest() -> Dictionary:
 	return _read(world_dir.path_join("package.json"), {})
 
 
+## The world's rules settings (TASK-53): edition and house rules, defaults filled in.
+func rules_settings() -> Dictionary:
+	return Rules.settings_of(world_manifest().get("rules", {}))
+
+
+## Saves the world's rules settings (into its package.json, "rules").
+func set_rules_settings(settings: Dictionary) -> Error:
+	var manifest := world_manifest()
+	manifest["rules"] = settings
+	var f := FileAccess.open(world_dir.path_join("package.json"), FileAccess.WRITE)
+	if f == null:
+		return FileAccess.get_open_error()
+	f.store_string(JSON.stringify(manifest, " ", false))
+	return OK
+
+
 func world_store() -> EntryStore:
 	return EntryStore.open(world_dir)
 

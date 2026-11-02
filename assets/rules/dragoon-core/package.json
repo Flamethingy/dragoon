@@ -1,0 +1,10 @@
+{
+ "format": "dragoon-package",
+ "format_version": 1,
+ "id": "dragoon-core",
+ "name": "Dragoon Core Rules",
+ "kind": "rules",
+ "version": "1.0.0",
+ "description": "Built-in rules data (TASK-53): conditions for the 2014 and 2024 rules, damage types, weapon properties and masteries, weapons, armor, proficiency and spell slot tables, cantrip scaling, XP, class resources and house rule options. SRD content, kept in git; read by the Rules module (scripts/rules/rules.gd).",
+ "files": ["core.json", "conditions.json"]
+}

@@ -115,9 +115,7 @@ static func d20(modifier: int, advantage := 0) -> String:
 
 
 static func modifier(sheet: Dictionary, ability: String) -> int:
-	var stats: Variant = sheet.get("stats", {})
-	var score := int(stats.get(ability, 10)) if stats is Dictionary else 10
-	return floori((score - 10) / 2.0)
+	return Rules.mod(sheet, ability)
 
 
 ## What a name means for this sheet: [{label, formula}] (an attack gives to-hit and damage);
@@ -138,7 +136,7 @@ static func resolve(sheet: Dictionary, query: String, features := {}) -> Array:
 	var words := q.replace("(", " ").replace(")", " ").replace("_", " ").split(" ", false)
 
 	if q == "initiative" or q == "init":
-		return [{"label": "Initiative", "formula": d20(modifier(sheet, "dex") + int(sheet.get("initiative_bonus", 0)), advantage)}]
+		return [{"label": "Initiative", "formula": d20(Rules.initiative(sheet), advantage)}]
 
 	var ability := ""
 	for w in words:
@@ -152,7 +150,7 @@ static func resolve(sheet: Dictionary, query: String, features := {}) -> Array:
 	if SKILLS.has(skill):
 		return [{"label": skill.replace("_", " ").capitalize(), "formula": d20(_bonus(sheet, "skills", skill, SKILLS[skill]), advantage)}]
 	if ability != "" and words.size() <= 2:
-		return [{"label": "%s check" % ability.to_upper(), "formula": d20(modifier(sheet, ability), advantage)}]
+		return [{"label": "%s check" % ability.to_upper(), "formula": d20(Rules.check(sheet, ability), advantage)}]
 
 	var weapon := q
 	for prefix in ["attack with ", "attack ", "hit with "]:
@@ -169,15 +167,9 @@ static func resolve(sheet: Dictionary, query: String, features := {}) -> Array:
 	return []
 
 
-## The sheet's own bonus (saves/skills), or ability modifier + proficiency if it lists the
-## save/skill without a number, or just the ability modifier.
+## A save's or skill's bonus (TASK-53: the Rules module; a stored number wins).
 static func _bonus(sheet: Dictionary, list_key: String, key: String, ability: String) -> int:
-	var list: Variant = sheet.get(list_key)
-	if list is Dictionary and list.has(key) and list[key] != null:
-		return int(list[key])
-	if list is Array and key in list:
-		return modifier(sheet, ability) + int(sheet.get("proficiency_bonus", 2))
-	return modifier(sheet, ability)
+	return Rules.save(sheet, key) if list_key == "saves" else Rules.skill(sheet, key) if list_key == "skills" else Rules.mod(sheet, ability)
 
 
 ## The sheet's feature (features / actions / bonus_actions / reactions) with an `attack` whose

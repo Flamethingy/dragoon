@@ -81,6 +81,7 @@ var _show_sheet := {}  ## refs whose sheet should show in the sheet panel when i
 var _state := {}  ## the last table view from the host
 var _status: ServerStatus.Responder  ## host: answers the start screens' heartbeat (TASK-38)
 var _requested := {}  ## sha -> true while downloading
+var _rules := {}  ## the world's rules settings as the host sent them (players)
 var _catalog := {}  ## kind -> id -> entry of the packages (spells, items), read once (TASK-48)
 
 var _ui: TableUI
@@ -227,7 +228,7 @@ func view_for(player: String) -> Dictionary:
 			t["cell"] = start + Vector2i(newcomers, 0)
 			newcomers += 1
 		tokens.append(t)
-	return {"map": map, "tokens": tokens}
+	return {"map": map, "tokens": tokens, "rules": rules_settings()}
 
 
 ## HP and AC on a token as they are now (the events), not as in the file.
@@ -663,6 +664,8 @@ static func _hashes(view: Dictionary) -> Array:
 func _apply_state(view: Dictionary) -> void:
 	if view.is_empty():
 		return
+	if view.has("rules"):
+		_rules = Rules.settings_of(view.rules)
 	var map: Dictionary = view.map
 	var map_image: String = map.get("image", "")
 	if grid.map_id != map.id or grid.get_meta("image", "") != map_image:
@@ -1458,6 +1461,24 @@ func _handle_roll(sender: int, query: String, ref: String, hidden: bool) -> Dict
 		for peer_id: int in peers:
 			roll_added.rpc_id(peer_id, entry)
 	return entry
+
+
+# --- Rules settings (TASK-53) -----------------------------------------------------------------
+
+## The world's rules settings: edition, house rules (crits), automation (TASK-60).
+func rules_settings() -> Dictionary:
+	if is_dm() and timeline != null:
+		return timeline.rules_settings()
+	return _rules if not _rules.is_empty() else Rules.settings_of({})
+
+
+## DM: changes the world's rules settings; everyone gets them with the table.
+func set_rules_settings(settings: Dictionary) -> void:
+	if not is_dm() or timeline == null:
+		return
+	timeline.set_rules_settings(settings)
+	_apply_state(view_for(""))
+	_send_tables()
 
 
 # --- Quick buttons (TASK-48) ------------------------------------------------------------------

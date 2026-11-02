@@ -227,6 +227,8 @@ func _add_field(f: Dictionary) -> void:
 			_getters[key] = control.ids
 		"cell":
 			control = _cell(key, value)
+		"effects":
+			control = _effects(key, value)
 		_:
 			control = _json(key, value)
 	control.name = "Field_" + key
@@ -385,6 +387,44 @@ func _json(key: String, value: Variant) -> CodeEdit:
 			return {"_error": "JSON line %d: %s" % [j.get_error_line(), j.get_error_message()]}
 		return j.data
 	return c
+
+
+## The effects (TASK-65): JSON, with presets to add and "From the text" (the parser).
+func _effects(key: String, value: Variant) -> Control:
+	var box := VBoxContainer.new()
+	var c := CodeEdit.new()
+	c.name = "Json"
+	c.text = JSON.stringify(EntryStore.whole_numbers(value if value is Array else []), "  ")
+	c.custom_minimum_size = Vector2(0, clampi(c.get_line_count() * 22 + 16, 60, 260))
+	box.add_child(c)
+	var row := HBoxContainer.new()
+	box.add_child(row)
+	var presets := MenuButton.new()
+	presets.name = "Presets"
+	presets.text = "Add preset"
+	presets.flat = false
+	var names: Array = Effects.PRESETS.keys()
+	for i in names.size():
+		presets.get_popup().add_item(str(names[i]), i)
+	presets.get_popup().id_pressed.connect(func(i: int) -> void:
+		var list: Variant = JSON.parse_string(c.text)
+		var arr: Array = list if list is Array else []
+		arr.append((Effects.PRESETS[names[i]] as Dictionary).duplicate(true))
+		c.text = JSON.stringify(arr, "  "))
+	row.add_child(presets)
+	var from_text := _button(row, "From the text", "Fill it from the description (the parser; only the clear cases)", func() -> void:
+		var e := original.duplicate()
+		for k: String in ["description", "text", "level", "concentration", "duration"]:
+			if _getters.has(k):
+				e[k] = _getters[k].call()
+		c.text = JSON.stringify(Effects.parse(e), "  "))
+	from_text.name = "FromText"
+	_getters[key] = func() -> Variant:
+		var j := JSON.new()
+		if j.parse(c.text if c.text.strip_edges() != "" else "[]") != OK:
+			return {"_error": "Effects JSON line %d: %s" % [j.get_error_line(), j.get_error_message()]}
+		return j.data if j.data is Array else {"_error": "Effects must be a list [...]"}
+	return box
 
 
 func _markdown(key: String, value: String) -> Control:

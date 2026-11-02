@@ -525,7 +525,11 @@ const _ABILITY_WORDS := {"strength": "str", "dexterity": "dex", "constitution": 
 ## What a save-based feature or spell does (TASK-55): {name, ability, dc, damage: [{dice,
 ## type}], half, conditions, duration}. The DC: the feature's own (`save.dc`), else the
 ## caster's spell DC. {} if it has no save.
-static func save_effect(entry: Dictionary, caster := {}) -> Dictionary:
+static func save_effect(entry: Dictionary, caster := {}, use_effects := true) -> Dictionary:
+	if use_effects:  # TASK-65: the structured effects win over the text
+		var structured := Effects.save_of(entry, caster)
+		if not structured.is_empty():
+			return structured
 	var text := str(entry.get("text", entry.get("description", ""))).get_slice("**At Higher Levels", 0)
 	var lower := text.to_lower()
 	var save: Dictionary = entry.get("save", {}) if entry.get("save") is Dictionary else {}
@@ -563,7 +567,11 @@ static func save_effect(entry: Dictionary, caster := {}) -> Dictionary:
 		duration = {"rounds": int(dm.get_string(1)) * (10 if dm.get_string(2) == "minute" else 600 if dm.get_string(2) == "hour" else 1)}
 	elif "until the end of its next turn" in lower or "until the end of your next turn" in lower:
 		duration = {"rounds": 1, "ends": "turn_end"}
-	if "repeat the saving throw at the end of each of its turns" in lower or "repeat the save at the end of each of its turns" in lower:
+	elif "for the duration" in lower or "until the spell ends" in lower:  # the spell's own duration
+		var sd := RegEx.create_from_string("(\\d+) (minute|round|hour)").search(str(entry.get("duration", "")).to_lower())
+		if sd != null:
+			duration = {"rounds": int(sd.get_string(1)) * (10 if sd.get_string(2) == "minute" else 600 if sd.get_string(2) == "hour" else 1)}
+	if "repeat the saving throw at the end of each of its turns" in lower or "repeat the save at the end of each of its turns" in lower 			or RegEx.create_from_string("at the end of each of its turns, the target can make another \\w+ saving throw").search(lower) != null:
 		duration["save_ends"] = true  # TASK-63: a save at the end of each of its turns ends it
 	return {"name": str(entry.get("name", "")), "ability": ability, "dc": dc, "damage": damage,
 		"half": "half as much" in lower or "half damage" in lower, "conditions": conds, "duration": duration}
@@ -572,6 +580,9 @@ static func save_effect(entry: Dictionary, caster := {}) -> Dictionary:
 ## A spell with a spell attack (TASK-49): {name, to_hit, damage: [{dice, type}], ranged}; {}
 ## for none. Damage from the entry's `damage`, else its text ("3d6 fire damage").
 static func spell_attack_of(entry: Dictionary, caster: Dictionary) -> Dictionary:
+	var structured := Effects.attack_of(entry, caster)  # TASK-65
+	if not structured.is_empty():
+		return structured
 	var text := str(entry.get("description", entry.get("text", ""))).get_slice("**At Higher Levels", 0)
 	var lower := text.to_lower()
 	if not "spell attack" in lower:
@@ -593,7 +604,7 @@ static func spell_attack_of(entry: Dictionary, caster: Dictionary) -> Dictionary
 ## save), else "other" (rolled into the chat).
 static func spell_kind(entry: Dictionary) -> String:
 	var lower := str(entry.get("description", entry.get("text", ""))).to_lower()
-	if "spell attack" in lower:
+	if "spell attack" in lower or not Effects.attack_of(entry, {}).is_empty():
 		return "attack"
 	if not save_effect(entry).is_empty():
 		return "save"

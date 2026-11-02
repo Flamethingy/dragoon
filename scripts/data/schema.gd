@@ -68,11 +68,12 @@ const KINDS := {
 		["role", "line"], ["alignment", "line"], ["attitude", "choice", ["", "friendly", "neutral", "hostile"]],
 		["proficiency_bonus", "int"], ["proficiencies", "list"], ["traits", "features"], ["features", "refs"],
 		["spells", "refs"], ["inventory", "json"], ["factions", "refs"], ["location", "ref"], ["stat_block", "ref"]],
-	"features": [["text", "markdown"], ["uses", "line"], ["cost", "line"], ["attack", "json"], ["save", "json"], ["damage", "json"]],
+	"features": [["text", "markdown"], ["uses", "line"], ["cost", "line"], ["attack", "json"], ["save", "json"], ["damage", "json"],
+		["effects", "effects", "Effects (what its buttons do)"]],
 	"spells": [["level", "int", "Level (0 = cantrip)"], ["school", "line"], ["subschool", "line"], ["casting_time", "line"],
 		["range_m", "float", "Range (m, 0 = self/touch)"], ["duration", "line"], ["concentration", "bool"], ["ritual", "bool"],
-		["components", "json"], ["classes", "list"]],
-	"items": [["rarity", "line"], ["type", "list"], ["gold", "float", "Price (gp)"], ["weight", "float"]],
+		["components", "json"], ["classes", "list"], ["effects", "effects", "Effects (what casting does)"]],
+	"items": [["rarity", "line"], ["type", "list"], ["gold", "float", "Price (gp)"], ["weight", "float"], ["effects", "effects", "Effects (what using it does)"]],
 	"places": [["type", "line"], ["parent", "ref"], ["map", "ref"], ["factions", "refs"], ["population", "int"], ["world_at", "cell"]],
 	"factions": [["type", "line"], ["leader", "ref"], ["headquarters", "ref"], ["allies", "refs"], ["enemies", "refs"], ["goals", "markdown"]],
 	"lore": [["category", "line"], ["related", "refs"]],
@@ -160,7 +161,7 @@ static func empty(type: String) -> Variant:
 			return 0
 		"bool":
 			return false
-		"list", "refs", "features", "cell", "tokens":
+		"list", "refs", "features", "cell", "tokens", "effects":
 			return []
 		"stats":
 			var s := {}

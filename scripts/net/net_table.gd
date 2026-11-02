@@ -1472,6 +1472,11 @@ func rules_settings() -> Dictionary:
 	return _rules if not _rules.is_empty() else Rules.settings_of({})
 
 
+## How much the table does by itself in `category` (TASK-60): "off", "assist" or "auto".
+func automation(category: String) -> String:
+	return Rules.automation(rules_settings(), category)
+
+
 ## DM: changes the world's rules settings; everyone gets them with the table.
 func set_rules_settings(settings: Dictionary) -> void:
 	if not is_dm() or timeline == null:

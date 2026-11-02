@@ -12,6 +12,21 @@ const CORE_DIR := "res://assets/rules/dragoon-core"
 const ABILITIES := ["str", "dex", "con", "int", "wis", "cha"]
 const DEFAULT_SETTINGS := {"edition": "2014", "house_rules": {"crit": "max_plus_roll", "flanking": "off"},
 	"automation": {}}
+## How much the table does by itself, per category (TASK-60): "off" (by hand), "assist" (posted
+## for the DM to apply) or "auto" (applied at once; undo corrects it). Defaults: Nico's
+## decision 1, Auto; movement only ever warns; reaction hints off.
+const AUTOMATION_LEVELS := {"off": "Off", "assist": "Assist", "auto": "Auto"}
+const AUTOMATION := {
+	"damage": {"label": "Damage", "default": "auto", "tip": "Hits and failed saves take the damage off the target's hit points"},
+	"healing": {"label": "Healing", "default": "auto", "tip": "Healing spells and potions add hit points"},
+	"conditions": {"label": "Conditions", "default": "auto", "tip": "Spells and features put their conditions on the target"},
+	"durations": {"label": "Durations", "default": "auto", "tip": "Effects and conditions end when their time runs out"},
+	"resources": {"label": "Resources and slots", "default": "auto", "tip": "Casting spends the slot, features their uses; rests give them back"},
+	"concentration": {"label": "Concentration", "default": "auto", "tip": "Damage asks for the Constitution save; a new spell ends the old one"},
+	"death_saves": {"label": "Death saves", "default": "auto", "tip": "0 HP: unconscious, death saves on the turn, damage counts as failures"},
+	"movement": {"label": "Movement warnings", "default": "assist", "tip": "Warns when a token moves farther than its speed (never blocks)"},
+	"reactions": {"label": "Reaction hints", "default": "off", "tip": "Points out opportunity attacks and reactions like Shield"},
+}
 
 static var _core := {}
 static var _conditions := {}  ## id -> condition
@@ -64,6 +79,15 @@ static func settings_of(world_settings: Variant) -> Dictionary:
 			else:
 				out[k] = world_settings[k]
 	return out
+
+
+## The automation level ("off" / "assist" / "auto") of a category in the world's settings.
+static func automation(settings: Dictionary, category: String) -> String:
+	var auto: Dictionary = settings.get("automation", {}) if settings.get("automation") is Dictionary else {}
+	var v := str(auto.get(category, ""))
+	if v in AUTOMATION_LEVELS:
+		return v
+	return str((AUTOMATION.get(category, {}) as Dictionary).get("default", "auto"))
 
 
 ## The edition an entry plays by: its own (the source book), else the world's (decision 5).

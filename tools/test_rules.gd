@@ -80,6 +80,13 @@ func _init() -> void:
 	_check(Timeline.new(dir.path_join("westmarch/timelines/red-fang")).rules_settings().edition == "2024", "the world keeps its edition")
 	PackageManager._delete_tree(dir)
 
+	# --- Automation levels (TASK-60) --------------------------------------------------------------
+	var defaults := Rules.settings_of({})
+	_check(["damage", "healing", "conditions", "durations", "resources", "concentration", "death_saves"].all(func(c: String) -> bool: return Rules.automation(defaults, c) == "auto")
+		and Rules.automation(defaults, "reactions") == "off" and Rules.automation(defaults, "movement") == "assist", "automation defaults as decided")
+	_check(Rules.automation(Rules.settings_of({"automation": {"damage": "off", "healing": "bogus"}}), "damage") == "off"
+		and Rules.automation(Rules.settings_of({"automation": {"healing": "bogus"}}), "healing") == "auto", "a world's level wins, junk falls back")
+
 	# --- Dice use the Rules module --------------------------------------------------------------
 	_check(Dice.resolve(rogue, "stealth")[0].formula == "1d20+9" and Dice.resolve(bard, "athletics")[0].formula == "1d20+1", "dice roll with the derived bonuses")
 

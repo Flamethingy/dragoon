@@ -7,16 +7,16 @@ extends Node
 ## back to the start screen.
 ## The last used world, timeline, name, address and port are kept in `settings_file`.
 
-const VIEWS := ["table", "session", "compendium", "world", "timeline", "events", "notes", "encounters"]
+const VIEWS := ["table", "session", "compendium", "world", "timeline", "events", "notes", "encounters", "rules"]
 const VIEW_NAMES := {"table": "Table", "session": "Session", "compendium": "Compendium", "world": "World", "timeline": "Timeline",
-	"events": "Events", "notes": "Notes", "encounters": "Encounters"}
-const DM_VIEWS := ["compendium", "world", "timeline", "events", "encounters"]
+	"events": "Events", "notes": "Notes", "encounters": "Encounters", "rules": "Rules"}
+const DM_VIEWS := ["compendium", "world", "timeline", "events", "encounters", "rules"]
 ## The views that are books (TASK-39): the core compendium, the world's and the timeline's.
 const BOOK_VIEWS := ["compendium", "world", "timeline"]
 ## Panels the table's UI brings (the session log with notes and rolls, the open sheet).
 const KEEP_PANELS := ["session", "sheet"]
 ## The calm table's buttons: the compendium and the world's book ("Book"), each its own window.
-const MINIMAL_VIEWS := ["compendium", "world"]
+const MINIMAL_VIEWS := ["compendium", "world", "rules"]
 
 static var settings_file := "user://app.cfg"
 
@@ -32,6 +32,7 @@ var books := {}  ## book view -> Compendium (in a session)
 var notes_view: NotesView
 var timeline_view: TimelineView
 var encounters_view: EncountersView
+var rules_view: RulesView  ## the world's rules page (TASK-60)
 
 var dock: Dock  ## the panels around the table (TASK-37)
 ## Nico, 2026-11-01: a calm table to start with. Only the map and two buttons at the top
@@ -267,6 +268,11 @@ func _panel(which: String) -> Control:
 			encounters_view.calendar = table.notes.calendar
 			encounters_view.assets = table.assets
 			c = encounters_view
+		"rules":
+			rules_view = RulesView.new()
+			rules_view.name = "RulesView"
+			rules_view.table = table
+			c = rules_view
 	dock.add_panel(which, "Book" if minimal and which == "world" else VIEW_NAMES[which], c, _default_place(which))
 	return c
 
@@ -291,6 +297,8 @@ func _refresh_view(which: String) -> void:
 			timeline_view.refresh()
 		"encounters":
 			encounters_view.refresh()
+		"rules":
+			rules_view.refresh()
 
 
 func _sync_buttons() -> void:
@@ -312,6 +320,7 @@ func _drop_views() -> void:
 	notes_view = null
 	timeline_view = null
 	encounters_view = null
+	rules_view = null
 
 
 ## A card let go outside its own window (EntryDrag): the book window under the mouse
@@ -398,6 +407,7 @@ func _hud_actions() -> void:
 	if table.is_dm():
 		acts["compendium"] = toggle_view.bind("compendium")
 		acts["book"] = toggle_view.bind("world")
+		acts["rules"] = toggle_view.bind("rules")
 	if hud.actions.keys() != acts.keys():
 		hud.actions = acts
 		hud.refresh()

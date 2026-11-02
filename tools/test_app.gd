@@ -144,6 +144,21 @@ func _init() -> void:
 	dm.show_view("encounters")
 	await process_frame
 	_check(dm.encounters_view != null and dm.dock.is_shown("encounters"), "encounters view")
+	# the world's rules page (TASK-60)
+	dm.show_view("rules")
+	await process_frame
+	_check(dm.rules_view != null and dm.dock.is_shown("rules") and dm.rules_view.find_child("Row_damage", true, false) != null
+		and dm.rules_view.find_child("Row_crit", true, false) != null and dm.rules_view.find_child("Row_edition", true, false) != null, "rules page: edition, house rules, automation")
+	_check(dm.table.automation("damage") == "auto" and dm.table.automation("reactions") == "off", "defaults: Auto, reaction hints off")
+	var pick := dm.rules_view.find_child("Row_damage", true, false).get_node("Pick") as OptionButton
+	pick.select(1)
+	pick.item_selected.emit(1)
+	_check(dm.table.automation("damage") == "assist" and dm.table.timeline.rules_settings().automation.damage == "assist", "a change is saved with the world")
+	dm.rules_view.set_value("edition", "", "2024")
+	_check(dm.table.rules_settings().edition == "2024" and dm.table.rules_settings().house_rules.crit == "max_plus_roll", "edition changed, house rules kept")
+	dm.rules_view.set_value("automation", "damage", "auto")
+	dm.rules_view.set_value("edition", "", "2014")
+	dm.toggle_view("rules")
 	dm.show_view("notes")
 	await process_frame
 	_check(dm.dock.is_shown("notes") and dm.dock.place_of("notes") == "left" and dm.dock.is_shown("events"), "notes view, the others stay open")

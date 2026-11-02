@@ -27,6 +27,16 @@ func _init() -> void:
 		{"w": "spell", "ref": "spells/fire-bolt", "v": "round", "r": [5, 5, 2, 2]}, {"w": "item", "r": [1, 1, 2, 2]}], HudWidgets.HUD_GRID)
 	_check(cleaned.size() == 3 and cleaned[0].v == "picture" and not cleaned[1].has("v") and cleaned[2].ref == "spells/fire-bolt" and cleaned[2].v == "round",
 		"layouts keep variants and refs, a quick button needs its ref (%s)" % [cleaned])
+	# TASK-75: size limits per piece (pixels -> cells of the grid in use)
+	var hud_cell := Vector2(33.3, 33.3)
+	var page_cell := Vector2(70, 63)
+	_check(HudWidgets.fit_cells("hp", "", hud_cell, HudWidgets.HUD_GRID) == Vector2i(4, 1) and HudWidgets.fit_cells("hp", "", page_cell, HudWidgets.PAGE_GRID) == Vector2i(2, 1), "a new piece fits its content: health 4 x 1 on the HUD, 2 x 1 on a page")
+	_check(HudWidgets.clamp_cells("spell", "square", Vector2i(1, 1), hud_cell, HudWidgets.HUD_GRID) == Vector2i(2, 2) and HudWidgets.clamp_cells("spell", "square", Vector2i(20, 20), hud_cell, HudWidgets.HUD_GRID) == Vector2i(5, 5), "a quick button: at least 2 x 2, at most 5 x 5 cells on the HUD")
+	_check(HudWidgets.clamp_cells("skills", "", Vector2i(16, 10), page_cell, HudWidgets.PAGE_GRID) == Vector2i(16, 10), "lists that scroll have no maximum")
+	_check(HudWidgets.clamp_cells("portrait", "small", Vector2i(3, 5), hud_cell, HudWidgets.HUD_GRID) == Vector2i(4, 3), "variants have their own limits (small portrait)")
+	var old_layout := HudWidgets.clean([{"w": "slots", "r": [6, 4, 2, 6]}, {"w": "check", "ref": "stealth", "r": [0, 0, 1, 1]}], HudWidgets.PAGE_GRID, page_cell)
+	_check(old_layout[0].r == [6, 4, 2, 4] and old_layout[1].r == [0, 0, 1, 1], "old layouts are clamped when they load (%s)" % [old_layout])
+	_check(HudWidgets.clean([{"w": "check", "ref": "stealth", "r": [0, 0, 1, 1]}], HudWidgets.HUD_GRID, hud_cell)[0].r == [0, 0, 2, 2], "too small grows to the minimum")
 	_check(HudActions.first_dice("takes 1d4 + 1 force damage") == "1d4+1" and HudActions.first_dice("1d8 + your modifier") == "1d8"
 		and HudActions.first_dice("no dice") == "", "dice found in a description")
 	var wiz := {"name": "Wiz", "stats": {"int": 16}, "proficiency_bonus": 2, "classes": [{"class": "classes/wizard", "level": 1}]}
@@ -239,6 +249,9 @@ func _init() -> void:
 	ed.place(8, Rect2i(10, 18, 9, 9))
 	ed.remove(2)  # no spell slots
 	_check(ed.items().map(func(i: Dictionary) -> String: return i.w) == ["portrait", "hp", "combat", "rules", "compendium", "book", "leave", "skills"], "add, move, remove")
+	ed.place(7, Rect2i(10, 18, 1, 1))
+	_check(ed.items()[7].r[2] >= 5 and ed.items()[7].r[3] >= 6, "resizing stops at the minimum (%s)" % [ed.items()[7].r])
+	ed.place(7, Rect2i(10, 18, 9, 9))
 	ed.add_item("portrait", "small")
 	ed.cycle_variant(8)
 	_check(ed.items()[8].v == "token", "double-click: the next variant")

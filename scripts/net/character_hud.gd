@@ -250,8 +250,8 @@ func cell_size() -> Vector2:
 ## The active one's HUD layout: its own, its template's (sheet `_hud`), else the default.
 func layout() -> Array:
 	var s: Dictionary = table.sheets.get(active, {}) if table != null else {}
-	var own := HudWidgets.clean(s.get("_hud"), HudWidgets.HUD_GRID)
-	return own if not own.is_empty() else HudWidgets.DEFAULT_HUD.duplicate(true)
+	var own := HudWidgets.clean(s.get("_hud"), HudWidgets.HUD_GRID, cell_size())  # TASK-75: within the pieces' limits
+	return own if not own.is_empty() else HudWidgets.clean(HudWidgets.DEFAULT_HUD, HudWidgets.HUD_GRID, cell_size())
 
 
 ## Its sheet pages (`_pages`), else the default ones.
@@ -261,8 +261,17 @@ func page_list() -> Array:
 	if s.get("_pages") is Array:
 		for p: Variant in s._pages:
 			if p is Dictionary:
-				out.append({"name": str(p.get("name", "Page")), "items": HudWidgets.clean(p.get("items"), HudWidgets.PAGE_GRID)})
-	return out if not out.is_empty() else HudWidgets.DEFAULT_PAGES.duplicate(true)
+				out.append({"name": str(p.get("name", "Page")), "items": HudWidgets.clean(p.get("items"), HudWidgets.PAGE_GRID, page_cell())})
+	if out.is_empty():
+		for p: Dictionary in HudWidgets.DEFAULT_PAGES:
+			out.append({"name": p.name, "items": HudWidgets.clean(p.items, HudWidgets.PAGE_GRID, page_cell())})
+	return out
+
+
+## A sheet page's cell in pixels.
+func page_cell() -> Vector2:
+	var area := pages.grid_rect().size if pages != null else (size if size.x > 0 else get_viewport_rect().size) * Vector2(0.72, 0.78)
+	return area / Vector2(HudWidgets.PAGE_GRID)
 
 
 ## May this user change the active one's layouts (owners, the DM)?

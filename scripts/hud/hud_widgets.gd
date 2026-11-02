@@ -35,6 +35,34 @@ const KINDS := {
 	"item": {"label": "Item", "size": [2, 2]},
 	"check": {"label": "Check", "size": [2, 2]},
 }
+## How big a piece may be, in pixels (TASK-75): `min` (smaller and its content no longer
+## fits), `fit` (its size when added: just its content) and `max` (bigger only adds empty
+## space; lists that scroll have none). "kind:variant" overrides the kind. The grid's cells
+## differ (the HUD: about 33 px, a sheet page: about 70 px), so the cells follow from these.
+const LIMITS := {
+	"portrait": {"min": [64, 72], "fit": [132, 170], "max": [420, 520]},
+	"portrait:small": {"min": [120, 36], "fit": [200, 50], "max": [420, 100]},
+	"hp": {"min": [90, 22], "fit": [132, 33], "max": [520, 64]},
+	"slots": {"min": [80, 30], "fit": [132, 66], "max": [420, 260]},
+	"info": {"min": [150, 60], "fit": [220, 100], "max": [640, 140]},
+	"abilities": {"min": [90, 150], "fit": [100, 200], "max": [320, 330]},
+	"saves": {"min": [90, 150], "fit": [100, 200], "max": [320, 330]},
+	"skills": {"min": [150, 200], "fit": [230, 300]},
+	"description": {"min": [150, 80], "fit": [200, 165]},
+	"features": {"min": [150, 80], "fit": [165, 165]},
+	"spells": {"min": [150, 80], "fit": [165, 165]},
+	"inventory": {"min": [150, 80], "fit": [165, 165]},
+	"turn": {"min": [150, 28], "fit": [165, 33], "max": [420, 64]},
+	"combat": {"min": [60, 26], "fit": [100, 33], "max": [260, 64]},
+	"rules": {"min": [60, 26], "fit": [100, 33], "max": [260, 64]},
+	"compendium": {"min": [90, 26], "fit": [132, 33], "max": [300, 64]},
+	"book": {"min": [60, 26], "fit": [100, 33], "max": [260, 64]},
+	"leave": {"min": [60, 26], "fit": [100, 33], "max": [260, 64]},
+	"spell": {"min": [40, 40], "fit": [66, 66], "max": [170, 170]},
+	"item": {"min": [40, 40], "fit": [66, 66], "max": [170, 170]},
+	"check": {"min": [40, 40], "fit": [66, 66], "max": [170, 170]},
+}
+
 ## Kinds with variants: the first is the default.
 const VARIANTS := {
 	"portrait": ["token", "picture", "small"],
@@ -66,9 +94,9 @@ const DEFAULT_HUD := [
 ]
 const DEFAULT_PAGES := [
 	{"name": "Sheet", "items": [
-		{"w": "portrait", "r": [0, 0, 3, 4]}, {"w": "info", "r": [3, 0, 5, 3]}, {"w": "hp", "r": [3, 3, 5, 1]},
-		{"w": "abilities", "r": [0, 4, 3, 6]}, {"w": "saves", "r": [3, 4, 3, 6]}, {"w": "skills", "r": [8, 0, 8, 10]},
-		{"w": "slots", "r": [6, 4, 2, 6]}]},
+		{"w": "portrait", "r": [0, 0, 3, 4]}, {"w": "info", "r": [3, 0, 5, 2]}, {"w": "hp", "r": [3, 2, 5, 1]},
+		{"w": "slots", "r": [3, 3, 5, 1]}, {"w": "abilities", "r": [0, 4, 3, 5]}, {"w": "saves", "r": [3, 4, 3, 5]},
+		{"w": "skills", "r": [8, 0, 8, 10]}]},
 	{"name": "Spells & gear", "items": [
 		{"w": "spells", "r": [0, 0, 8, 10]}, {"w": "inventory", "r": [8, 0, 8, 5]}, {"w": "features", "r": [8, 5, 8, 5]}]},
 ]
@@ -76,8 +104,54 @@ const DEFAULT_PAGES := [
 const ABILITIES := ["str", "dex", "con", "int", "wis", "cha"]
 
 
-## A layout made clean: known kinds, whole cells inside the grid.
-static func clean(items: Variant, grid: Vector2i) -> Array:
+## A piece's limits in pixels: {min, fit, max (absent: none)}.
+static func limits(kind: String, v := "") -> Dictionary:
+	return LIMITS.get(kind + ":" + v, LIMITS.get(kind, {"min": [1, 1], "fit": [66, 66]}))
+
+
+## The smallest size in cells on a grid with cells of `cell` pixels (at least 1 x 1).
+static func min_cells(kind: String, v: String, cell: Vector2) -> Vector2i:
+	var m: Array = limits(kind, v).min
+	return Vector2i(maxi(1, ceili(float(m[0]) / maxf(cell.x, 1.0) - 0.05)), maxi(1, ceili(float(m[1]) / maxf(cell.y, 1.0) - 0.05)))
+
+
+## The biggest size in cells (the grid if it has no maximum; never below the minimum).
+static func max_cells(kind: String, v: String, cell: Vector2, grid: Vector2i) -> Vector2i:
+	var l := limits(kind, v)
+	var lo := min_cells(kind, v, cell)
+	if not l.has("max"):
+		return Vector2i(maxi(lo.x, grid.x), maxi(lo.y, grid.y))
+	var m: Array = l.max
+	return Vector2i(maxi(lo.x, floori(float(m[0]) / maxf(cell.x, 1.0) + 0.05)), maxi(lo.y, floori(float(m[1]) / maxf(cell.y, 1.0) + 0.05)))
+
+
+## The size a new piece gets: its content's (rounded to cells), inside its limits and the grid.
+static func fit_cells(kind: String, v: String, cell: Vector2, grid: Vector2i) -> Vector2i:
+	if not _real(cell):  # no real screen yet (headless): the kind's cells on the HUD
+		var k: Array = KINDS.get(kind, {"size": [2, 2]}).size
+		return Vector2i(clampi(int(k[0]), 1, grid.x), clampi(int(k[1]), 1, grid.y))
+	var f: Array = limits(kind, v).fit
+	var want := Vector2i(roundi(float(f[0]) / maxf(cell.x, 1.0)), roundi(float(f[1]) / maxf(cell.y, 1.0)))
+	return clamp_cells(kind, v, want, cell, grid)
+
+
+## Cells of a real screen or page (a few pixels: no size known yet, the limits wait).
+static func _real(cell: Vector2) -> bool:
+	return cell.x >= 12.0 and cell.y >= 12.0
+
+
+## `size` (cells) kept between the piece's minimum and maximum and inside the grid.
+static func clamp_cells(kind: String, v: String, size: Vector2i, cell: Vector2, grid: Vector2i) -> Vector2i:
+	if not _real(cell):
+		return Vector2i(clampi(size.x, 1, grid.x), clampi(size.y, 1, grid.y))
+	var lo := min_cells(kind, v, cell)
+	var hi := max_cells(kind, v, cell, grid)
+	return Vector2i(clampi(clampi(size.x, lo.x, hi.x), 1, grid.x), clampi(clampi(size.y, lo.y, hi.y), 1, grid.y))
+
+
+## A layout made clean: known kinds, whole cells inside the grid; with `cell` (pixels of a
+## cell) each piece also kept within its size limits (TASK-75: old layouts get clamped).
+static func clean(items: Variant, grid: Vector2i, cell := Vector2.ZERO) -> Array:
 	var out := []
 	if not items is Array:
 		return out
@@ -90,9 +164,14 @@ static func clean(items: Variant, grid: Vector2i) -> Array:
 		var r: Array = it.r
 		var w := clampi(int(r[2]), 1, grid.x)
 		var h := clampi(int(r[3]), 1, grid.y)
+		var v := str(it.get("v", "")) if VARIANTS.has(kind) and str(it.get("v", "")) in VARIANTS[kind] else ""
+		if _real(cell):
+			var sz := clamp_cells(kind, variant({"w": kind, "v": v}), Vector2i(w, h), cell, grid)
+			w = sz.x
+			h = sz.y
 		var item := {"w": kind, "r": [clampi(int(r[0]), 0, grid.x - w), clampi(int(r[1]), 0, grid.y - h), w, h]}
-		if VARIANTS.has(kind) and str(it.get("v", "")) in VARIANTS[kind]:
-			item["v"] = str(it.v)
+		if v != "":
+			item["v"] = v
 		if kind in QUICK:
 			item["ref"] = str(it.ref)
 		for flag: String in ["name", "badge"]:  # the inspector's ticks (TASK-50), kept only when off

@@ -435,8 +435,11 @@ func _fill_inspector() -> void:
 	var w_now: Variant = _shared(func(it: Dictionary) -> int: return int(it.r[2]))
 	var h_now: Variant = _shared(func(it: Dictionary) -> int: return int(it.r[3]))
 	var size_row := HBoxContainer.new()
-	size_row.add_child(_spin("W", int(one.r[2]) if w_now == null else int(w_now), grid.x, func(v: float) -> void: set_cells(int(v), 0)))
-	size_row.add_child(_spin("H", int(one.r[3]) if h_now == null else int(h_now), grid.y, func(v: float) -> void: set_cells(0, int(v))))
+	var one_size := HudWidgets.clamp_cells(str(one.w), HudWidgets.variant(one), Vector2i.ONE, cell_size(), grid)
+	var lo := one_size if list.size() == 1 else Vector2i.ONE
+	var hi := HudWidgets.clamp_cells(str(one.w), HudWidgets.variant(one), grid, cell_size(), grid) if list.size() == 1 else grid
+	size_row.add_child(_spin("W", int(one.r[2]) if w_now == null else int(w_now), mini(hi.x, grid.x), func(v: float) -> void: set_cells(int(v), 0), lo.x))
+	size_row.add_child(_spin("H", int(one.r[3]) if h_now == null else int(h_now), mini(hi.y, grid.y), func(v: float) -> void: set_cells(0, int(v)), lo.y))
 	_row("Size" + (" (mixed)" if w_now == null or h_now == null else ""), size_row)
 	if list.size() == 1:
 		var pos_row := HBoxContainer.new()
@@ -548,8 +551,8 @@ func _fill_cards() -> void:
 		box.custom_minimum_size = thumb
 		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		col.add_child(box)
-		var cells: Array = HudWidgets.KINDS[entry.w].size
-		var real := Vector2(float(cells[0]), float(cells[1])) * cell
+		var cells := HudWidgets.fit_cells(str(entry.w), HudWidgets.variant(entry), cell, grid)
+		var real := Vector2(cells) * cell
 		var piece := HudWidgets.build(str(entry.w), sheet, hud, real, entry)
 		piece.size = real
 		var k := minf(minf(thumb.x / real.x, thumb.y / real.y), 1.4)
@@ -611,8 +614,8 @@ func _can_drop_data(at: Vector2, data: Variant) -> bool:
 ## A card dropped on the screen: the piece is put there (centred on the mouse).
 func _drop_data(at: Vector2, data: Variant) -> void:
 	var d := data as Dictionary
-	var cells: Array = HudWidgets.KINDS[d.w].size
-	var c := _to_canvas(at) / cell_size() - Vector2(float(cells[0]), float(cells[1])) * 0.5
+	var cells := HudWidgets.fit_cells(str(d.w), HudWidgets.variant(d), cell_size(), grid)
+	var c := _to_canvas(at) / cell_size() - Vector2(cells) * 0.5
 	add_item(str(d.w), str(d.get("v", "")), str(d.get("ref", "")), Vector2i(c.round()))
 
 
@@ -638,9 +641,9 @@ func add_item(kind: String, v := "", ref := "", at := Vector2i(-1, -1)) -> void:
 		return
 	if sets.is_empty():
 		sets.append({"name": "Page 1", "items": []})
-	var cells: Array = HudWidgets.KINDS[kind].size
-	var w := mini(int(cells[0]), grid.x)
-	var h := mini(int(cells[1]), grid.y)
+	var cells := HudWidgets.fit_cells(kind, HudWidgets.variant({"w": kind, "v": v}), cell_size(), grid)  # TASK-75: just its content
+	var w := cells.x
+	var h := cells.y
 	var pos := Vector2i(clampi(at.x, 0, grid.x - w), clampi(at.y, 0, grid.y - h))
 	if at.x < 0 or at.y < 0:
 		pos = Vector2i.ZERO
@@ -751,8 +754,9 @@ func place(index: int, r: Rect2i) -> void:
 
 
 func _set_rect(it: Dictionary, r: Rect2i) -> void:
-	var w := clampi(r.size.x, 1, grid.x)
-	var h := clampi(r.size.y, 1, grid.y)
+	var sz := HudWidgets.clamp_cells(str(it.w), HudWidgets.variant(it), r.size, cell_size(), grid)  # TASK-75: within its limits
+	var w := sz.x
+	var h := sz.y
 	it.r = [clampi(r.position.x, 0, grid.x - w), clampi(r.position.y, 0, grid.y - h), w, h]
 
 
@@ -784,6 +788,11 @@ func _rebuild(inspect := true) -> void:
 		_layer.remove_child(c)
 		c.queue_free()
 	var list := items()
+	for it: Dictionary in list:
+		var r: Array = it.r
+		var sz := HudWidgets.clamp_cells(str(it.w), HudWidgets.variant(it), Vector2i(int(r[2]), int(r[3])), cell_size(), grid)
+		if sz != Vector2i(int(r[2]), int(r[3])):
+			_set_rect(it, Rect2i(int(r[0]), int(r[1]), sz.x, sz.y))
 	for i in list.size():
 		var rect := _rect_px(list[i].r).grow(-2)
 		var piece := HudWidgets.build(str(list[i].w), sheet, hud, rect.size, list[i])

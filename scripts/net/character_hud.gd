@@ -44,6 +44,9 @@ func _ready() -> void:
 	if table == null:
 		return
 	table.table_changed.connect(_check_active)
+	table.table_changed.connect(func() -> void:  # TASK-62: the turn piece follows the combat
+		if visible and editor == null and layout().any(func(it: Dictionary) -> bool: return str(it.w) == "turn"):
+			_fill())
 	table.pcs_changed.connect(_check_active)
 	if table.grid != null:
 		table.grid.selection_changed.connect(_on_selection)

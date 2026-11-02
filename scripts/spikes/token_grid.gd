@@ -55,6 +55,8 @@ var active := ""  ## the active token (TASK-44, orange ring); "" = none
 var _drag_group := {}  ## the other selected tokens dragged along: id -> true
 var _drag_started := false  ## the mouse moved since the press: the ghosts are out
 var plans: MovePlans  ## planned moves: ghosts, dotted trails, Space to go (TASK-45)
+## id -> {moved, speed} (metres) in a combat, else {} (TASK-62: the trail shows the budget)
+var budget: Callable
 var _glide := {}  ## id -> trail (cells) the next confirmed move of it glides along
 var _right_at := Vector2.ZERO  ## where the right button went down (a click opens the token's menu)
 var _box_from := Vector2.ZERO  ## map position where a selection box started

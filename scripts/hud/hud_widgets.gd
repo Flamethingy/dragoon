@@ -23,6 +23,7 @@ const KINDS := {
 	"features": {"label": "Features", "size": [5, 5]},
 	"spells": {"label": "Spells", "size": [5, 5]},
 	"inventory": {"label": "Inventory", "size": [5, 5]},
+	"turn": {"label": "Turn", "size": [5, 1]},  # TASK-62: action economy and movement
 	# the app's buttons (Nico, 2026-11-01: "for now" pieces too); only shown to who may use them
 	"combat": {"label": "Combat", "size": [3, 1]},
 	"rules": {"label": "Rules", "size": [3, 1]},
@@ -198,6 +199,8 @@ static func build(kind: String, s: Dictionary, hud: CharacterHud, size: Vector2,
 			body = _text(_list_bbcode(s, ["spells"]), "Spells")
 		"inventory":
 			body = _text(_inventory_bbcode(s), "Inventory")
+		"turn":
+			body = _turn(hud)
 		_:
 			body = Label.new()
 	panel.add_child(body)
@@ -213,6 +216,53 @@ static func build(kind: String, s: Dictionary, hud: CharacterHud, size: Vector2,
 		conc.mouse_filter = Control.MOUSE_FILTER_PASS
 		panel.add_child(conc)
 	return _hide_parts(panel, it)
+
+
+## The active creature's turn (TASK-62): Action, Bonus, Reaction, Object pips (a click marks /
+## unmarks one), the metres moved of its speed and Dash. Only in a combat; display only.
+static func _turn(hud: CharacterHud) -> Control:
+	var row := HBoxContainer.new()
+	row.name = "Turn"
+	row.add_theme_constant_override("separation", 4)
+	var usage := {}
+	if hud.table != null:
+		for c: Dictionary in hud.table.combat_view().get("order", []):
+			if c.get("usage") is Dictionary and (c.entity == hud.active or (c.get("members", []) as Array).any(func(m: Dictionary) -> bool: return m.entity == hud.active)):
+				usage = c.usage
+	if usage.is_empty():
+		var l := Label.new()
+		l.text = "No combat"
+		l.theme_type_variation = UISkin.V_MUTED
+		row.add_child(l)
+		return row
+	for pair: Array in [["action", "A", "Action"], ["bonus", "B", "Bonus action"], ["reaction", "R", "Reaction"], ["object", "O", "Object interaction"]]:
+		var b := Button.new()
+		b.name = "Pip_" + str(pair[0])
+		b.text = str(pair[1])
+		b.toggle_mode = true
+		b.button_pressed = bool(usage.get(pair[0], false))
+		b.focus_mode = Control.FOCUS_NONE
+		b.tooltip_text = "%s%s (a click marks it; nothing is blocked)" % [pair[2], " used" if b.button_pressed else ""]
+		b.custom_minimum_size = Vector2(24, 0)
+		var kind := str(pair[0])
+		b.toggled.connect(func(on: bool) -> void: hud.table.mark_action(hud.active, kind, on))
+		row.add_child(b)
+	var move := Label.new()
+	move.name = "Move"
+	move.text = "%s / %s m" % [MovePlans._num(float(usage.moved)), MovePlans._num(float(usage.speed))]
+	if float(usage.moved) > float(usage.speed) + 0.01:
+		move.add_theme_color_override("font_color", UISkin.RED)
+	row.add_child(move)
+	var dash := Button.new()
+	dash.name = "Dash"
+	dash.text = "Dash"
+	dash.toggle_mode = true
+	dash.button_pressed = bool(usage.get("dash", false))
+	dash.focus_mode = Control.FOCUS_NONE
+	dash.tooltip_text = "Dash: uses the action, doubles the movement"
+	dash.toggled.connect(func(on: bool) -> void: hud.table.mark_action(hud.active, "action", on, "dash"))
+	row.add_child(dash)
+	return row
 
 
 ## The inspector's ticks (TASK-50): "name": false hides the name (portrait, quick button),

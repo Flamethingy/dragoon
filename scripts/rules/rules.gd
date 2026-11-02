@@ -541,6 +541,28 @@ static func _damage_ids() -> Array:
 	return out
 
 
+## Walking speed in metres (TASK-62): the sheet's ("speed": 9, {"walk": 9} or "9 m"), 0 or
+## half by conditions (restrained, grappled, 2014 exhaustion ...).
+static func speed(s: Dictionary, edition := "2014") -> float:
+	var v: Variant = s.get("speed", 9)
+	var m := 9.0
+	if v is Dictionary:
+		m = float(v.get("walk", 9))
+	elif v is float or v is int:
+		m = float(v)
+	else:
+		var digits := RegEx.create_from_string("[\\d.]+").search(str(v))
+		m = float(digits.get_string()) if digits != null else 9.0
+	var flags := condition_flags(s, edition)
+	if "speed_zero" in flags:
+		return 0.0
+	if "speed_half" in flags:
+		m /= 2.0
+	if edition == "2024" and "exhaustion" in (s.get("conditions", []) as Array):
+		m = maxf(0.0, m - 1.5 * clampi(int(s.get("exhaustion", 1)), 1, 6))  # 2024: 5 ft per level
+	return m
+
+
 ## The AC bonus of cover (TASK-54): "half" +2, "three_quarters" +5.
 static func cover_bonus(cover: String) -> int:
 	return 2 if cover == "half" else 5 if cover == "three_quarters" else 0

@@ -213,15 +213,23 @@ func _draw() -> void:
 			pts.append(grid.cell_center(path[i], cells))
 		if _dragging.has(id):  # the trail runs on to the ghost under the mouse
 			pts.append((plan.ghost as Sprite2D).position)
-		_dotted(pts, Color(1, 1, 1, 0.75), 4.0)
+		var b: Dictionary = grid.budget.call(id) if grid.budget.is_valid() else {}
+		var n := squares(path)
+		var over := not b.is_empty() and float(b.moved) + n * TokenGrid.METRES_PER_CELL > float(b.speed) + 0.01
+		_dotted(pts, Color(1.0, 0.45, 0.2, 0.9) if over else Color(1, 1, 1, 0.75), 4.0)
 		if plan.has("going") or path.size() < 2 and not _dragging.has(id):
 			continue
-		var n := squares(path)
 		var label := "%s m" % _metres(n)
+		if not b.is_empty():  # TASK-62: used this turn + this move / speed; over it only warns
+			label = "%s / %s m" % [_num(float(b.moved) + n * TokenGrid.METRES_PER_CELL), _num(float(b.speed))]
 		var at: Vector2 = (plan.ghost as Sprite2D).position + Vector2(grid.cell * maxf(cells, 1.0) * 0.5 + 6, -8)
 		var size := _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
 		draw_rect(Rect2(at + Vector2(-5, -size.y + 2), size + Vector2(10, 6)), Color(0, 0, 0, 0.55))
-		draw_string(_font, at + Vector2(0, 0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1, 1, 1, 0.95))
+		draw_string(_font, at + Vector2(0, 0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.6, 0.35) if over else Color(1, 1, 1, 0.95))
+
+
+static func _num(m: float) -> String:
+	return str(int(m)) if is_equal_approx(m, roundf(m)) else "%.1f" % m
 
 
 static func _metres(squares_moved: int) -> String:

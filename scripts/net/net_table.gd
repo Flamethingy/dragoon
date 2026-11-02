@@ -104,6 +104,11 @@ func _ready() -> void:
 	grid.step_requested.connect(_on_step_requested)
 	grid.token_clicked.connect(_on_token_clicked)
 	grid.token_menu.connect(func(entity: String) -> void: condition_menu_requested.emit(entity))
+	grid.budget = func(id: String) -> Dictionary:  # TASK-62: the trail's budget in a combat
+		for c: Dictionary in combat_view().get("order", []):
+			if c.get("usage") is Dictionary and (c.entity == id or (c.get("members", []) as Array).any(func(m: Dictionary) -> bool: return m.entity == id)):
+				return c.usage
+		return {}
 	assets = AssetCache.new(cache_dir)
 	notes = SessionNotes.new()
 	notes.calendar = WorldCalendar.load_file(calendar_path)
@@ -398,6 +403,87 @@ func combat_state() -> Dictionary:
 	return _combat if not _combat.is_empty() else {"active": false, "order": [], "round": 0, "turn": 0}
 
 
+# --- Action economy (TASK-62) ---------------------------------------------------------------------
+
+const ECONOMY := ["action", "bonus", "reaction", "object"]
+
+## What `ref` used since its turn began (display only, never blocks): {action, bonus,
+## reaction, object: bool, dash: bool, moved: metres, speed: metres (doubled by a Dash)}.
+func turn_usage(ref: String) -> Dictionary:
+	var out := {"action": false, "bonus": false, "reaction": false, "object": false, "dash": false, "moved": 0.0, "speed": 0.0}
+	if event_log == null or timeline == null:
+		return out
+	var events := event_log.effective()
+	var start := -1
+	var group := ""
+	for c: Dictionary in combat_state().order:
+		if c.has("members") and ref in (c.members as Array):
+			group = str(c.entity)
+	for i in range(events.size() - 1, -1, -1):
+		var e: Dictionary = events[i]
+		if e.type == "combat.turn" and str(e.data.get("entity", "")) in [ref, group] and str(e.data.get("entity", "")) != "":
+			start = i
+			break
+		if e.type == "combat.started":
+			start = i
+			break
+	var cells := 0
+	for i in range(maxi(start, 0), events.size()):
+		var e: Dictionary = events[i]
+		if str(e.entity) != ref:
+			continue
+		match str(e.type):
+			"action.used":
+				out[str(e.data.get("kind", "action"))] = true
+				if str(e.data.get("what", "")) == "dash":
+					out["dash"] = true
+			"action.unused":
+				out[str(e.data.get("kind", "action"))] = false
+				if str(e.data.get("what", "")) == "dash" or str(e.data.get("kind", "")) == "action":
+					out["dash"] = false
+			"token.moved":
+				var f: Array = e.data.get("from", [0, 0])
+				var t: Array = e.data.get("to", [0, 0])
+				cells += maxi(absi(int(t[0]) - int(f[0])), absi(int(t[1]) - int(f[1])))
+	out["moved"] = cells * TokenGrid.METRES_PER_CELL
+	var s := sheet_for(Reveal.DM, ref)
+	out["speed"] = Rules.speed(s, Rules.edition_of(s, rules_settings())) * (2.0 if out.dash else 1.0)
+	return out
+
+
+## Marks (or unmarks) one of `ref`'s action / bonus / reaction / object pips this turn; "dash"
+## is an action that doubles the movement.
+func mark_action(ref: String, kind: String, on := true, what := "") -> void:
+	if is_dm():
+		_handle_mark(1, ref, kind, on, what)
+	elif is_online():
+		request_mark.rpc_id(1, ref, kind, on, what)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_mark(ref: String, kind: String, on: bool, what: String) -> void:
+	if is_dm():
+		_handle_mark(multiplayer.get_remote_sender_id(), ref, kind.left(20), on, what.left(60))
+
+
+func _handle_mark(sender: int, ref: String, kind: String, on: bool, what: String) -> Dictionary:
+	if kind not in ECONOMY or not in_combat() or _editable_sheet(sender, ref).is_empty():
+		return {}
+	var e := event_log.append("action.used" if on else "action.unused", ref, {"kind": kind, "what": what}, _sender_player(sender))
+	_combat_changed()
+	return e
+
+
+## Which pip an attack or feature takes: its place on the sheet (bonus_actions, reactions).
+func _action_kind(sheet: Dictionary, name: String) -> String:
+	var features: Dictionary = timeline.entries("features")
+	for pair: Array in [["bonus_actions", "bonus"], ["reactions", "reaction"]]:
+		for fid: Variant in sheet.get(pair[0], []):
+			if str((features.get(str(fid), {}) as Dictionary).get("name", "")).to_lower() == name.to_lower():
+				return pair[1]
+	return "action"
+
+
 ## The initiative order for the tracker: [{entity, name, initiative, rolled, surprised,
 ## current, members: [{entity, name}]}] plus round and turn.
 func combat_view() -> Dictionary:
@@ -411,6 +497,7 @@ func combat_view() -> Dictionary:
 		var row := {"entity": o.entity, "initiative": o.initiative, "rolled": o.get("rolled", true), "current": i == int(c.turn),
 			"name": str(o.get("name", "")) if o.has("members") else timeline.name_of(str(o.entity)),
 			"surprised": str(o.entity) in surprised or (o.has("members") and (o.members as Array).any(func(m: Variant) -> bool: return m in surprised))}
+		row["usage"] = turn_usage(str(o.members[0]) if o.has("members") and not (o.members as Array).is_empty() else str(o.entity))  # TASK-62
 		if o.has("members"):
 			row["members"] = (o.members as Array).map(func(m: Variant) -> Dictionary: return {"entity": str(m), "name": timeline.name_of(str(m))})
 			if str(row.name) == "":
@@ -566,7 +653,7 @@ func next_turn() -> Dictionary:
 		if round_now != 1 or str(rules_settings().edition) == "2024" or not _surprised(c, order[turn]):
 			break
 		skipped.append(timeline.name_of(str(order[turn].entity)))
-	var e := event_log.append("combat.turn", "", {"round": round_now, "turn": turn})
+	var e := event_log.append("combat.turn", "", {"round": round_now, "turn": turn, "entity": str(order[turn].entity) if not order.is_empty() else ""})
 	_set_status("Round %d, turn %d%s" % [round_now, turn + 1, " (no turn: %s)" % ", ".join(skipped) if not skipped.is_empty() else ""])
 	if not order.is_empty():  # a character at 0 HP: its death save prompt
 		var who := str(order[turn].entity)
@@ -991,6 +1078,8 @@ func _handle_move(sender: int, entity: String, cell: Vector2i) -> void:
 		if facing != "":
 			token_turned.rpc_id(peer_id, entity, facing)
 	_set_status("%s moved to %s (event %d)" % [_name_of(entity), cell, int(e.get("id", 0))])
+	if in_combat():  # TASK-62: the movement budget on the tracker and the HUD
+		_combat_changed()
 
 
 ## The party token travels: one token.moved per member (data.group = "party"), so
@@ -1933,6 +2022,9 @@ func _handle_attack(sender: int, ref: String, query: String, targets: Array, opt
 	var features: Dictionary = timeline.entries("features")
 	var names: Array = Dice.multiattack(sheet, features) if bool(opts.get("multi", false)) else [query]
 	var cards := []
+	if in_combat() and not names.is_empty():  # TASK-62: the action (once for a Multiattack)
+		var kind := "action" if bool(opts.get("multi", false)) else _action_kind(sheet, str(names[0]).trim_prefix("attack with "))
+		event_log.append("action.used", ref, {"kind": kind, "what": "Multiattack" if bool(opts.get("multi", false)) else str(names[0])}, player)
 	for n: Variant in names:
 		var atk := Dice.attack_of(sheet, str(n), features)
 		if atk.is_empty():
@@ -2179,6 +2271,8 @@ func _handle_save_action(sender: int, ref: String, what: String, targets: Array,
 		return {}
 	if str(fx.name) == "":
 		fx.name = HudWidgets._name_of(what)
+	if in_combat():  # TASK-62
+		event_log.append("action.used", ref, {"kind": "action" if "/" in what else _action_kind(sheet, what), "what": str(fx.name)}, player)
 	var rolls := []
 	for d: Dictionary in fx.damage:
 		var r := Dice.roll(str(d.dice), rng)

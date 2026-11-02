@@ -105,6 +105,7 @@ func _ready() -> void:
 	timeline_bar.follow(table.timeline_sync, table.notes.calendar)
 	timeline_bar.cursor_changed.connect(func(at: int) -> void: table.look_back(timeline_bar.cursor_event(), at))
 	timeline_bar.show_toggled.connect(func(on: bool) -> void: table.show_everyone(on))
+	timeline_bar.time_requested.connect(func(minutes: int, reason: String) -> void: table.advance_clock(minutes, reason))
 	timeline_bar.rewind_requested.connect(func(upto: int) -> void:  # TASK-86
 		table.rewind_to(upto)
 		timeline_bar.line.set_cursor(-1))
@@ -160,6 +161,7 @@ func _refresh() -> void:
 	timeline_bar.visible = online
 	timeline_bar.show_button.visible = dm
 	timeline_bar.dm = dm
+	timeline_bar.time_button.visible = dm and timeline_bar.line.cursor_at < 0
 	if not online:
 		sheet.hide()
 	_next_session.visible = dm

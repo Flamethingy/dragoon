@@ -107,6 +107,20 @@ func _init() -> void:
 	line.list_requested.emit(b)
 	_check(asked.size() == 1 and asked[0] == b.events, "a box asks for its events in the list")
 
+	# Pass time (DM, at now): the clock moves on, a new box
+	bar.dm = true
+	bar._on_cursor(-1)
+	_check(bar.time_button.visible, "the DM can pass time at now")
+	bar.time_requested.connect(func(minutes: int, reason: String) -> void: dm.advance_clock(minutes, reason))
+	var boxes := (dm.timeline_sync.data.moments as Array).size()
+	var clock := log.day * 1440 + maxi(log.time, 0)
+	bar.time_button.get_popup().id_pressed.emit(2)  # 1 hour
+	await _frames(5)
+	_check(log.day * 1440 + log.time == clock + 60, "an hour passes")
+	_check((dm.timeline_sync.data.moments as Array).size() == boxes + 1, "a new box (%d -> %d)" % [boxes, (dm.timeline_sync.data.moments as Array).size()])
+	bar._on_cursor(int(ms[0].at))
+	_check(not bar.time_button.visible, "not while looking back")
+
 	dm.multiplayer.multiplayer_peer.close()
 	await process_frame
 	PackageManager._delete_tree(ProjectSettings.globalize_path(DIR))

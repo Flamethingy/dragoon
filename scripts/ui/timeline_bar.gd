@@ -9,6 +9,7 @@ extends DockPanel
 signal cursor_changed(at: int)  ## the moment looked at, in seconds; -1 = now (live)
 signal list_requested(ids: Array)  ## DM: that moment's events in the Timeline list
 signal show_toggled(on: bool)  ## DM: Show everyone (TASK-84)
+signal time_requested(minutes: int, reason: String)  ## DM: Pass time (the clock moves on: a new box)
 signal rewind_requested(upto: int)  ## DM: set the timeline back to this moment (TASK-86), confirmed
 signal restore_requested(rewind_id: int)  ## DM: bring a cut-off branch back, confirmed  ## DM: that moment's events in the Timeline list
 
@@ -20,6 +21,10 @@ var show_button: Button  ## DM: everyone's timeline follows mine (TASK-84)
 var shown := false  ## a player: the DM is showing me a moment (no cursor of my own)
 var dm := false  ## the DM's bar: set back, restore, change the past
 var back_button: Button  ## DM looking back: set the timeline back to here (TASK-86)
+var time_button: MenuButton  ## DM at now: Pass time
+## Pass time's choices: [text, minutes, reason]
+const PASS_TIME := [["1 minute", 1, ""], ["10 minutes", 10, ""], ["1 hour", 60, ""], ["4 hours", 240, ""],
+	["8 hours", 480, ""], ["1 day", 1440, ""], ["1 week", 10080, ""]]
 var confirm: ConfirmationDialog
 var _confirmed := Callable()
 
@@ -50,11 +55,25 @@ func _init() -> void:
 	show_button.toggle_mode = true
 	show_button.visible = false
 	_head.add_child(show_button)
-	_head.move_child(show_button, 3)
+	_head.move_child(show_button, 4)
+	time_button = MenuButton.new()
+	time_button.name = "PassTime"
+	time_button.text = "Pass time"
+	time_button.tooltip_text = "The in-world clock moves on (a new box on the timeline)"
+	time_button.focus_mode = Control.FOCUS_NONE
+	time_button.flat = false
+	time_button.add_theme_font_size_override("font_size", 12)
+	time_button.visible = false
+	for i in PASS_TIME.size():
+		time_button.get_popup().add_item(str(PASS_TIME[i][0]), i)
+	time_button.get_popup().id_pressed.connect(func(i: int) -> void:
+		time_requested.emit(int(PASS_TIME[i][1]), str(PASS_TIME[i][2])))
+	_head.add_child(time_button)
+	_head.move_child(time_button, 2)
 	back_button = _small_button("Set back to here", "Cut off everything after this moment (it can be restored from the faded branch)", _ask_rewind)
 	back_button.visible = false
 	_head.add_child(back_button)
-	_head.move_child(back_button, 2)
+	_head.move_child(back_button, 3)
 	confirm = ConfirmationDialog.new()
 	confirm.name = "Confirm"
 	confirm.confirmed.connect(func() -> void:
@@ -63,7 +82,7 @@ func _init() -> void:
 	add_child(confirm)
 	var fit := _small_button("Fit", "Show the whole timeline", func() -> void: line.fit())
 	_head.add_child(fit)
-	_head.move_child(fit, 4)
+	_head.move_child(fit, 5)
 	line = TimelineLine.new()
 	line.name = "Line"
 	line.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -131,6 +150,7 @@ func _ask_rewind() -> void:
 func _on_cursor(at: int) -> void:
 	now_button.visible = at >= 0 and not shown
 	back_button.visible = at >= 0 and dm
+	time_button.visible = at < 0 and dm
 	_show_when()
 	cursor_changed.emit(at)
 

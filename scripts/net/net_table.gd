@@ -26,7 +26,7 @@ signal sheet_received(ref: String)  ## a sheet I opened arrived or changed (TASK
 signal rolls_changed  ## the roll log got a roll (TASK-12)
 signal entry_imported(entry: Dictionary)
 signal condition_menu_requested(ref: String)
-signal attack_requested(ref: String, query: String, multi: bool)  ## a sheet's attack link: pick targets (TASK-54)  ## a token's right click, a sheet's or roll card's link (TASK-56)  ## DM: a core entry was copied into the world
+signal attack_requested(ref: String, query: String, multi: bool, kind: String)  ## a sheet's attack or save link: pick targets (TASK-54/55)  ## a token's right click, a sheet's or roll card's link (TASK-56)  ## DM: a core entry was copied into the world
 
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
@@ -86,6 +86,7 @@ var _requested := {}  ## sha -> true while downloading
 var _rules := {}  ## the world's rules settings as the host sent them (players)
 var _combat := {}  ## the initiative order as the host sent it (players, TASK-58)
 var _applied := {}  ## host: "<card id>:<target>" -> hp.changed id applied from a card (Assist, TASK-54)
+var _pending_saves := {}  ## host: card id -> the save card waiting for players' saves (TASK-55)
 var _catalog := {}  ## kind -> id -> entry of the packages (spells, items), read once (TASK-48)
 
 var _ui: TableUI
@@ -1282,6 +1283,7 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 					attacks.append(str(f.get("name", fid)))
 		sheet["_attacks"] = attacks
 		sheet["_multiattack"] = not Dice.multiattack(sheet, features).is_empty()  # TASK-54
+		sheet["_save_actions"] = _save_features(sheet)  # TASK-55
 		var refs := {}  # spells and items: name (and level) for the HUD's quick buttons (TASK-48)
 		for v: Variant in sheet.get("spells", []):
 			var e := catalog_entry(str(v))
@@ -1771,8 +1773,8 @@ func request_attack(ref: String, query: String, targets: Array, opts: Dictionary
 
 
 ## Asks the table's UI to pick targets for an attack (a sheet's or the HUD's attack link).
-func begin_attack(ref: String, query: String, multi := false) -> void:
-	attack_requested.emit(ref, query, multi)
+func begin_attack(ref: String, query: String, multi := false, kind := "attack") -> void:
+	attack_requested.emit(ref, query, multi, kind)
 
 
 func _handle_attack(sender: int, ref: String, query: String, targets: Array, opts: Dictionary) -> Array:
@@ -1834,6 +1836,177 @@ func _attack_card(player: String, ref: String, sheet: Dictionary, atk: Dictionar
 	return _post_roll(_roll_entry(ev))
 
 
+# --- Save-based actions (TASK-55) -------------------------------------------------------------
+
+## A save-based feature ("Acid Breath") or spell ("spells/burning-hands") of `ref` at
+## `targets`: the damage is rolled once, each target rolls its save against the DC (the
+## feature's, else the caster's spell DC). The DM's creatures save at once; a player's
+## creature gets a "DEX save DC 15" prompt (the DM can roll for them). A fail takes the damage
+## (and the conditions the text names), a success half if the text says so, none otherwise.
+## `opts`: {cover} (+2 / +5 on Dex saves).
+func save_action(ref: String, what: String, targets: Array, opts := {}) -> void:
+	if is_dm():
+		_handle_save_action(1, ref, what, targets, opts)
+	elif is_online():
+		request_save_action.rpc_id(1, ref, what, targets, opts)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_save_action(ref: String, what: String, targets: Array, opts: Dictionary) -> void:
+	if is_dm():
+		_handle_save_action(multiplayer.get_remote_sender_id(), ref, what.left(100), targets.slice(0, 20), opts)
+
+
+## The save-based features of a sheet (names), for its links.
+func _save_features(sheet: Dictionary) -> Array:
+	var out := []
+	var features: Dictionary = timeline.entries("features") if timeline != null else {}
+	for key in ["features", "actions", "bonus_actions", "reactions", "legendary_actions"]:
+		for fid: Variant in sheet.get(key, []):
+			var f: Variant = features.get(str(fid), {})
+			if f is Dictionary and not f.has("attack") and not Rules.save_effect(f).is_empty():
+				out.append(str(f.get("name", fid)))
+	return out
+
+
+## The entry behind `what`: a spell / item ref, else one of the sheet's features by name.
+func _effect_entry(sheet: Dictionary, what: String) -> Dictionary:
+	if "/" in what:
+		return catalog_entry(what)
+	var features: Dictionary = timeline.entries("features")
+	for key in ["features", "actions", "bonus_actions", "reactions", "legendary_actions"]:
+		for fid: Variant in sheet.get(key, []):
+			var f: Variant = features.get(str(fid), {})
+			if f is Dictionary and str(f.get("name", "")).to_lower() == what.to_lower():
+				return f
+	return {}
+
+
+func _handle_save_action(sender: int, ref: String, what: String, targets: Array, opts: Dictionary) -> Dictionary:
+	var player := _sender_player(sender)
+	if player == "" or not may_see_sheet(player, ref):
+		_deny_roll(sender, "that's not your sheet")
+		return {}
+	var sheet := sheet_for(Reveal.DM, ref)
+	var entry := _effect_entry(sheet, what)
+	var fx := Rules.save_effect(entry, sheet)
+	if fx.is_empty():
+		_deny_roll(sender, "\"%s\" has no saving throw" % what)
+		return {}
+	if str(fx.name) == "":
+		fx.name = HudWidgets._name_of(what)
+	var rolls := []
+	for d: Dictionary in fx.damage:
+		var r := Dice.roll(str(d.dice), rng)
+		rolls.append({"formula": str(d.dice), "rolled": int(r.total), "type": str(d.type)})
+	var cover := Rules.cover_bonus(str(opts.get("cover", ""))) if fx.ability == "dex" else 0
+	var card := {"name": fx.name, "ability": fx.ability, "dc": fx.dc, "half": fx.half, "damage": rolls, "conditions": fx.conditions,
+		"duration": fx.duration, "cover": cover, "targets": []}
+	var waiting := []
+	for t: Variant in targets:
+		var tref := str(t)
+		if tref == ref or sheet_for(Reveal.DM, tref).is_empty():
+			continue
+		if (owners.get(tref, []) as Array).is_empty():
+			card.targets.append(_save_row(tref, card))
+		else:
+			waiting.append(tref)
+			card.targets.append({"ref": tref, "name": timeline.name_of(tref), "waiting": true})
+	var data := {"roll": "%s (DC %d %s save)" % [fx.name, fx.dc, str(fx.ability).to_upper()], "results": [], "who": str(sheet.get("name", "")),
+		"hidden": false, "save": card}
+	var ev := event_log.append("dice.rolled", ref, data, player)
+	var posted := _post_roll(_roll_entry(ev))
+	if not waiting.is_empty():
+		_pending_saves[int(ev.id)] = card.duplicate(true)  # its own copy: the posted card stays as it was
+		for tref: String in waiting:
+			_ask_save(int(ev.id), tref, _pending_saves[int(ev.id)])
+	return posted
+
+
+## One target's save: rolled now (the DM's side), damage and conditions as the result says.
+func _save_row(tref: String, card: Dictionary, by := Reveal.DM) -> Dictionary:
+	var ts := sheet_for(Reveal.DM, tref)
+	var asked := Dice.resolve(ts, "%s save" % card.ability, {}, rules_settings())
+	var formula := str(asked[0].formula) if not asked.is_empty() else "1d20"
+	if int(card.get("cover", 0)) > 0:
+		formula += "+%d" % int(card.cover)
+	var r := Dice.roll(formula, rng)
+	var ok := int(r.total) >= int(card.dc)  # a natural 20 or 1 means nothing special on a save
+	var row := {"ref": tref, "name": timeline.name_of(tref), "total": int(r.total), "formula": formula, "success": ok,
+		"label": str(asked[0].label) if not asked.is_empty() else "", "damage": [], "amount": 0, "by": by}
+	if not ok or bool(card.half):
+		for d: Dictionary in card.damage:
+			var amount := int(d.rolled) if not ok else int(d.rolled) / 2
+			var after := Rules.damage_after(ts, amount, str(d.type))
+			row.damage.append({"rolled": amount, "type": str(d.type), "amount": int(after.amount), "note": str(after.note)})
+			row.amount = int(row.amount) + int(after.amount)
+	if int(row.amount) > 0:
+		match automation("damage"):
+			"auto":
+				row["applied"] = int(_handle_hp(1, tref, -int(row.amount), str(card.name)).get("id", 0))
+			"assist":
+				row["pending"] = true
+	if not ok and not (card.conditions as Array).is_empty() and automation("conditions") != "off":
+		var done := []
+		for c: Variant in card.conditions:
+			if automation("conditions") == "auto":
+				var e := _handle_condition(1, tref, str(c), true, 1, card.get("duration", {}))
+				if not e.is_empty():
+					done.append(int(e.id))
+		row["conditions"] = card.conditions
+		if not done.is_empty():
+			row["applied_conditions"] = done
+	return row
+
+
+## Asks the players of `tref` for their save (a prompt in their chat), the DM sees it wait.
+func _ask_save(card_id: int, tref: String, card: Dictionary) -> void:
+	var prompt := {"id": card_id, "by": Reveal.DM, "who": timeline.name_of(tref), "ref": tref, "results": [], "hidden": false,
+		"action": "save_prompt", "text": "%s save DC %d" % [str(card.ability).to_upper(), int(card.dc)]}
+	var players: Array = owners.get(tref, [])
+	for peer_id: int in peers:
+		if str(peers[peer_id]) in players:
+			roll_added.rpc_id(peer_id, prompt)
+	var mine := prompt.duplicate()
+	mine["action"] = "save_prompt_dm"
+	mine["hidden"] = true
+	_add_roll(mine)
+
+
+## A player answers their save prompt (or the DM rolls for an absent one): the result card.
+func answer_save(card_id: int, tref: String) -> void:
+	if is_dm():
+		_handle_save_answer(1, card_id, tref)
+	elif is_online():
+		request_save_answer.rpc_id(1, card_id, tref)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_save_answer(card_id: int, tref: String) -> void:
+	if is_dm():
+		_handle_save_answer(multiplayer.get_remote_sender_id(), card_id, tref)
+
+
+func _handle_save_answer(sender: int, card_id: int, tref: String) -> Dictionary:
+	var player := _sender_player(sender)
+	var card: Dictionary = _pending_saves.get(card_id, {})
+	if card.is_empty() or not (card.targets as Array).any(func(r: Dictionary) -> bool: return r.ref == tref and r.get("waiting", false)):
+		return {}
+	if player != Reveal.DM and not owns(player, tref):
+		_deny_roll(sender, "that's not your save")
+		return {}
+	for r: Dictionary in card.targets:
+		if r.ref == tref:
+			r.erase("waiting")
+	if not (card.targets as Array).any(func(r: Dictionary) -> bool: return r.get("waiting", false)):
+		_pending_saves.erase(card_id)
+	var one := card.duplicate()
+	one["targets"] = [_save_row(tref, card, player)]
+	var data := {"roll": "%s: %s save" % [card.name, str(card.ability).to_upper()], "results": [], "who": timeline.name_of(tref), "hidden": false, "save": one}
+	var ev := event_log.append("dice.rolled", tref, data, player)
+	return _post_roll(_roll_entry(ev))
+
+
 ## A new roll card into the feed, to everyone who may see it.
 func _post_roll(entry: Dictionary) -> Dictionary:
 	_add_roll(entry)
@@ -1849,12 +2022,17 @@ func undo_card(card_id: int) -> int:
 		return 0
 	var card := event_log.get_event(card_id)
 	var count := 0
-	for row: Variant in (card.get("data", {}).get("attack", {}) as Dictionary).get("targets", []):
+	for row: Variant in _card_rows(card):
 		var id := int((row as Dictionary).get("applied", 0))
 		if _applied.has("%d:%s" % [card_id, row.ref]):
 			id = int(_applied["%d:%s" % [card_id, row.ref]])
-		if id > 0 and not event_log.is_undone(id):
-			event_log.undo(id)
+		var ids: Array = [id] + (row as Dictionary).get("applied_conditions", [])
+		var any := false
+		for x: Variant in ids:
+			if int(x) > 0 and not event_log.is_undone(int(x)):
+				event_log.undo(int(x))
+				any = true
+		if any:
 			_applied.erase("%d:%s" % [card_id, row.ref])
 			_sheet_changed(str(row.ref))
 			count += 1
@@ -1865,14 +2043,23 @@ func undo_card(card_id: int) -> int:
 	return count
 
 
+## The target rows of an attack or save card event.
+static func _card_rows(card: Dictionary) -> Array:
+	var d: Dictionary = card.get("data", {})
+	for key in ["attack", "save"]:
+		if d.get(key) is Dictionary:
+			return (d[key] as Dictionary).get("targets", [])
+	return []
+
+
 ## DM: applies the damage an attack card (Assist) left for one target.
 func apply_card(card_id: int, target: String) -> Dictionary:
 	if not is_dm() or _applied.has("%d:%s" % [card_id, target]):
 		return {}
 	var card := event_log.get_event(card_id)
-	for row: Variant in (card.get("data", {}).get("attack", {}) as Dictionary).get("targets", []):
+	for row: Variant in _card_rows(card):
 		if str(row.ref) == target and int(row.get("amount", 0)) > 0 and int(row.get("applied", 0)) == 0:
-			var e := _handle_hp(1, target, -int(row.amount), str(card.data.attack.name))
+			var e := _handle_hp(1, target, -int(row.amount), str(card.data.get("roll", "")))
 			_applied["%d:%s" % [card_id, target]] = int(e.get("id", 0))
 			return e
 	return {}
@@ -1988,6 +2175,8 @@ static func _roll_entry(e: Dictionary) -> Dictionary:
 		entry["action"] = str(d.action)
 	if d.has("attack"):  # targets, hits, damage (TASK-54)
 		entry["attack"] = d.attack
+	if d.has("save"):  # DC, saves per target, damage (TASK-55)
+		entry["save"] = d.save
 	if d.has("table"):
 		entry["table"] = str(d.table).trim_prefix("tables/")
 		entry["value"] = int(d.get("value", 0))
@@ -2231,6 +2420,12 @@ static func roll_bbcode(entry: Dictionary, names := {}) -> String:
 		lines.append(line)
 	if entry.get("attack") is Dictionary:  # TASK-54: one line per target
 		lines = _attack_lines(entry)
+	elif entry.get("save") is Dictionary:  # TASK-55
+		lines = _save_lines(entry)
+	if str(entry.get("action", "")) == "save_prompt":
+		lines.insert(0, "[b][url=save:%d:%s]%s · Roll[/url][/b]" % [int(entry.get("id", 0)), entry.get("ref", ""), Markdown.escape(str(entry.get("text", "")))])
+	elif str(entry.get("action", "")) == "save_prompt_dm":
+		lines.insert(0, "[i]waiting for the %s[/i] · [url=save:%d:%s]roll for them[/url]" % [Markdown.escape(str(entry.get("text", ""))), int(entry.get("id", 0)), entry.get("ref", "")])
 	if str(entry.get("action", "")) == "prompt":  # TASK-58: the player's initiative prompt
 		lines.insert(0, "[b][url=init:%s]Roll initiative[/url][/b]" % entry.get("ref", ""))
 	elif str(entry.get("action", "")) == "prompt_dm":
@@ -2247,6 +2442,43 @@ static func roll_bbcode(entry: Dictionary, names := {}) -> String:
 	if entry.get("hidden", false):
 		head += " [color=#%s][i]hidden[/i][/color]" % Markdown.MUTED.to_html(false)
 	return "[font_size=12]%s[/font_size]\n%s" % [head, "\n".join(lines)]
+
+
+## A save card's lines: the damage rolled once, then "→ Goblin: DEX 9 failed · 14 fire".
+static func _save_lines(entry: Dictionary) -> PackedStringArray:
+	var s: Dictionary = entry.save
+	var out := PackedStringArray()
+	var muted := Markdown.MUTED.to_html(false)
+	var dmg := PackedStringArray()
+	for d: Dictionary in s.get("damage", []):
+		dmg.append("%d %s [color=#%s](%s)[/color]" % [int(d.rolled), str(d.type), muted, Markdown.escape(str(d.formula))])
+	out.append("DC %d %s save%s%s" % [int(s.dc), str(s.ability).to_upper(), " · " + ", ".join(dmg) if not dmg.is_empty() else "",
+		" · half on a success" if bool(s.half) and not dmg.is_empty() else ""])
+	var applied := false
+	for row: Dictionary in s.get("targets", []):
+		if row.get("waiting", false):
+			out.append("→ %s: [i]waiting for the save[/i]" % Markdown.escape(str(row.name)))
+			continue
+		var verdict := "[color=#%s][b]saved[/b][/color]" % UISkin.GREEN.to_html(false) if bool(row.get("success", false)) else "[color=#%s][b]failed[/b][/color]" % UISkin.RED.to_html(false)
+		var line := "→ %s: %s %d [color=#%s]%s[/color] %s" % [Markdown.escape(str(row.name)), str(s.ability).to_upper(), int(row.total), muted, Markdown.escape(str(row.formula)), verdict]
+		var bits := PackedStringArray()
+		for d: Dictionary in row.get("damage", []):
+			var t := "%d %s" % [int(d.rolled), str(d.type)]
+			if str(d.note) != "":
+				t += " → %d (%s)" % [int(d.amount), d.note]
+			bits.append(t.strip_edges())
+		if not bits.is_empty():
+			line += " · " + ", ".join(bits)
+		if not (row.get("conditions", []) as Array).is_empty():
+			line += " · " + ", ".join((row.conditions as Array).map(func(c: Variant) -> String: return str(c)))
+		if row.get("pending", false):
+			line += " · [url=apply:%d:%s]apply %d[/url]" % [int(entry.get("id", 0)), row.ref, int(row.amount)]
+		if int(row.get("applied", 0)) > 0 or not (row.get("applied_conditions", []) as Array).is_empty():
+			applied = true
+		out.append(line)
+	if applied:
+		out.append("[color=#%s]applied[/color] · [url=undo:%d]undo[/url]" % [muted, int(entry.get("id", 0))])
+	return out
 
 
 ## An attack card's lines: "→ Goblin: 17 hits · 9 slashing → 4 (resistant)", undo / apply.

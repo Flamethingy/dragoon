@@ -115,6 +115,8 @@ func _on_meta(meta: Variant) -> void:
 		table.roll(m.substr(5), ref, Input.is_key_pressed(KEY_SHIFT) and table.is_dm())
 	elif m.begins_with("attack:") and table != null:  # TASK-54: pick targets, then roll
 		table.begin_attack(ref, m.substr(7), m == "attack:multiattack")
+	elif m.begins_with("saveact:") and table != null:  # TASK-55: a save-based action
+		table.begin_attack(ref, m.substr(8), false, "save")
 	elif m == "cond:add" and table != null:  # TASK-56: the condition menu
 		table.condition_menu_requested.emit(ref)
 	elif m.begins_with("cond:off:") and table != null:
@@ -284,6 +286,8 @@ static func _attacks(s: Dictionary) -> String:
 		out += ", [url=attack:multiattack]Multiattack[/url]"
 	for name: Variant in s.get("_attacks", []):
 		out += ", [url=attack:%s]%s[/url]" % [str(name).to_lower(), Markdown.escape(str(name))]
+	for name: Variant in s.get("_save_actions", []):
+		out += ", [url=saveact:%s]%s[/url]" % [str(name), Markdown.escape(str(name))]
 	return out
 
 

@@ -368,9 +368,10 @@ func _build_attack_bar(root: Control) -> void:
 
 ## Starts an attack of `ref`: click the targets on the map (a second click drops one), then
 ## Roll. A creature's Multiattack (`multi`) rolls its listed attacks in a row.
-func begin_attack(ref: String, query: String, multi := false) -> void:
+func begin_attack(ref: String, query: String, multi := false, kind := "attack") -> void:
 	cancel_attack()
-	attack = {"ref": ref, "query": query, "multi": multi, "targets": []}
+	attack = {"ref": ref, "query": query, "multi": multi, "targets": [], "kind": kind}
+	_adv.visible = kind == "attack"  # a save: the targets' own conditions decide
 	attack_bar.visible = true
 	_update_attack_label()
 
@@ -405,7 +406,10 @@ func roll_attack() -> void:
 	var adv := int(_adv.get_item_metadata(_adv.selected))
 	if adv != 2:
 		opts["advantage"] = adv
-	table.attack(str(attack.ref), str(attack.query), (attack.targets as Array).duplicate(), opts)
+	if str(attack.get("kind", "attack")) == "save":
+		table.save_action(str(attack.ref), str(attack.query), (attack.targets as Array).duplicate(), {"cover": opts.cover})
+	else:
+		table.attack(str(attack.ref), str(attack.query), (attack.targets as Array).duplicate(), opts)
 	cancel_attack()
 
 

@@ -486,6 +486,61 @@ static func _lists_type(s: Dictionary, key: String, type: String) -> bool:
 	return false
 
 
+const _ABILITY_WORDS := {"strength": "str", "dexterity": "dex", "constitution": "con", "intelligence": "int", "wisdom": "wis", "charisma": "cha"}
+
+
+## What a save-based feature or spell does (TASK-55): {name, ability, dc, damage: [{dice,
+## type}], half, conditions, duration}. The DC: the feature's own (`save.dc`), else the
+## caster's spell DC. {} if it has no save.
+static func save_effect(entry: Dictionary, caster := {}) -> Dictionary:
+	var text := str(entry.get("text", entry.get("description", ""))).get_slice("**At Higher Levels", 0)
+	var lower := text.to_lower()
+	var save: Dictionary = entry.get("save", {}) if entry.get("save") is Dictionary else {}
+	var ability := str(save.get("ability", ""))
+	if ability == "":
+		for w: String in _ABILITY_WORDS:
+			if (w + " saving throw") in lower:
+				ability = _ABILITY_WORDS[w]
+				break
+	if ability == "":
+		return {}
+	var dc := int(save.get("dc", 0))
+	if dc <= 0:
+		var m := RegEx.create_from_string("dc (\\d+)").search(lower)
+		dc = int(m.get_string(1)) if m != null else spell_dc(caster)  # a spell: the caster's DC
+	var damage := []
+	if entry.get("damage") is Array:
+		for d: Variant in entry.damage:
+			if d is Dictionary and Dice.is_formula(str(d.get("dice", ""))):
+				damage.append({"dice": str(d.dice).replace(" ", ""), "type": str(d.get("type", ""))})
+	if damage.is_empty():
+		var re := RegEx.create_from_string("(\\d+d\\d+(?:\\s*[+-]\\s*\\d+)?)\\)?\\s+(\\w+)\\s+damage")
+		for m: RegExMatch in re.search_all(lower):
+			var t := m.get_string(2)
+			damage.append({"dice": m.get_string(1).replace(" ", ""), "type": t if t in _damage_ids() else ""})
+	var conds := []
+	for id: String in conditions():
+		if bool(conditions()[id].get("marker", false)) or id == "exhaustion":
+			continue
+		if RegEx.create_from_string("\\b%s\\b" % id).search(lower) != null:
+			conds.append(id)
+	var duration := {}
+	var dm := RegEx.create_from_string("for (\\d+) (minute|round|hour)").search(lower)
+	if dm != null:
+		duration = {"rounds": int(dm.get_string(1)) * (10 if dm.get_string(2) == "minute" else 600 if dm.get_string(2) == "hour" else 1)}
+	elif "until the end of its next turn" in lower or "until the end of your next turn" in lower:
+		duration = {"rounds": 1, "ends": "turn_end"}
+	return {"name": str(entry.get("name", "")), "ability": ability, "dc": dc, "damage": damage,
+		"half": "half as much" in lower or "half damage" in lower, "conditions": conds, "duration": duration}
+
+
+static func _damage_ids() -> Array:
+	var out := []
+	for d: Variant in core().get("damage_types", []):
+		out.append(str(d.get("id", d)) if d is Dictionary else str(d))
+	return out
+
+
 ## The AC bonus of cover (TASK-54): "half" +2, "three_quarters" +5.
 static func cover_bonus(cover: String) -> int:
 	return 2 if cover == "half" else 5 if cover == "three_quarters" else 0

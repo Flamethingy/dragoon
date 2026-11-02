@@ -79,6 +79,8 @@ func _init() -> void:
 			table.condition_menu_requested.emit(str(meta).substr(5))
 		elif str(meta).begins_with("init:") and table != null:  # an initiative prompt (TASK-58)
 			table.answer_initiative(str(meta).substr(5))
+		elif str(meta).begins_with("save:") and table != null:  # a save prompt (TASK-55)
+			table.answer_save(int(str(meta).get_slice(":", 1)), str(meta).substr(str(meta).find(":", 5) + 1))
 		elif str(meta).begins_with("undo:") and table != null:  # an attack card's damage (TASK-54)
 			table.undo_card(int(str(meta).substr(5)))
 		elif str(meta).begins_with("apply:") and table != null:

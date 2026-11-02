@@ -164,7 +164,6 @@ func _refresh() -> void:
 	_notes_panel.visible = online
 	chat.visible = online and minimal  # the app's calm table; otherwise the session panel has the rolls
 	timeline_bar.visible = online
-	timeline_bar.show_button.visible = dm
 	timeline_bar.dm = dm
 	timeline_bar.line.can_extend = dm  # the DM drags into the future to pass time
 	if not online:

@@ -4,8 +4,10 @@ extends DockPanel
 ## line, by in-world time, over all maps. It behaves like the chat (DockPanel): docked at the
 ## top of the table at first, it can dock at a side or the bottom, float, or pop out into its
 ## own window (also by dragging it past the program's edge).
-## The head shows the cursor's moment; "Fit" shows it all. A double click on the line (or
-## Home) goes back to now; the DM holds the current time to move it (TimelineLine).
+## Nico 2026-11-02: no head, so it stays slim: dragged by its background (away from the line)
+## it docks, floats or pops out; a right click away from the boxes has the menu (back to now,
+## fit, Show everyone). A double click on the line (or Home) goes back to now; the DM drags
+## the orange triangle, the current time (TimelineLine).
 
 signal cursor_changed(at: int)  ## the moment looked at, in seconds; -1 = now (live)
 signal list_requested(ids: Array)  ## DM: that moment's events in the Timeline list
@@ -18,8 +20,8 @@ signal restore_requested(rewind_id: int)  ## DM: bring a cut-off branch back, co
 
 var sync: TimelineSync
 var line: TimelineLine
-var when_label: Label
-var show_button: Button  ## DM: everyone's timeline follows mine (TASK-84)
+var showing_all := false  ## DM: everyone's timeline follows mine (TASK-84)
+var menu: PopupMenu  ## right click: back to now, fit, Show everyone
 var shown := false  ## a player: the DM is showing me a moment (no cursor of my own)
 var dm := false  ## the DM's bar: set back, restore, change the past
 var confirm: ConfirmationDialog
@@ -33,31 +35,24 @@ func _init() -> void:
 	window_title = "Dragoon · Timeline"
 	window_min = Vector2i(600, 140)
 	allow_top = true
-	place = {"dock": "top", "side": 10, "bottom": 4, "top": 3, "r": [8, 3, 32, 4], "window": false}
+	place = {"dock": "top", "side": 10, "bottom": 4, "top": 2, "r": [8, 3, 32, 3], "window": false}
+	thin = true  # docked at a side it is as slim as at the top
+	drag_anywhere = true
 	title_label.text = "Timeline"
-	title_label.size_flags_horizontal = Control.SIZE_FILL
-	when_label = Label.new()
-	when_label.name = "When"
-	when_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	when_label.add_theme_font_size_override("font_size", 12)
-	when_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_head.add_child(when_label)
-	_head.move_child(when_label, 1)
-	show_button = _small_button("Show everyone", "Every player's timeline follows yours (a flashback, a replay)", func() -> void:
-		show_toggled.emit(show_button.button_pressed))
-	show_button.toggle_mode = true
-	show_button.visible = false
-	_head.add_child(show_button)
-	_head.move_child(show_button, 2)
+	_head.visible = false
+	menu = PopupMenu.new()
+	menu.name = "Menu"
+	menu.add_item("Back to now", 0)
+	menu.add_item("Fit everything", 1)
+	menu.add_check_item("Show everyone", 2)
+	menu.id_pressed.connect(_on_menu)
+	add_child(menu)
 	confirm = ConfirmationDialog.new()
 	confirm.name = "Confirm"
 	confirm.confirmed.connect(func() -> void:
 		if _confirmed.is_valid():
 			_confirmed.call())
 	add_child(confirm)
-	var fit := _small_button("Fit", "Show the whole timeline", func() -> void: line.fit())
-	_head.add_child(fit)
-	_head.move_child(fit, 3)
 	line = TimelineLine.new()
 	line.name = "Line"
 	line.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -67,20 +62,41 @@ func _init() -> void:
 	body.add_child(line)
 	line.future_requested.connect(func(minutes: int) -> void: time_requested.emit(minutes, ""))
 	line.split_requested.connect(_ask_split)
+	line.background_input.connect(_head_input)  # its background moves it, like a title
+	line.menu_requested.connect(open_menu)
 	line.restore_requested.connect(func(id: int, cut: int) -> void:
 		if dm:
 			_ask("Bring back the %d cut-off moment%s? They count again, after what happened since." % [cut, "" if cut == 1 else "s"],
 				func() -> void: restore_requested.emit(id)))
 
 
-func _small_button(text: String, tip: String, pressed: Callable) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.tooltip_text = tip
-	b.focus_mode = Control.FOCUS_NONE
-	b.add_theme_font_size_override("font_size", 12)
-	b.pressed.connect(pressed)
-	return b
+## The bar's menu at `at` (screen position).
+func open_menu(at: Vector2) -> void:
+	menu.set_item_disabled(menu.get_item_index(0), line.cursor_at < 0 or shown)
+	var i := menu.get_item_index(2)
+	menu.set_item_checked(i, showing_all)
+	menu.set_item_disabled(i, not dm)
+	menu.position = Vector2i(at)
+	menu.reset_size()
+	menu.popup()
+
+
+func _on_menu(id: int) -> void:
+	match id:
+		0:
+			if not shown:
+				line.set_cursor(-1)
+		1:
+			line.fit()
+		2:
+			if dm:
+				toggle_show()
+
+
+## DM: Show everyone on / off (TASK-84).
+func toggle_show() -> void:
+	showing_all = not showing_all
+	show_toggled.emit(showing_all)
 
 
 ## Follows a TimelineSync (the table's) and the calendar for the dates.
@@ -102,7 +118,8 @@ func _refresh() -> void:
 ## Show everyone (TASK-84): the DM's button shows it; a player's own cursor is off while on.
 func set_showing(on: bool, dm: bool) -> void:
 	if dm:
-		show_button.set_pressed_no_signal(on)
+		showing_all = on
+		_show_when()
 		return
 	shown = on
 	line.cursor_locked = on
@@ -196,14 +213,16 @@ func segment() -> Dictionary:
 func _show_when() -> void:
 	var ms := line.moments()
 	if line.cursor_at < 0:
-		when_label.text = "The DM is showing everyone: now" if shown else "now · %d moments" % ms.size()
+		line.hint = "The DM is showing everyone: now" if shown else ("Showing everyone" if showing_all else "")
+		line.queue_redraw()
 		return
 	var i := -1
 	for m: Dictionary in ms:
 		if int(m.at) > line.cursor_at:
 			break
 		i = int(m.index)
-	when_label.text = ("The DM is showing: %s" if shown else ("looking back: %s · changes go here" if dm else "looking back: %s · act at Now")) % (line.moment_text(ms[i]).get_slice("\n", 0) if i >= 0 else "before the beginning")
+	line.hint = ("The DM is showing: %s" if shown else ("Showing everyone: %s" if showing_all else "looking back: %s")) % (line.moment_text(ms[i]).get_slice("\n", 0) if i >= 0 else "before the beginning")
+	line.queue_redraw()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

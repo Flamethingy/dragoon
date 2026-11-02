@@ -7,17 +7,20 @@ extends Control
 ## Laid out along "u" (time) and across "v": left to right when the bar is wide, bottom to
 ## top when it is tall (docked at a side; Nico 2026-11-02). Text stays upright.
 ## Wheel: zoom around the mouse; right or middle drag (or Shift+wheel): pan. Left click or
-## drag moves the black cursor at once (the table follows in real time; it stays where let go,
-## and stops at now). Nico 2026-11-02: press and hold a second (the DM, can_extend) and the
-## orange triangle, the current time, moves instead: let go later on, that much time passes;
-## earlier, the DM is asked to split the timeline there. A double click goes back to now.
-## Hovering a box shows what changed; right click on a box asks for its events.
+## drag on the line moves the black cursor (below it) at once: the table follows in real time;
+## it stays where let go, and stops at now. Nico 2026-11-02: the DM drags the orange triangle
+## (above the line), the current time: let go later on, that much time passes; earlier, the
+## DM is asked to split the timeline there. A double click goes back to now. The rest of the
+## bar (away from the line) moves the panel. Hovering a box shows what changed; right click
+## on a box asks for its events, elsewhere for the bar's menu (fit, show everyone, now).
 
 signal cursor_moved(at: int)  ## -1 = now (live)
 signal list_requested(moment: Dictionary)
 signal restore_requested(rewind_id: int, moments: int)  ## right click on a cut-off branch (DM, TASK-86)
 signal future_requested(minutes: int)  ## DM let go of the current time later on: pass this much time
 signal split_requested(at: int)  ## DM let go of the current time in the past: split the timeline there (asks first)
+signal background_input(event: InputEvent)  ## a left drag away from the line: the panel moves (DockPanel)
+signal menu_requested(at: Vector2)  ## right click away from the boxes (screen position)
 
 const MARGIN := 18.0
 const BOX := Vector2(12, 18)  ## along, across
@@ -30,8 +33,6 @@ const NOW_COLOR := Color(0.9, 0.5, 0.1)
 ## Steps the future snaps to (minutes), the finest one at least FUTURE_PX pixels long.
 const FUTURE_STEPS := [1, 5, 10, 15, 30, 60, 120, 240, 480, 1440, 10080]
 const FUTURE_PX := 10.0
-const HOLD := 1.0  ## seconds pressed without moving: the current time is picked up
-const MOVE_PX := 7.0  ## a press that moves this far is a drag of the cursor
 
 var ink := Color(0.3, 0.2, 0.16)  ## the theme's text colour (set in _ready)
 
@@ -43,10 +44,9 @@ var cursor_at := -1  ## seconds, -1 = now
 var cursor_locked := false  ## the DM is showing everyone a moment (TASK-84): no scrubbing
 var can_extend := false  ## the DM: dragging past now goes into the future (passes time)
 var future_at := -1  ## while the current time is held: where it would go, in seconds
-var now_drag := false  ## the DM holds the current time (the orange triangle)
-var _press_pos := Vector2.ZERO
-var _moved := false
-var _press_id := 0
+var now_drag := false  ## the DM drags the current time (the orange triangle)
+var hint := ""  ## a short text in the corner (looking back, the DM showing ...)
+var _moving_panel := false
 var _pan_from := Vector2.ZERO
 var _pan_view := 0.0
 var _panning := false
@@ -230,13 +230,20 @@ func _draw() -> void:
 		var text := ("+" + duration_text(fm)) if fm >= 0 else ("−%s · split here?" % duration_text(-fm))
 		var at := Vector2(nu + 8, y - 8) if not vertical() else _p(nu, y + 16) + Vector2(0, 4)
 		draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs + 1, NOW_COLOR)
-	draw_colored_polygon(_triangle(nu, y, 1.5 if now_drag else 1.0), NOW_COLOR)  # held: bigger
+	draw_colored_polygon(_triangle(nu, y, -1.0, 1.25 if now_drag else 1.0), NOW_COLOR)  # above the line
 	if cursor_at >= 0:
-		draw_colored_polygon(_triangle(x_of(float(cursor_at)), y), ink)
+		draw_colored_polygon(_triangle(x_of(float(cursor_at)), y, 1.0), ink)
+	if hint != "":
+		var hs := font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 1)
+		var hp := Vector2(size.x - hs.x - 6, size.y - 4) if not vertical() else Vector2(4, 12)
+		draw_string(font, hp, hint, HORIZONTAL_ALIGNMENT_LEFT, size.x - 8, fs - 1, Color(ink, 0.6))
 
 
-func _triangle(u: float, y: float, scale := 1.0) -> PackedVector2Array:
-	return PackedVector2Array([_p(u, y + 11), _p(u - 6 * scale, y + 11 + 9 * scale), _p(u + 6 * scale, y + 11 + 9 * scale)])
+## A triangle pointing at the line from below (`side` 1) or above (-1).
+func _triangle(u: float, y: float, side: float, scale := 1.0) -> PackedVector2Array:
+	var tip := y + 11.0 * side
+	var base := tip + 9.0 * scale * side
+	return PackedVector2Array([_p(u, tip), _p(u - 6 * scale, base), _p(u + 6 * scale, base)])
 
 
 ## Cut-off branches (TASK-86): faded small boxes beside the line, from where it was set back.
@@ -273,24 +280,50 @@ func branch_box_at(pos: Vector2) -> Dictionary:
 
 ## Time labels beside the line, as fine as the zoom allows (rounds, minutes, hours, days).
 func _draw_ticks(y: float, font: Font, fs: int) -> void:
+	var room := _thick() - (y + 24.0) - 2.0  # beside the line, past the black triangle (vertical)
+	for k: Dictionary in ticks(font, fs):
+		var u: float = k.u
+		draw_line(_p(u, y + 4), _p(u, y + 8), Color(ink, 0.5), 1.0)
+		if str(k.text) == "":
+			continue
+		var at := Vector2(u + 3, size.y - 3) if not vertical() else _p(u, y + 24) + Vector2(0, 4)
+		draw_string(font, at, str(k.text), HORIZONTAL_ALIGNMENT_LEFT, 160.0 if not vertical() else maxf(room, 1.0), fs, Color(ink, 0.75))
+
+
+## The ticks in view: [{u, text}], the finest step whose labels have room (Nico 2026-11-02:
+## zoomed out nothing overlapped any more); a label that would still run into the one before
+## is left out (its tick stays).
+func ticks(font: Font = null, fs := 11) -> Array:
+	if font == null:
+		font = get_theme_default_font()
 	var day := hours_per_day() * 3600
-	var steps := [6, 60, 600, 3600, 6 * 3600, day, 7 * day, 30 * day, 365 * day]
+	var year := (calendar.days_per_year if calendar != null and calendar.days_per_year > 0 else 365) * day
+	var steps := [6, 60, 600, 3600, 6 * 3600, day, 7 * day, 30 * day, year, 10 * year, 100 * year, 1000 * year]
 	var step := steps.back() as int
 	for s: int in steps:
-		if float(s) / span * _width() >= (60.0 if vertical() else 90.0):
+		var gap := float(s) / span * _width()
+		var need := fs + 10.0 if vertical() else font.get_string_size(_tick_text(floori(view_from / s) * s, s, day), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 16.0
+		if gap >= maxf(need, 40.0):
 			step = s
 			break
+	var out := []
 	var t := floori(view_from / step) * step
 	var end := view_from + span
-	var n := 0
-	while t <= end and n < 200:
-		n += 1
+	var free_from := -INF  # where the next label may start along the line
+	while t <= end and out.size() < 200:
 		var u := x_of(t)
-		if u >= 0:
-			draw_line(_p(u, y + 4), _p(u, y + 8), Color(ink, 0.5), 1.0)
-			var at := Vector2(u + 3, size.y - 3) if not vertical() else _p(u, y + 26) + Vector2(0, 4)
-			draw_string(font, at, _tick_text(t, step, day), HORIZONTAL_ALIGNMENT_LEFT, 120, fs, Color(ink, 0.75))
 		t += step
+		if u < 0 or u > _len():
+			continue
+		var text := _tick_text(t - step, step, day)
+		var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x if not vertical() else fs + 2.0
+		var from := u + 3.0 if not vertical() else u - w * 0.5
+		if from < free_from or (not vertical() and from + w > _len()):
+			text = ""
+		else:
+			free_from = from + w + 8.0
+		out.append({"u": u, "text": text})
+	return out
 
 
 func _tick_text(t: int, step: int, day: int) -> String:
@@ -298,8 +331,13 @@ func _tick_text(t: int, step: int, day: int) -> String:
 	var minutes := (t - d * day) / 60
 	if calendar == null:
 		return "day %d %02d:%02d" % [d, minutes / 60, minutes % 60] if step < day else "day %d" % d
+	if step >= 30 * day:  # zoomed far out: the month or the year is enough
+		var dt := calendar.date_of(d)
+		var era := (" " + str(dt.era)) if str(dt.era) != "" else ""
+		return ("%d%s" % [int(dt.year), era]) if step >= 300 * day else "%s %d" % [str(dt.month_name), int(dt.year)]
 	if step >= day:
-		return calendar.format_day(d)
+		var dd := calendar.date_of(d)
+		return "%d. %s" % [int(dd.day), str(dd.month_name)]
 	if step < 60:
 		return "%s +%ds" % [calendar.format_time(minutes), (t - d * day) % 60]
 	return calendar.format_time(minutes) if minutes > 0 or step < 3600 else calendar.format_day(d)
@@ -381,63 +419,73 @@ func _gui_input(event: InputEvent) -> void:
 			else:
 				var click := _panning and b.button_index == MOUSE_BUTTON_RIGHT and b.position.distance_to(_pan_from) < 4
 				var cut := branch_box_at(b.position)
+				var i := box_at(at.x) if absf(at.y - _line_y()) <= BOX.y else -1
 				if click and not cut.is_empty():
 					restore_requested.emit(int(cut.rewind), int(cut.count))
+				elif click and i >= 0:
+					list_requested.emit(moments()[i])
 				elif click:
-					var i := box_at(at.x)
-					if i >= 0:
-						list_requested.emit(moments()[i])
+					menu_requested.emit(get_screen_transform() * b.position)  # fit, show everyone, now
 				_panning = false
 			accept_event()
 		elif b.button_index == MOUSE_BUTTON_LEFT:
 			if b.pressed and b.double_click and not cursor_locked:
-				_press_id += 1  # no hold
 				_scrubbing = false
 				now_drag = false
 				future_at = -1
 				set_cursor(-1)
-			elif b.pressed and not cursor_locked:
+			elif b.pressed and can_extend and on_now_handle(b.position):
+				_scrubbing = true  # the orange triangle: the current time (DM)
+				now_drag = true
+				drag_now(at.x)
+			elif b.pressed and on_track(b.position) and not cursor_locked:
 				_scrubbing = true
-				_moved = false
-				_press_pos = b.position
-				_press_id += 1
-				if can_extend and is_inside_tree():
-					var id := _press_id
-					get_tree().create_timer(HOLD).timeout.connect(func() -> void: hold(id))
-			elif not b.pressed and _scrubbing:
+				drag_to(at.x)  # the black cursor goes there at once
+			elif b.pressed:
+				_moving_panel = true  # the bar's background: it moves the panel
+				background_input.emit(event)
+			elif _moving_panel:
+				_moving_panel = false
+				background_input.emit(event)
+			elif _scrubbing:
 				_scrubbing = false
-				_press_id += 1
-				if not now_drag and not _moved:
-					drag_to(at.x)  # a click: the cursor goes there
 				let_go(at.x)
 			accept_event()
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
-		if _panning:
+		if _moving_panel:
+			background_input.emit(event)
+		elif _panning:
 			view_from = _pan_view - (_uv(mm.position).x - _uv(_pan_from).x) / _width() * span
 			queue_redraw()
 			accept_event()
 		elif _scrubbing:
 			if now_drag:
 				drag_now(_uv(mm.position).x)
-			elif _moved or mm.position.distance_to(_press_pos) >= MOVE_PX:
-				_moved = true
-				_press_id += 1  # moving: no hold
+			else:
 				drag_to(_uv(mm.position).x)
 			accept_event()
+		else:
+			var hand := can_extend and on_now_handle(mm.position)
+			mouse_default_cursor_shape = (Control.CURSOR_VSIZE if vertical() else Control.CURSOR_HSIZE) if hand \
+				else Control.CURSOR_ARROW if on_track(mm.position) else Control.CURSOR_MOVE
 
 
-## Held a second without moving (press `id`): the DM picks up the current time there.
-func hold(id: int) -> void:
-	if id != _press_id or not _scrubbing or _moved or not can_extend:
-		return
-	now_drag = true
-	mouse_default_cursor_shape = Control.CURSOR_VSIZE if vertical() else Control.CURSOR_HSIZE
-	set_cursor(-1)  # the table is live while the current time moves
-	drag_now(_uv(_press_pos).x)
+## On the orange triangle, the current time (beside the line, on the far side from the cursor).
+func on_now_handle(pos: Vector2) -> bool:
+	var uv := _uv(pos)
+	var y := _line_y()
+	return absf(uv.x - _now_u()) <= 10.0 and uv.y >= y - 26.0 and uv.y <= y - 4.0
 
 
-## The DM moves the current time (held): to `u`, not before the first moment.
+## On the line's strip (boxes, the black cursor); the rest of the bar moves the panel.
+func on_track(pos: Vector2) -> bool:
+	var v := _uv(pos).y
+	var y := _line_y()
+	return v >= y - 26.0 and v <= y + 24.0
+
+
+## The DM drags the current time (the orange triangle): to `u`, not before the first moment.
 func drag_now(u: float) -> void:
 	var ms := moments()
 	var at := int(at_of(u))
@@ -472,7 +520,6 @@ func let_go(u: float) -> void:
 	if now_drag:
 		var minutes := future_minutes()
 		now_drag = false
-		mouse_default_cursor_shape = Control.CURSOR_ARROW
 		future_at = -1
 		queue_redraw()
 		set_cursor(-1)

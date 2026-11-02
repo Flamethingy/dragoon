@@ -36,11 +36,16 @@ func _init() -> void:
 	var dbar := _bar(dm)
 	var bbar := _bar(bob)
 	await _frames(3)
-	_check(dbar.show_button.visible and not bbar.show_button.visible, "only the DM has Show everyone")
+	dbar.open_menu(Vector2(100, 100))
+	var mi := dbar.menu.get_item_index(2)
+	_check(not dbar.menu.is_item_disabled(mi), "the DM's bar menu has Show everyone")
+	dbar.menu.hide()
+	bbar.open_menu(Vector2(100, 100))
+	_check(bbar.menu.is_item_disabled(bbar.menu.get_item_index(2)), "a player's not")
+	bbar.menu.hide()
 
 	# on: Bob follows the DM's cursor
-	dbar.show_button.button_pressed = true
-	dbar.show_button.pressed.emit()
+	dbar._on_menu(2)
 	await _frames(5)
 	_check(dm.showing and bob.showing, "Show everyone is on for both")
 	var m := _moment_with(dbar, walked)
@@ -48,7 +53,7 @@ func _init() -> void:
 	await _until(func() -> bool: return bob.grid.is_past() and bob.grid.past.has(BORIN))
 	_check(bob.grid.is_past() and bob.grid.past[BORIN].get_meta("cell") == start + Vector2i(2, 0), "Bob's table shows the DM's moment")
 	_check(bbar.line.cursor_at == int(m.at), "his cursor sits where the DM's is (%d / %d)" % [bbar.line.cursor_at, int(m.at)])
-	_check(bbar.when_label.text.begins_with("The DM is showing"), "with a hint (%s)" % bbar.when_label.text)
+	_check(bbar.line.hint.begins_with("The DM is showing"), "with a hint (%s)" % bbar.line.hint)
 	_check(bob.grid.locked, "he can't act")
 
 	# he can't scrub away
@@ -75,8 +80,7 @@ func _init() -> void:
 	_check(cara.showing and cara.looking_back == dm.looking_back, "Ann joins late and sees the DM's moment")
 
 	# off: everyone back at now with their own cursor
-	dbar.show_button.button_pressed = false
-	dbar.show_button.pressed.emit()
+	dbar._on_menu(2)
 	await _until(func() -> bool: return not bob.showing and not bob.grid.is_past())
 	_check(not bob.showing and bob.looking_back == -1 and not bob.grid.is_past() and not bob.grid.locked, "off: Bob is back at now")
 	_check(bbar.line.cursor_at == -1 and not bbar.shown, "with his own cursor again")
@@ -107,7 +111,7 @@ func _bar(t: NetTable) -> TimelineBar:
 	bar.follow(t.timeline_sync, t.notes.calendar)
 	bar.line.size = Vector2(1500, 60)
 	bar.line.fit()
-	bar.show_button.visible = t.is_dm()
+	bar.dm = t.is_dm()
 	bar.cursor_changed.connect(func(at: int) -> void: t.look_back(bar.cursor_event(), at))
 	bar.show_toggled.connect(func(on: bool) -> void: t.show_everyone(on))
 	t.showing_changed.connect(func() -> void:

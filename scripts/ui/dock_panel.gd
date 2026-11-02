@@ -19,7 +19,7 @@ const EDGE := 8.0  ## pixels at the inner edge that resize
 const ZONE := 0.08  ## the dock zones: this part of the screen at each edge
 const SIDE_CELLS := Vector2i(6, 24)  ## width of a side dock, min / max
 const BOTTOM_CELLS := Vector2i(4, 14)  ## height of the bottom dock, min / max
-const TOP_CELLS := Vector2i(3, 10)  ## height of the top dock, min / max (the timeline bar, TASK-82)
+const TOP_CELLS := Vector2i(2, 10)  ## height of the top dock, min / max (the timeline bar, TASK-82)
 
 ## dock: "left" / "right" / "top" / "bottom" / "float"; side: cells of a side dock, bottom /
 ## top: rows of that dock; r: the floating rect in cells; window: popped out; win: that
@@ -30,6 +30,11 @@ var section := "panel"
 var window_title := "Dragoon"
 var close_hides := false  ## closing its own window hides it (`closed`), else it docks back
 var allow_top := false  ## it may dock at the top (a wide, low panel like the timeline bar)
+## Nico 2026-11-02: a slim panel (the timeline bar): docked at a side it is as wide as it is high
+## at the top (`place.top`), from the top of the screen, and the other panels at that side sit
+## beside it.
+var thin := false
+var drag_anywhere := false  ## its background moves it too, not only the title
 var window_min := Vector2i(320, 400)  ## its own window at least this big
 var window: Window  ## its own window while popped out
 var title_label: Label
@@ -127,12 +132,16 @@ func cell() -> Vector2:
 func cells_rect() -> Rect2i:
 	var g := HudWidgets.HUD_GRID
 	var top := TOP + top_rows()  # below a panel docked at the top
+	if thin and str(place.dock) in ["left", "right"]:
+		var tw := clampi(int(place.get("top", 2)), 3, TOP_CELLS.y)  # at a side at least 3: room for the dates
+		return Rect2i(0 if place.dock == "left" else g.x - tw, TOP, tw, g.y - TOP)
 	match str(place.dock):
 		"left":
-			return Rect2i(0, top, clampi(int(place.side), SIDE_CELLS.x, SIDE_CELLS.y), g.y - top)
+			var lw := clampi(int(place.side), SIDE_CELLS.x, SIDE_CELLS.y)
+			return Rect2i(thin_cells("left"), top, lw, g.y - top)
 		"right":
 			var w := clampi(int(place.side), SIDE_CELLS.x, SIDE_CELLS.y)
-			return Rect2i(g.x - w, top, w, g.y - top)
+			return Rect2i(g.x - w - thin_cells("right"), top, w, g.y - top)
 		"top":
 			return Rect2i(0, TOP, g.x, clampi(int(place.get("top", 3)), TOP_CELLS.x, TOP_CELLS.y))
 		"bottom":
@@ -167,6 +176,19 @@ func top_rows() -> int:
 		if d != null and d != self and d.get_parent() == home and d.window == null and d.visible and str(d.place.dock) == "top":
 			rows = maxi(rows, clampi(int(d.place.get("top", 3)), TOP_CELLS.x, TOP_CELLS.y))
 	return rows
+
+
+## Cells taken at `side` by slim panels docked there (the others sit beside them).
+func thin_cells(side: String) -> int:
+	var home := _home if _home != null else get_parent()
+	if home == null or not is_inside_tree():
+		return 0
+	var cells := 0
+	for p: Node in get_tree().get_nodes_in_group("dock_panels"):
+		var d := p as DockPanel
+		if d != null and d != self and d.thin and d.get_parent() == home and d.window == null and d.visible and str(d.place.dock) == side:
+			cells = maxi(cells, clampi(int(d.place.get("top", 2)), 3, TOP_CELLS.y))
+	return cells
 
 
 ## A panel docked at the top pushes the side docks of its home down: they follow when it
@@ -255,6 +277,8 @@ func _head_input(event: InputEvent) -> void:
 ## The inner edge (floating: the lower right corner) resizes it, by whole cells.
 func _gui_input(event: InputEvent) -> void:
 	if window != null:
+		if drag_anywhere:
+			_head_input(event)
 		return
 	var local := get_local_mouse_position()
 	if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
@@ -265,10 +289,14 @@ func _gui_input(event: InputEvent) -> void:
 			_drag = ""
 			save_place()
 			accept_event()
+		elif drag_anywhere:
+			_head_input(event)
 	elif event is InputEventMouseMotion:
 		if _drag == "resize":
 			_resize_to(_home_pos())
 			accept_event()
+		elif _drag == "move" and drag_anywhere:
+			_head_input(event)
 		else:
 			mouse_default_cursor_shape = _edge_cursor() if _on_edge(local) else Control.CURSOR_ARROW
 
@@ -278,6 +306,12 @@ func _resize_to(at: Vector2) -> void:
 	var c := cell()
 	var g := HudWidgets.HUD_GRID
 	match str(place.dock):
+		"right" when thin:
+			place.top = clampi(int(roundf(g.x - at.x / c.x)), TOP_CELLS.x, TOP_CELLS.y)
+			_update_top_rows()
+		"left" when thin:
+			place.top = clampi(int(roundf(at.x / c.x)), TOP_CELLS.x, TOP_CELLS.y)
+			_update_top_rows()
 		"right":
 			place.side = clampi(int(roundf(g.x - at.x / c.x)), SIDE_CELLS.x, SIDE_CELLS.y)
 		"left":
@@ -333,16 +367,17 @@ func _show_zones(on: bool) -> void:
 	_zones.name = "DockZones"
 	_zones.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_zones.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_zones.draw.connect(func() -> void:
+	var zc := _zones  # not _zones: that is gone once it is let go, a draw may still come
+	zc.draw.connect(func() -> void:
 		var a := area()
-		var hot := str(_zones.get_meta("hot", ""))
+		var hot := str(zc.get_meta("hot", ""))
 		var rects := {"left": Rect2(0, 0, a.x * ZONE, a.y), "right": Rect2(a.x * (1.0 - ZONE), 0, a.x * ZONE, a.y),
 			"bottom": Rect2(a.x * ZONE, a.y * (1.0 - ZONE * 1.3), a.x * (1.0 - ZONE * 2), a.y * ZONE * 1.3)}
 		if allow_top:
 			rects["top"] = Rect2(a.x * ZONE, 0, a.x * (1.0 - ZONE * 2), a.y * ZONE * 1.3)
 		for z: String in rects:
-			_zones.draw_rect(rects[z], Color(1.0, 0.55, 0.1, 0.45 if z == hot else 0.15))
-			_zones.draw_rect(rects[z], Color(1.0, 0.55, 0.1, 0.9), false, 2.0))
+			zc.draw_rect(rects[z], Color(1.0, 0.55, 0.1, 0.45 if z == hot else 0.15))
+			zc.draw_rect(rects[z], Color(1.0, 0.55, 0.1, 0.9), false, 2.0))
 	(_home as Control).add_child(_zones)
 	(_home as Control).move_child(_zones, get_index())
 

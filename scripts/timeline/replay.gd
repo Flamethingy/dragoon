@@ -60,6 +60,12 @@ static func apply(s: Dictionary, e: Dictionary) -> void:
 					inv[item] = left
 				else:
 					inv.erase(item)
+		"item.flagged":  # TASK-70: equipped / attuned
+			var flags := _dict(s, "item_flags")
+			var item := str(d.get("item", ""))
+			if not flags.get(item) is Dictionary:
+				flags[item] = {}
+			(flags[item] as Dictionary)[str(d.get("flag", "equipped"))] = bool(d.get("on", true))
 		# --- TASK-17 ---
 		"condition.applied":
 			var cond := str(d.get("condition", ""))

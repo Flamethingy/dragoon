@@ -209,7 +209,8 @@ static func attack_of(sheet: Dictionary, name: String, features := {}) -> Dictio
 		if d is Dictionary and is_formula(str(d.get("dice", ""))):
 			dmg.append({"dice": str(d.dice).replace(" ", ""), "type": str(d.get("type", ""))})
 	return {"name": str(f.get("name", name)), "to_hit": int(a.get("to_hit", 0)), "damage": dmg,
-		"ranged": "ranged" in str(a.get("kind", "")).to_lower(), "range": Rules.range_of(a.get("range", ""))}
+		"ranged": "ranged" in str(a.get("kind", "")).to_lower(), "range": Rules.range_of(a.get("range", "")),
+		"item": str(a.get("item", "")), "ammunition": bool(a.get("ammunition", false))}
 
 
 const _COUNTS := {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "twice": 2, "thrice": 3}
@@ -271,6 +272,9 @@ static func _attack_feature(sheet: Dictionary, name: String, features: Dictionar
 			var f: Variant = features.get(str(id), {})
 			if f is Dictionary and f.get("attack") is Dictionary:
 				found.append(f)
+	for f: Variant in sheet.get("_weapon_attacks", []):  # TASK-70: the equipped weapons
+		if f is Dictionary:
+			found.append(f)
 	for f: Dictionary in found:
 		if str(f.get("name", "")).to_lower() == name:
 			return f

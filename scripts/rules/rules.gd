@@ -26,6 +26,7 @@ const AUTOMATION := {
 	"death_saves": {"label": "Death saves", "default": "auto", "tip": "0 HP: unconscious, death saves on the turn, damage counts as failures"},
 	"movement": {"label": "Movement warnings", "default": "assist", "tip": "Warns when a token moves farther than its speed (never blocks)"},
 	"reactions": {"label": "Reaction hints", "default": "off", "tip": "Points out opportunity attacks and reactions like Shield"},
+	"ammunition": {"label": "Ammunition", "default": "off", "tip": "A shot with a bow or crossbow uses one arrow or bolt from the inventory"},
 }
 
 static var _core := {}
@@ -233,21 +234,203 @@ static func ac(s: Dictionary) -> int:
 	return armor_ac(s) + _bonus_effects(s, "ac")
 
 
-## AC from what is equipped (no stored value): armor base + Dex (capped), + shield.
+## AC from what is equipped (no stored value): armor base + Dex (capped), + shield, + magic
+## bonuses (+1 armor, a Ring of Protection; an item needing attunement only when attuned,
+## TASK-70); no armor: Unarmored Defense (Barbarian + CON, Monk + WIS without a shield).
 static func armor_ac(s: Dictionary) -> int:
-	var base := 10 + mod(s, "dex")
+	var dex := mod(s, "dex")
+	var base := 10 + dex
 	var shield := 0
-	for it: Variant in s.get("inventory", []):
-		if not (it is Dictionary and bool(it.get("equipped", false))):
-			continue
-		var a := armor(str(it.get("item", "")))
+	var extra := 0
+	var armored := false
+	for g: Dictionary in equipped_gear(s):
+		var a: Dictionary = g.get("armor", {})
+		var bonus := int(g.get("ac_bonus", 0)) if active_magic(g) else 0
 		if a.is_empty():
-			continue
-		if str(a.category) == "shield":
-			shield = int(a.get("ac_bonus", 2))
+			extra += bonus
+		elif str(a.get("category", "")) == "shield":
+			shield = maxi(shield, int(a.get("ac_bonus", 2)) + bonus)
 		else:
-			base = int(a.ac) + mini(mod(s, "dex"), int(a.get("dex_max", 99)))
-	return base + shield
+			var cap := int(a.get("dex_max", 99))
+			var worn := int(a.get("ac", 10)) + (0 if cap == 0 else mini(dex, cap)) + bonus  # heavy armor: no DEX, not even a minus
+			base = worn if not armored else maxi(base, worn)
+			armored = true
+	if not armored:
+		var unarmored := 0
+		for c: Variant in s.get("classes", []):
+			if c is Dictionary:
+				match _class_id(str(c.get("class", ""))):
+					"barbarian":
+						unarmored = maxi(unarmored, mod(s, "con"))
+					"monk":
+						if shield == 0:
+							unarmored = maxi(unarmored, mod(s, "wis"))
+		base += unarmored
+	return base + shield + extra
+
+
+# --- Gear (TASK-70) ----------------------------------------------------------------------------
+
+## The inventory as [{item, qty, equipped, attuned}]: the file's list [{item, qty, equipped}] or
+## Replay's {item: qty}, with the item.flagged events (`item_flags`) on top.
+static func gear(s: Dictionary) -> Array:
+	var flags: Dictionary = s.get("item_flags", {}) if s.get("item_flags") is Dictionary else {}
+	var out := []
+	var inv: Variant = s.get("inventory", [])
+	if inv is Array:
+		for it: Variant in inv:
+			if it is Dictionary:
+				out.append({"item": str(it.get("item", "")), "qty": int(it.get("qty", 1)), "equipped": bool(it.get("equipped", false)), "attuned": bool(it.get("attuned", false))})
+			elif str(it) != "":
+				out.append({"item": str(it), "qty": 1, "equipped": false, "attuned": false})
+	elif inv is Dictionary:
+		for item: Variant in inv:
+			out.append({"item": str(item), "qty": int(inv[item]), "equipped": false, "attuned": false})
+	for g: Dictionary in out:
+		var f: Variant = flags.get(g.item)
+		if f is Dictionary:
+			for k: String in ["equipped", "attuned"]:
+				if (f as Dictionary).has(k):
+					g[k] = bool(f[k])
+	return out
+
+
+## What an item is at the table: {name, weapon (core row), armor (core row), bonus (+N to hit and
+## damage), ac_bonus, attunement (needs it), ammunition}. From the item entry's own fields
+## (weapon, armor, bonus, ac_bonus, attunement), its name and type ("+1 Longsword", "Weapon,
+## Katana"), its text ("functions as a light hammer", "+1 bonus to attack and damage rolls",
+## "requires attunement") and the dragoon-core weapon and armor tables.
+static func item_info(item_ref: String, entry: Dictionary) -> Dictionary:
+	var name := str(entry.get("name", item_ref.get_file().replace("-", " ").capitalize()))
+	var text := str(entry.get("description", entry.get("text", ""))).to_lower()
+	var kind := "%s %s" % [name, str(entry.get("type", ""))]
+	var w := weapon(item_ref)
+	var a := armor(item_ref)
+	if w.is_empty() and a.is_empty():
+		var m := RegEx.create_from_string("functions as an? ([a-z' -]+?)(?: with|,|\\.| that| and)").search(text)
+		w = _table_row("weapons", m.get_string(1) if m != null else kind)
+		if w.is_empty():
+			w = _table_row("weapons", kind)
+		if w.is_empty():
+			a = _table_row("armor", kind)
+	if entry.get("weapon") is Dictionary:
+		w = w.duplicate()
+		w.merge(entry.weapon, true)
+	if entry.get("armor") is Dictionary:
+		a = a.duplicate()
+		a.merge(entry.armor, true)
+	var info := {"name": name, "weapon": w, "armor": a, "bonus": 0, "ac_bonus": 0,
+		"attunement": bool(entry.get("attunement", "requires attunement" in text)),
+		"ammunition": "ammunition" in kind.to_lower() or RegEx.create_from_string("(?i)\\b(arrows?|bolts?|bullets?|needles?)\\b").search(name) != null}
+	var plus := RegEx.create_from_string("\\+(\\d)").search(name)
+	var hit := RegEx.create_from_string("\\+(\\d) bonus to attack and damage rolls").search(text)
+	if entry.has("bonus"):
+		info.bonus = int(entry.bonus)
+	elif hit != null:
+		info.bonus = int(hit.get_string(1))
+	elif plus != null and not w.is_empty():
+		info.bonus = int(plus.get_string(1))
+	var acm := RegEx.create_from_string("\\+(\\d) bonus to (?:your )?(?:ac|armor class)").search(text)
+	if entry.has("ac_bonus"):
+		info.ac_bonus = int(entry.ac_bonus)
+	elif acm != null:
+		info.ac_bonus = int(acm.get_string(1))
+	elif plus != null and not a.is_empty():
+		info.ac_bonus = int(plus.get_string(1))
+	return info
+
+
+## The longest core weapon/armor name in `text` ("['Weapon', 'GreatAxe']" -> Greataxe).
+static func _table_row(table: String, text: String) -> Dictionary:
+	var hay := _squash(text)
+	var best := {}
+	for r: Dictionary in core().get(table, []):
+		var n := _squash(str(r.name)).trim_suffix("armor")
+		if n.length() >= 3 and n in hay and n.length() > _squash(str(best.get("name", ""))).length():
+			best = r
+	return best
+
+
+static func _squash(s: String) -> String:
+	var out := ""
+	for ch in s.to_lower():
+		if (ch >= "a" and ch <= "z") or (ch >= "0" and ch <= "9"):
+			out += ch
+	return out
+
+
+## An item's magic counts: it needs no attunement, or it is attuned.
+static func active_magic(g: Dictionary) -> bool:
+	return not bool(g.get("attunement", false)) or bool(g.get("attuned", false))
+
+
+## The equipped gear with its item info (the host's `_gear`, else the core tables only).
+static func equipped_gear(s: Dictionary) -> Array:
+	var list: Array = s._gear if s.get("_gear") is Array else gear(s).map(func(g: Dictionary) -> Dictionary:
+		var out := g.duplicate()
+		out.merge(item_info(str(g.item), {}), false)
+		return out)
+	return list.filter(func(g: Dictionary) -> bool: return bool(g.get("equipped", false)))
+
+
+## How many items are attuned, and the most allowed (3).
+static func attunement(s: Dictionary) -> Dictionary:
+	var list: Array = s._gear if s.get("_gear") is Array else gear(s)
+	return {"count": list.filter(func(g: Dictionary) -> bool: return bool(g.get("attuned", false))).size(), "max": int(core().get("attunement_max", 3))}
+
+
+## Proficient with a core weapon row: the sheet's proficiencies and its classes' (`_weapon_profs`)
+## name its category ("Martial Weapons") or the weapon; with nothing known it counts as yes.
+static func weapon_proficient(s: Dictionary, w: Dictionary) -> bool:
+	var profs := []
+	for key: String in ["proficiencies", "_weapon_profs"]:
+		if s.get(key) is Array:
+			profs.append_array(s[key])
+	if profs.is_empty():
+		return true
+	var cat := "%s weapon" % str(w.get("category", "")).to_lower()
+	var name := str(w.get("name", "")).to_lower()
+	for p: Variant in profs:
+		var t := str(p).to_lower()
+		if cat in t or (name != "" and name in t):
+			return true
+	return false
+
+
+## The equipped weapons as attack features (TASK-70): {name, attack: {to_hit, damage, kind,
+## range, ammunition}, item, mastery, weapon: true}; a versatile one also two-handed (without
+## a shield). To hit: STR (ranged DEX, finesse the better) + proficiency + magic bonus.
+static func weapon_attacks(s: Dictionary) -> Array:
+	var out := []
+	var gear_on := equipped_gear(s)
+	var shield := gear_on.any(func(g: Dictionary) -> bool: return str((g.get("armor", {}) as Dictionary).get("category", "")) == "shield")
+	for g: Dictionary in gear_on:
+		var w: Dictionary = g.get("weapon", {})
+		if w.is_empty() or str(w.get("damage", "")) == "":
+			continue
+		var props: Array = w.get("properties", [])
+		var ranged := bool(w.get("ranged", false)) or "ammunition" in props or (w.get("range") is Array and not "thrown" in props)
+		var ab := "dex" if ranged else "str"
+		if "finesse" in props and mod(s, "dex") > mod(s, "str"):
+			ab = "dex"
+		var magic := int(g.get("bonus", 0)) if active_magic(g) else 0
+		var prof := proficiency(s) if weapon_proficient(s, w) else 0
+		var rng: Variant = w.get("range")
+		var range_text := "%s/%s m" % [MovePlans._num(float(rng[0])), MovePlans._num(float(rng[1]))] if rng is Array and (rng as Array).size() == 2 else ("3 m" if "reach" in props else "1.5 m")
+		var attack := {"to_hit": mod(s, ab) + prof + magic, "kind": "Ranged Weapon Attack" if ranged else "Melee Weapon Attack",
+			"damage": [{"dice": _plus(str(w.damage), mod(s, ab) + magic), "type": str(w.get("type", ""))}], "range": range_text,
+			"ammunition": "ammunition" in props, "item": str(g.item), "proficient": prof > 0}
+		var name := str(g.get("name", w.get("name", "Weapon")))
+		out.append({"name": name, "attack": attack, "item": str(g.item), "mastery": str(w.get("mastery", "")), "weapon": true})
+		if "versatile" in props and str(w.get("versatile", "")) != "" and not shield:
+			var two := attack.duplicate(true)
+			two.damage[0].dice = _plus(str(w.versatile), mod(s, ab) + magic)
+			out.append({"name": "%s (two-handed)" % name, "attack": two, "item": str(g.item), "mastery": str(w.get("mastery", "")), "weapon": true})
+	return out
+
+
+static func _plus(dice: String, n: int) -> String:
+	return dice if n == 0 else "%s%+d" % [dice, n]
 
 
 ## A core armor entry by item ref or id ("items/chain-mail"), {} if none.

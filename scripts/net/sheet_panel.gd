@@ -119,6 +119,10 @@ func _on_meta(meta: Variant) -> void:
 		table.begin_attack(ref, m.substr(8), false, "save")
 	elif m == "death" and table != null:  # TASK-57
 		table.roll_death_save(ref)
+	elif m.begins_with("gear:") and table != null:  # TASK-70: gear:<flag>:<on|off>:<item>
+		var p := m.split(":", true, 3)
+		if p.size() == 4:
+			table.flag_item(ref, p[3], p[1], p[2] == "on")
 	elif m.begins_with("res:") and table != null:  # TASK-64: a use spent / back
 		table.use_resource(ref, m.substr(8), 1 if m.begins_with("res:use:") else -1)
 	elif m == "rest:short" and table != null:
@@ -264,6 +268,9 @@ static func to_bbcode(s: Dictionary) -> String:
 			bb += StatBlock._field("Languages", Markdown.inline(StatBlock._join(s.languages)))
 		var items := PackedStringArray()
 		var inv: Variant = s.get("inventory")
+		if s.get("_gear") is Array:  # TASK-70: with what is equipped and attuned
+			inv = null
+			bb += _gear(s)
 		if inv is Array:  # the file: [{item, qty}]
 			for it: Variant in inv:
 				if it is Dictionary:
@@ -355,6 +362,29 @@ static func _attacks(s: Dictionary) -> String:
 	for name: Variant in s.get("_save_actions", []):
 		out += ", [url=saveact:%s]%s[/url]" % [str(name), Markdown.escape(str(name))]
 	return out
+
+
+## The inventory (TASK-70): weapons, armor and magic items with equip / attune links (on an
+## editable sheet), the attunement count (orange past 3).
+static func _gear(s: Dictionary) -> String:
+	var editable := bool(s.get("_editable", false)) or bool(s.get("_full", false))
+	var parts := PackedStringArray()
+	for g: Dictionary in s._gear:
+		var label := Markdown.escape(str(g.get("name", _item(str(g.item), 1)))) + (" ×%d" % int(g.qty) if int(g.get("qty", 1)) > 1 else "")
+		var wearable := not (g.get("weapon", {}) as Dictionary).is_empty() or not (g.get("armor", {}) as Dictionary).is_empty() or int(g.get("ac_bonus", 0)) > 0
+		var tags := PackedStringArray()
+		if wearable:
+			tags.append(("[url=gear:equipped:off:%s]equipped[/url]" if bool(g.get("equipped", false)) else "[url=gear:equipped:on:%s]equip[/url]") % g.item if editable else ("equipped" if bool(g.get("equipped", false)) else ""))
+		if bool(g.get("attunement", false)):
+			tags.append(("[url=gear:attuned:off:%s]attuned[/url]" if bool(g.get("attuned", false)) else "[url=gear:attuned:on:%s]attune[/url]") % g.item if editable else ("attuned" if bool(g.get("attuned", false)) else "not attuned"))
+		var shown := Array(tags).filter(func(t: String) -> bool: return t != "")
+		parts.append(label + (" (%s)" % ", ".join(PackedStringArray(shown)) if not shown.is_empty() else ""))
+	var bb := StatBlock._field("Inventory", ", ".join(parts)) if not parts.is_empty() else ""
+	var att: Dictionary = s.get("_attunement", {})
+	if int(att.get("count", 0)) > 0:
+		var over := int(att.count) > int(att.get("max", 3))
+		bb += StatBlock._field("Attunement", ("[color=#%s]%d / %d: too many[/color]" % [UISkin.ORANGE.to_html(false), int(att.count), int(att.max)]) if over else "%d / %d" % [int(att.count), int(att.get("max", 3))])
+	return bb
 
 
 static func _item(ref: String, qty: int) -> String:

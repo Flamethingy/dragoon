@@ -1881,6 +1881,21 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 					own.append(id)
 			sheet["features"] = own
 		sheet["_class_features"] = auto
+		var gear := []  # TASK-70: the inventory with what each item is
+		for g: Dictionary in Rules.gear(sheet):
+			var info := Rules.item_info(str(g.item), catalog_entry(str(g.item)))
+			info.merge(g, true)
+			gear.append(info)
+		sheet["_gear"] = gear
+		var profs := []
+		for c: Variant in sheet.get("classes", []):
+			if c is Dictionary:
+				for m: RegExMatch in RegEx.create_from_string("'([^']+)'|\"([^\"]+)\"").search_all(str(catalog_entry(str(c.get("class", ""))).get("prof_weapon", ""))):
+					profs.append(m.get_string(1) + m.get_string(2))
+		if not profs.is_empty():
+			sheet["_weapon_profs"] = profs
+		sheet["_weapon_attacks"] = Rules.weapon_attacks(sheet)
+		sheet["_attunement"] = Rules.attunement(sheet)
 		var attacks := []
 		var features := _features()
 		for key in ["features", "actions", "bonus_actions", "reactions"]:
@@ -1888,6 +1903,8 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 				var f: Variant = features.get(str(fid), {})
 				if f is Dictionary and f.get("attack") is Dictionary:
 					attacks.append(str(f.get("name", fid)))
+		for w: Dictionary in sheet._weapon_attacks:
+			attacks.append(str(w.name))
 		sheet["_attacks"] = attacks
 		sheet["_multiattack"] = not Dice.multiattack(sheet, features).is_empty()  # TASK-54
 		sheet["_save_actions"] = _save_features(sheet)  # TASK-55
@@ -2004,6 +2021,34 @@ func use_resource(ref: String, resource: String, amount: int) -> void:
 
 
 ## Gives (`qty` > 0) or takes (< 0) items: item.gained / item.lost (TASK-51).
+## Equips / attunes an item (TASK-70): item.flagged {item, flag, on}. A 4th attuned item is
+## still attuned, but the DM and the sheet are warned (warn, never block).
+func flag_item(ref: String, item: String, flag: String, on := true) -> void:
+	if is_dm():
+		_handle_flag(1, ref, item, flag, on)
+	elif is_online():
+		request_flag.rpc_id(1, ref, item, flag, on)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_flag(ref: String, item: String, flag: String, on: bool) -> void:
+	if is_dm():
+		_handle_flag(multiplayer.get_remote_sender_id(), ref.left(200), item.left(200), flag.left(20), on)
+
+
+func _handle_flag(sender: int, ref: String, item: String, flag: String, on: bool) -> Dictionary:
+	var sheet := _editable_sheet(sender, ref)
+	if sheet.is_empty() or item == "" or flag not in ["equipped", "attuned"]:
+		return {}
+	var e := event_log.append("item.flagged", ref, {"item": item, "flag": flag, "on": on}, _sender_player(sender))
+	_after_change(ref, e)
+	if flag == "attuned" and on:
+		var att := Rules.attunement(sheet_for(Reveal.DM, ref))
+		if int(att.count) > int(att.max):
+			_dm_line(ref, "attuned to %d items (at most %d)" % [int(att.count), int(att.max)])
+	return e
+
+
 func change_item(ref: String, item: String, qty: int) -> void:
 	if is_dm():
 		_handle_item(1, ref, item, qty)
@@ -2556,7 +2601,25 @@ func _handle_attack(sender: int, ref: String, query: String, targets: Array, opt
 			_deny_roll(sender, "%s has no attack \"%s\"" % [sheet.get("name", ref), n])
 			continue
 		cards.append(_attack_card(player, ref, sheet, atk, targets, opts))
+		if bool(atk.get("ammunition", false)):
+			_use_ammunition(ref, sheet, str(atk.name), player)
 	return cards
+
+
+## A shot with an ammunition weapon (TASK-70, automation "ammunition"): Auto takes one arrow,
+## bolt ... from the inventory (none left: shot anyway, the DM is told), Assist only reminds.
+func _use_ammunition(ref: String, sheet: Dictionary, weapon: String, player: String) -> void:
+	var mode := automation("ammunition")
+	if mode == "off":
+		return
+	var ammo := (sheet.get("_gear", []) as Array).filter(func(g: Dictionary) -> bool: return bool(g.get("ammunition", false)) and int(g.get("qty", 0)) > 0)
+	if ammo.is_empty():
+		_dm_line(ref, "%s: no ammunition left (shot anyway)" % weapon)
+	elif mode == "auto":
+		var e := event_log.append("item.lost", ref, {"item": str(ammo[0].item), "qty": 1}, player)
+		_after_change(ref, e)
+	else:
+		_dm_line(ref, "%s: one %s used?" % [weapon, str(ammo[0].name).to_lower()])
 
 
 func _attack_card(player: String, ref: String, sheet: Dictionary, atk: Dictionary, targets: Array, opts: Dictionary) -> Dictionary:

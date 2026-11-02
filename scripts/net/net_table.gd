@@ -1931,9 +1931,13 @@ func _apply_state(view: Dictionary) -> void:
 		grid.areas.set_templates(templates)
 	var map: Dictionary = view.map
 	var map_image: String = map.get("image", "")
-	if grid.map_id != map.id or grid.get_meta("image", "") != map_image:
+	var lost: bool = grid.map_id == map.id and grid.map_size != Vector2.ZERO and not grid.has_picture()
+	if lost:
+		push_warning("Table: the picture of map %s had gone missing (image %s); shown again" % [map.id, map_image.left(12)])
+	if grid.map_id != map.id or grid.get_meta("image", "") != map_image or lost:
 		var tex := assets.texture(map_image)
 		if tex == null:
+			push_warning("Table: no picture for map %s (image %s)" % [map.id, map_image.left(12)])
 			return
 		grid.show_map(map, tex)
 		grid.set_meta("image", map_image)

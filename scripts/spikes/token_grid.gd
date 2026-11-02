@@ -139,7 +139,15 @@ func clear() -> void:
 		_image.queue_free()
 		_image = null
 	map_size = Vector2.ZERO
+	map_id = ""  # nothing shown: the next table view builds the map again
+	set_meta("image", "")
 	queue_redraw()
+
+
+## The map picture is really there (Nico 2026-11-02: it sometimes went missing while the grid
+## and the tokens stayed).
+func has_picture() -> bool:
+	return _image != null and is_instance_valid(_image) and not _image.is_queued_for_deletion() 		and _image.is_inside_tree() and _image.visible and _image.texture != null 		and _image.texture.get_width() > 0
 
 
 ## The map's own token list: entity id -> start cell.

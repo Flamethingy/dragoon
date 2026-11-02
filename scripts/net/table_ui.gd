@@ -103,7 +103,12 @@ func _ready() -> void:
 	timeline_bar.visible = false
 	root.add_child(timeline_bar)
 	timeline_bar.follow(table.timeline_sync, table.notes.calendar)
-	timeline_bar.cursor_changed.connect(func(_at: int) -> void: table.look_back(timeline_bar.cursor_event()))
+	timeline_bar.cursor_changed.connect(func(at: int) -> void: table.look_back(timeline_bar.cursor_event(), at))
+	timeline_bar.show_toggled.connect(func(on: bool) -> void: table.show_everyone(on))
+	table.showing_changed.connect(func() -> void:
+		timeline_bar.set_showing(table.showing, table.is_dm())
+		if not table.is_dm():
+			timeline_bar.line.set_cursor(table.looking_at))
 	table.past_changed.connect(func() -> void: hud.set_locked(table.looking_back >= 0))
 	timeline_bar.list_requested.connect(func(first: int, last: int) -> void:
 		if table.is_dm() and timeline_list_opener.is_valid():
@@ -149,6 +154,7 @@ func _refresh() -> void:
 	_notes_panel.visible = online
 	chat.visible = online and minimal  # the app's calm table; otherwise the session panel has the rolls
 	timeline_bar.visible = online
+	timeline_bar.show_button.visible = dm
 	if not online:
 		sheet.hide()
 	_next_session.visible = dm

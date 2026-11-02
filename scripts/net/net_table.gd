@@ -108,6 +108,11 @@ var looking_back := -1
 var _cut := {}  ## while a past view is built: the event ids up to that moment
 var _cutting := false
 var _backs := {}  ## host: peer id -> the event id that player looks back at (they can't act)
+var looking_at := -1  ## my cursor in seconds (the bar's), -1 = now
+## TASK-84, "Show everyone": the DM: on while every player follows my cursor; a player: on while
+## the DM shows me their moment (I can't look elsewhere then).
+var showing := false
+signal showing_changed  ## Show everyone went on or off, or the DM's cursor moved (players)
 
 
 func _ready() -> void:
@@ -1729,6 +1734,8 @@ func hello(name_given: String) -> void:
 	sync_rolls.rpc_id(sender, _rolls_for(player))
 	sync_notes.rpc_id(sender, notes.session, _notes_for(player), notes.names)
 	timeline_sync.welcome(sender)
+	if showing:
+		_show_everyone(sender)
 	receive_table.rpc_id(sender, view_for(player))
 	var who := timeline.player_name(player)
 	_set_status("%s joined as %s" % [who, timeline.name_of(_pc_of(player))] if _pc_of(player) != "" \
@@ -2245,11 +2252,14 @@ func _paths_between(a: Dictionary, b: Dictionary) -> Dictionary:
 
 ## Looks at the moment ending with event `upto` (-1: back to now). Only my screen changes;
 ## while I look back I can't act (the DM acting in the past comes with TASK-85).
-func look_back(upto: int) -> void:
+func look_back(upto: int, at := -1) -> void:
+	if not is_dm() and showing:
+		return  # the DM is showing everyone a moment
 	if upto == looking_back or not is_online():
 		return
 	var from := looking_back
 	looking_back = upto
+	looking_at = at if upto >= 0 else -1
 	grid.locked = upto >= 0
 	if upto < 0:
 		grid.end_past()
@@ -2261,6 +2271,54 @@ func look_back(upto: int) -> void:
 		request_past.rpc_id(1, upto, from)
 	_set_status("Looking back in time (Now or Home: back to the present)" if upto >= 0 else "Back to now")
 	past_changed.emit()
+	if is_dm() and showing:
+		_show_everyone()
+
+
+## DM (TASK-84): every player's timeline follows mine while `on`; off gives them theirs back
+## (at now).
+func show_everyone(on: bool) -> void:
+	if not is_dm() or on == showing:
+		return
+	showing = on
+	if on:
+		_show_everyone()
+	else:
+		for peer_id: int in peers:
+			_backs.erase(peer_id)
+			dm_showing.rpc_id(peer_id, false, -1, -1)
+	showing_changed.emit()
+
+
+## Host: sends every player (or just `only`) the DM's moment.
+func _show_everyone(only := 0) -> void:
+	for peer_id: int in peers:
+		if only != 0 and peer_id != only:
+			continue
+		var from: int = _backs.get(peer_id, -1)
+		if looking_back >= 0:
+			_backs[peer_id] = looking_back
+		else:
+			_backs.erase(peer_id)
+		dm_showing.rpc_id(peer_id, true, looking_at, looking_back)
+		if looking_back >= 0:
+			past_shown.rpc_id(peer_id, past_view(str(peers[peer_id]), looking_back, from))
+
+
+## DM -> players: the DM shows everyone the moment at `at` s (event `upto`; -1 = now), or stopped.
+@rpc("authority", "call_remote", "reliable")
+func dm_showing(on: bool, at: int, upto: int) -> void:
+	showing = on
+	var was := looking_back
+	looking_back = upto if on else -1
+	looking_at = at if on else -1
+	grid.locked = looking_back >= 0
+	if looking_back < 0:
+		grid.end_past()
+	if was != looking_back:
+		past_changed.emit()
+	showing_changed.emit()
+	_set_status(("The DM is showing everyone a moment" if upto >= 0 else "The DM is showing everyone the present") if on else "Back to your own timeline (now)")
 
 
 ## Player -> DM: show me the moment ending with event `upto` (I came from `from`).

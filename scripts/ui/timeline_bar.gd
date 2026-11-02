@@ -7,12 +7,15 @@ extends DockPanel
 ## The head shows the cursor's moment and "Now" to go back to the present; "Fit" shows it all.
 
 signal cursor_changed(at: int)  ## the moment looked at, in seconds; -1 = now (live)
-signal list_requested(first_id: int, last_id: int)  ## DM: that moment's events in the Timeline list
+signal list_requested(first_id: int, last_id: int)
+signal show_toggled(on: bool)  ## DM: Show everyone (TASK-84)  ## DM: that moment's events in the Timeline list
 
 var sync: TimelineSync
 var line: TimelineLine
 var when_label: Label
 var now_button: Button
+var show_button: Button  ## DM: everyone's timeline follows mine (TASK-84)
+var shown := false  ## a player: the DM is showing me a moment (no cursor of my own)
 
 
 func _init() -> void:
@@ -36,9 +39,15 @@ func _init() -> void:
 	now_button.visible = false
 	_head.add_child(now_button)
 	_head.move_child(now_button, 2)
+	show_button = _small_button("Show everyone", "Every player's timeline follows yours (a flashback, a replay)", func() -> void:
+		show_toggled.emit(show_button.button_pressed))
+	show_button.toggle_mode = true
+	show_button.visible = false
+	_head.add_child(show_button)
+	_head.move_child(show_button, 3)
 	var fit := _small_button("Fit", "Show the whole timeline", func() -> void: line.fit())
 	_head.add_child(fit)
-	_head.move_child(fit, 3)
+	_head.move_child(fit, 4)
 	line = TimelineLine.new()
 	line.name = "Line"
 	line.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -74,8 +83,19 @@ func _refresh() -> void:
 	_show_when()
 
 
+## Show everyone (TASK-84): the DM's button shows it; a player's own cursor is off while on.
+func set_showing(on: bool, dm: bool) -> void:
+	if dm:
+		show_button.set_pressed_no_signal(on)
+		return
+	shown = on
+	line.cursor_locked = on
+	now_button.visible = line.cursor_at >= 0 and not on
+	_show_when()
+
+
 func _on_cursor(at: int) -> void:
-	now_button.visible = at >= 0
+	now_button.visible = at >= 0 and not shown
 	_show_when()
 	cursor_changed.emit(at)
 
@@ -95,16 +115,17 @@ func cursor_event() -> int:
 func _show_when() -> void:
 	var ms := line.moments()
 	if line.cursor_at < 0:
-		when_label.text = "now · %d moments" % ms.size()
+		when_label.text = "The DM is showing everyone: now" if shown else "now · %d moments" % ms.size()
 		return
 	var i := -1
 	for m: Dictionary in ms:
 		if int(m.at) > line.cursor_at:
 			break
 		i = int(m.index)
-	when_label.text = "looking back: %s · act at Now" % (line.moment_text(ms[i]).get_slice("\n", 0) if i >= 0 else "before the beginning")
+	when_label.text = ("The DM is showing: %s" if shown else "looking back: %s · act at Now") % (line.moment_text(ms[i]).get_slice("\n", 0) if i >= 0 else "before the beginning")
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and (event as InputEventKey).keycode == KEY_HOME and is_visible_in_tree():
-		line.set_cursor(-1)
+		if not shown:
+			line.set_cursor(-1)

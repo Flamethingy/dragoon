@@ -24,6 +24,7 @@ var calendar: WorldCalendar
 var view_from := 0.0  ## seconds at the left end of the line
 var span := 3600.0  ## seconds across the line
 var cursor_at := -1  ## seconds, -1 = now
+var cursor_locked := false  ## the DM is showing everyone a moment (TASK-84): no scrubbing
 var _pan_from := Vector2.ZERO
 var _pan_view := 0.0
 var _panning := false
@@ -250,8 +251,8 @@ func _gui_input(event: InputEvent) -> void:
 				_panning = false
 			accept_event()
 		elif b.button_index == MOUSE_BUTTON_LEFT:
-			_scrubbing = b.pressed
-			if b.pressed:
+			_scrubbing = b.pressed and not cursor_locked
+			if _scrubbing:
 				scrub_to(b.position.x)
 			accept_event()
 	elif event is InputEventMouseMotion:

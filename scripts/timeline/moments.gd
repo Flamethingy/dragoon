@@ -212,7 +212,7 @@ func summary(events: Array) -> Array:
 func display_name(ref: String) -> String:
 	if name_of.is_valid():
 		var n: Variant = name_of.call(ref)
-		if n != null and str(n) != "":
+		if n != null and str(n) != "" and str(n) != ref and str(n) != ref.get_file():  # not just the id again
 			return str(n)
 	return _short(ref)
 

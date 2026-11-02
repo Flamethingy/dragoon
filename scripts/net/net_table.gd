@@ -63,6 +63,7 @@ var status := "Offline"
 # Host
 var timeline: Timeline
 var event_log: EventLog
+var timeline_sync: TimelineSync  ## the timeline bar's moments on every screen (TASK-82)
 var map_id := ""
 var owners := {}  ## character ref -> [player ids] (its `owners`, plus picks of free PCs); the DM controls all
 var claims := {}  ## pc ref -> player id: free PCs picked in the lobby (table.json)
@@ -122,6 +123,9 @@ func _ready() -> void:
 				return c.usage
 		return {}
 	grid.crowd = func(id: String) -> Dictionary: return _crowded(id)  # TASK-79
+	timeline_sync = TimelineSync.new()
+	timeline_sync.table = self
+	add_child(timeline_sync)
 	assets = AssetCache.new(cache_dir)
 	notes = SessionNotes.new()
 	notes.calendar = WorldCalendar.load_file(calendar_path)
@@ -206,6 +210,7 @@ func host(port := DEFAULT_PORT) -> Error:
 	load_tables()
 	_load_rolls()
 	_apply_state(view_for(""))
+	timeline_sync.follow(event_log)
 	_set_status("Hosting %s on port %d (%d events in the log)" % [timeline.info.get("name", timeline.id()), port, event_log.events.size()])
 	return OK
 
@@ -1712,6 +1717,7 @@ func hello(name_given: String) -> void:
 	receive_accounts.rpc_id(sender, accounts)
 	sync_rolls.rpc_id(sender, _rolls_for(player))
 	sync_notes.rpc_id(sender, notes.session, _notes_for(player), notes.names)
+	timeline_sync.welcome(sender)
 	receive_table.rpc_id(sender, view_for(player))
 	var who := timeline.player_name(player)
 	_set_status("%s joined as %s" % [who, timeline.name_of(_pc_of(player))] if _pc_of(player) != "" \

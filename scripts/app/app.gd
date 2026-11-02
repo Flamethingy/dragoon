@@ -60,6 +60,10 @@ func _ready() -> void:
 	table_ui.lobby = false
 	table_ui.packages_root = packages_root
 	table_ui.compendium_opener = func() -> void: show_view("compendium")
+	table_ui.timeline_list_opener = func(first: int, last: int) -> void:  # a box of the timeline bar (TASK-82)
+		show_view("timeline")
+		if timeline_view != null:
+			timeline_view.show_range(first, last)
 	table.add_child(table_ui)
 	_layer = CanvasLayer.new()
 	_layer.layer = 8

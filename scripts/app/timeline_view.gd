@@ -11,6 +11,9 @@ var calendar: WorldCalendar
 var tree: Tree
 var filter_edit: LineEdit
 var heading: Label
+## Only events with ids in this range (a moment of the timeline bar, TASK-82); (0, 0) = all.
+var id_range := Vector2i.ZERO
+var _range_button: Button
 
 
 func _ready() -> void:
@@ -30,6 +33,12 @@ func _ready() -> void:
 	filter_edit.custom_minimum_size = Vector2(260, 0)
 	filter_edit.text_changed.connect(func(_t: String) -> void: refresh())
 	head.add_child(filter_edit)
+	_range_button = Button.new()
+	_range_button.name = "AllEvents"
+	_range_button.text = "Show all"
+	_range_button.visible = false
+	_range_button.pressed.connect(func() -> void: show_range(0, 0))
+	head.add_child(_range_button)
 	tree = Tree.new()
 	tree.name = "Events"
 	tree.columns = 6
@@ -66,6 +75,8 @@ func refresh() -> void:
 	var own_from := event_log.inherited.size()
 	for i in event_log.events.size():
 		var e: Dictionary = event_log.events[i]
+		if id_range != Vector2i.ZERO and (int(e.id) < id_range.x or int(e.id) > id_range.y):
+			continue
 		var about := str(e.entity)
 		if timeline != null and "/" in about:
 			about = "%s (%s)" % [timeline.name_of(about), about]
@@ -87,6 +98,15 @@ func refresh() -> void:
 	var last := root.get_child(root.get_child_count() - 1) if root.get_child_count() > 0 else null
 	if last != null:
 		tree.scroll_to_item(last)
+
+
+## Shows only the events first..last (a moment of the timeline bar); 0, 0 = all again.
+func show_range(first: int, last: int) -> void:
+	id_range = Vector2i(first, last)
+	if _range_button != null:
+		_range_button.visible = id_range != Vector2i.ZERO
+		_range_button.text = "Show all (now #%d–#%d)" % [first, last] if id_range != Vector2i.ZERO else "Show all"
+	refresh()
 
 
 ## A short text for an event: its type and the data that matters.

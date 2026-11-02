@@ -19,14 +19,17 @@ const EDGE := 8.0  ## pixels at the inner edge that resize
 const ZONE := 0.08  ## the dock zones: this part of the screen at each edge
 const SIDE_CELLS := Vector2i(6, 24)  ## width of a side dock, min / max
 const BOTTOM_CELLS := Vector2i(4, 14)  ## height of the bottom dock, min / max
+const TOP_CELLS := Vector2i(3, 10)  ## height of the top dock, min / max (the timeline bar, TASK-82)
 
-## dock: "left" / "right" / "bottom" / "float"; side: cells of a side dock, bottom: rows of
-## the bottom dock; r: the floating rect in cells; window: popped out; win: that window's rect.
-var place := {"dock": "right", "side": 10, "bottom": 7, "r": [30, 6, 12, 16], "window": false}
+## dock: "left" / "right" / "top" / "bottom" / "float"; side: cells of a side dock, bottom /
+## top: rows of that dock; r: the floating rect in cells; window: popped out; win: that
+## window's rect.
+var place := {"dock": "right", "side": 10, "bottom": 7, "top": 3, "r": [30, 6, 12, 16], "window": false}
 var place_file := "user://panels.cfg"
 var section := "panel"
 var window_title := "Dragoon"
 var close_hides := false  ## closing its own window hides it (`closed`), else it docks back
+var allow_top := false  ## it may dock at the top (a wide, low panel like the timeline bar)
 var window_min := Vector2i(320, 400)  ## its own window at least this big
 var window: Window  ## its own window while popped out
 var title_label: Label
@@ -74,6 +77,7 @@ func _init() -> void:
 			dock_back())
 	_head.add_child(pop)
 	visibility_changed.connect(_on_visibility)
+	add_to_group("dock_panels")
 	set_process(false)
 
 
@@ -93,9 +97,10 @@ func load_place() -> void:
 		var saved: Variant = cfg.get_value(section, "place", {})
 		if saved is Dictionary:
 			place.merge(saved, true)
-	if str(place.dock) not in ["left", "right", "bottom", "float"]:
+	if str(place.dock) not in ["left", "right", "top", "bottom", "float"]:
 		place.dock = "right"
 	apply()
+	_update_top_rows()
 
 
 func save_place() -> void:
@@ -121,12 +126,15 @@ func cell() -> Vector2:
 ## Its rect in cells, from the dock.
 func cells_rect() -> Rect2i:
 	var g := HudWidgets.HUD_GRID
+	var top := TOP + top_rows()  # below a panel docked at the top
 	match str(place.dock):
 		"left":
-			return Rect2i(0, TOP, clampi(int(place.side), SIDE_CELLS.x, SIDE_CELLS.y), g.y - TOP)
+			return Rect2i(0, top, clampi(int(place.side), SIDE_CELLS.x, SIDE_CELLS.y), g.y - top)
 		"right":
 			var w := clampi(int(place.side), SIDE_CELLS.x, SIDE_CELLS.y)
-			return Rect2i(g.x - w, TOP, w, g.y - TOP)
+			return Rect2i(g.x - w, top, w, g.y - top)
+		"top":
+			return Rect2i(0, TOP, g.x, clampi(int(place.get("top", 3)), TOP_CELLS.x, TOP_CELLS.y))
 		"bottom":
 			var h := clampi(int(place.bottom), BOTTOM_CELLS.x, BOTTOM_CELLS.y)
 			return Rect2i(0, g.y - h, g.x, h)
@@ -147,12 +155,38 @@ func apply() -> void:
 	size = px.size
 
 
-## Docks it: "left", "right", "bottom"; or "float" at `r` (cells).
+## Rows taken by a panel docked at the top of the same home (under the app's buttons): the
+## side docks start below it.
+func top_rows() -> int:
+	var rows := 0
+	var home := _home if _home != null else get_parent()
+	if home == null or not is_inside_tree():
+		return 0
+	for p: Node in get_tree().get_nodes_in_group("dock_panels"):
+		var d := p as DockPanel
+		if d != null and d != self and d.get_parent() == home and d.window == null and d.visible and str(d.place.dock) == "top":
+			rows = maxi(rows, clampi(int(d.place.get("top", 3)), TOP_CELLS.x, TOP_CELLS.y))
+	return rows
+
+
+## A panel docked at the top pushes the side docks of its home down: they follow when it
+## docks, resizes, hides or pops out.
+func _update_top_rows() -> void:
+	if not is_inside_tree():
+		return
+	var home := _home if _home != null else get_parent()
+	for p: Node in get_tree().get_nodes_in_group("dock_panels"):
+		if p != self and p is DockPanel and p.get_parent() == home and str((p as DockPanel).place.dock) in ["left", "right"]:
+			(p as DockPanel).apply()
+
+
+## Docks it: "left", "right", "top", "bottom"; or "float" at `r` (cells).
 func dock(where: String, r := Rect2i()) -> void:
 	place.dock = where
 	if where == "float" and r.has_area():
 		place.r = [r.position.x, r.position.y, r.size.x, r.size.y]
 	apply()
+	_update_top_rows()
 	save_place()
 
 
@@ -165,6 +199,8 @@ func zone_at(at: Vector2) -> String:
 		return "right"
 	if at.y > a.y * (1.0 - ZONE * 1.3):
 		return "bottom"
+	if at.y < a.y * ZONE * 1.3 and allow_top:
+		return "top"
 	return ""
 
 
@@ -248,6 +284,9 @@ func _resize_to(at: Vector2) -> void:
 			place.side = clampi(int(roundf(at.x / c.x)), SIDE_CELLS.x, SIDE_CELLS.y)
 		"bottom":
 			place.bottom = clampi(int(roundf(g.y - at.y / c.y)), BOTTOM_CELLS.x, BOTTOM_CELLS.y)
+		"top":
+			place.top = clampi(int(roundf(at.y / c.y)) - TOP, TOP_CELLS.x, TOP_CELLS.y)
+			_update_top_rows()
 		_:
 			var r: Array = place.r
 			place.r = [r[0], r[1], maxi(6, int(roundf(at.x / c.x)) - int(r[0])), maxi(4, int(roundf(at.y / c.y)) - int(r[1]))]
@@ -262,6 +301,8 @@ func _on_edge(local: Vector2) -> bool:
 			return local.x > size.x - EDGE
 		"bottom":
 			return local.y < EDGE
+		"top":
+			return local.y > size.y - EDGE
 	return local.x > size.x - EDGE * 2 and local.y > size.y - EDGE * 2
 
 
@@ -269,7 +310,7 @@ func _edge_cursor() -> Control.CursorShape:
 	match str(place.dock):
 		"left", "right":
 			return Control.CURSOR_HSIZE
-		"bottom":
+		"bottom", "top":
 			return Control.CURSOR_VSIZE
 	return Control.CURSOR_FDIAGSIZE
 
@@ -297,6 +338,8 @@ func _show_zones(on: bool) -> void:
 		var hot := str(_zones.get_meta("hot", ""))
 		var rects := {"left": Rect2(0, 0, a.x * ZONE, a.y), "right": Rect2(a.x * (1.0 - ZONE), 0, a.x * ZONE, a.y),
 			"bottom": Rect2(a.x * ZONE, a.y * (1.0 - ZONE * 1.3), a.x * (1.0 - ZONE * 2), a.y * ZONE * 1.3)}
+		if allow_top:
+			rects["top"] = Rect2(a.x * ZONE, 0, a.x * (1.0 - ZONE * 2), a.y * ZONE * 1.3)
 		for z: String in rects:
 			_zones.draw_rect(rects[z], Color(1.0, 0.55, 0.1, 0.45 if z == hot else 0.15))
 			_zones.draw_rect(rects[z], Color(1.0, 0.55, 0.1, 0.9), false, 2.0))
@@ -344,6 +387,7 @@ func pop_out() -> void:
 	window.visible = visible
 	(_head.get_node("PopOut") as Button).text = "Dock"
 	place.window = true
+	_update_top_rows()  # out of the top dock: the side docks take the room back
 	save_place()
 
 
@@ -366,6 +410,7 @@ func dock_back() -> void:
 	(_head.get_node("PopOut") as Button).text = "Pop out"
 	place.window = false
 	apply()
+	_update_top_rows()
 	save_place()
 
 
@@ -435,6 +480,8 @@ func drop_at(screen: Vector2i) -> void:
 
 
 func _on_visibility() -> void:
+	if is_inside_tree():
+		_update_top_rows.call_deferred()  # a top-docked panel shown or hidden moves the side docks
 	if window != null:
 		window.visible = visible
 	elif visible and is_inside_tree() and not _restored:

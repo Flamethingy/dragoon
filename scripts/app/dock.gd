@@ -5,6 +5,10 @@ extends Control
 ## (drag the tabs between areas, drag the grip to resize), or detached into its own OS
 ## window (closing the window docks it back). The middle stays free for the map.
 ## Where each panel is, the area sizes and the window rectangles are kept in `layout_file`.
+## A panel can also float over the table in a DockPanel (TASK-80, the calm table's books):
+## moved and docked inside the program like the chat, popped out into its own window (also by
+## dragging it past the program's edge) and docked again by dragging it back; its place is
+## kept in panels.cfg beside `layout_file`.
 
 signal panel_shown(id: String)
 signal panel_hidden(id: String)
@@ -83,7 +87,7 @@ func add_panel(id: String, title: String, content: Control, default_place := "ri
 	panels[id] = {"title": title, "holder": holder, "place": "hidden", "default": default_place,
 		"last_area": place if place in AREAS else (default_place if default_place in AREAS else "right"),
 		"window": null, "rect": _rect_from(saved.get("rect")), "screen": int(saved.get("screen", -1)),
-		"open": bool(saved.get("open", false)), "wanted": place}
+		"open": bool(saved.get("open", false)), "wanted": place, "frame": null}
 
 
 func has_panel(id: String) -> bool:
@@ -96,6 +100,9 @@ func place_of(id: String) -> String:
 		return "hidden"
 	var p: Dictionary = panels[id]
 	var holder: Control = p.holder
+	var f: DockPanel = p.get("frame")
+	if f != null and holder.get_parent() == f.body and f.visible:
+		return "window" if f.window != null else "float"
 	if p.window != null and holder.get_parent() == p.window:
 		return "window"
 	for a: String in AREAS:
@@ -116,8 +123,10 @@ func show_panel(id: String, place := "") -> void:
 	if place == "":
 		place = place_of(id)
 		if place == "hidden":
-			place = str(p.wanted) if str(p.wanted) in AREAS or str(p.wanted) == "window" else str(p.last_area)
-	if place == "window":
+			place = str(p.wanted) if str(p.wanted) in AREAS or str(p.wanted) in ["window", "float"] else str(p.last_area)
+	if place == "float":
+		float_panel(id)
+	elif place == "window":
 		detach(id)
 	else:
 		dock(id, place)
@@ -148,6 +157,58 @@ func dock(id: String, area: String) -> void:
 	p.last_area = area
 	p.wanted = area
 	_changed()
+
+
+## The panel floating over the table in its DockPanel (TASK-80); it pops out into its own
+## window by itself if it was there last time. Closing that window hides the panel.
+func float_panel(id: String) -> DockPanel:
+	if not panels.has(id):
+		return null
+	var p: Dictionary = panels[id]
+	var f: DockPanel = p.get("frame")
+	if f != null and (p.holder as Control).get_parent() == f.body and f.visible:
+		if f.window != null:
+			f.window.grab_focus()
+		return f
+	_take_out(id)
+	if f == null:
+		f = DockPanel.new()
+		f.name = "Float_" + id
+		f.section = "panel_" + id
+		f.place_file = layout_file.get_base_dir().path_join("panels.cfg")
+		f.window_title = "Dragoon · %s" % p.title
+		f.title_label.text = str(p.title)
+		f.close_hides = true
+		f.window_min = Vector2i(900, 650)
+		f.place = {"dock": "float", "side": 14, "bottom": 10, "r": [8, 3, 28, 21], "window": false}
+		f.closed.connect(func() -> void: hide_panel(id))
+		f.place_changed.connect(_save_soon)
+		p.frame = f
+		add_child(f)
+	var holder: Control = p.holder
+	holder.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	holder.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	f.body.add_child(holder)
+	f.visible = true
+	p.wanted = "float"
+	_changed()
+	return f
+
+
+## Forgets a panel (a session's views when it is left); its places stay saved.
+func remove_panel(id: String) -> void:
+	if not panels.has(id):
+		return
+	var p: Dictionary = panels[id]
+	_take_out(id)
+	panels.erase(id)
+	(p.holder as Control).queue_free()
+	var f: DockPanel = p.get("frame")
+	if f != null:
+		if f.window != null:
+			f.window.queue_free()
+		else:
+			f.queue_free()
 
 
 ## Moves a panel into its own OS window (closing the window docks it back).
@@ -203,6 +264,9 @@ func _take_out(id: String) -> void:
 	if w != null:
 		p.rect = Rect2i(w.position, w.size)
 		p.screen = w.current_screen
+	var f: DockPanel = p.get("frame")
+	if f != null and holder.get_parent() == f.body:
+		f.visible = false  # its window (if popped out) hides with it
 	if holder.get_parent() != null:
 		holder.get_parent().remove_child(holder)
 	if w != null:
@@ -316,7 +380,7 @@ func layout() -> Dictionary:
 		var where := place_of(id)
 		var w: Window = p.window
 		var rect: Rect2i = Rect2i(w.position, w.size) if w != null and where == "window" else p.rect
-		var keep := str(p.wanted) if str(p.wanted) in AREAS or str(p.wanted) == "window" else str(p.last_area)
+		var keep := str(p.wanted) if str(p.wanted) in AREAS or str(p.wanted) in ["window", "float"] else str(p.last_area)
 		out[id] = {"place": where if where != "hidden" else keep, "open": where != "hidden",
 			"rect": [rect.position.x, rect.position.y, rect.size.x, rect.size.y],
 			"screen": w.current_screen if w != null and where == "window" else int(p.screen)}

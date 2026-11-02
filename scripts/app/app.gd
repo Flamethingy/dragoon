@@ -212,7 +212,7 @@ func show_view(which: String) -> void:
 				dock.hide_panel(id)
 	else:
 		_panel(which)
-		dock.show_panel(which, "window" if minimal and which in MINIMAL_VIEWS else "")
+		dock.show_panel(which, "float" if minimal and which in MINIMAL_VIEWS else "")  # TASK-80: over the table, like the chat
 		if which in BOOK_VIEWS:
 			book = books[which]
 		_refresh_view(which)
@@ -314,9 +314,7 @@ func _drop_views() -> void:
 	for id: String in dock.panels.keys():
 		if id in KEEP_PANELS:
 			continue
-		var holder: Control = dock.panels[id].holder
-		dock.panels.erase(id)
-		holder.queue_free()
+		dock.remove_panel(id)
 	notes_view = null
 	timeline_view = null
 	encounters_view = null
@@ -329,6 +327,9 @@ func drop_outside(e: Dictionary, screen: Vector2i, from: Viewport = null) -> boo
 	var data := EntryDrag.data(e)
 	for id: String in dock.panels:
 		var w: Window = dock.panels[id].window
+		var f: DockPanel = dock.panels[id].get("frame")
+		if f != null and f.window != null:
+			w = f.window  # a floating book popped out (TASK-80)
 		if w == null or w == from or dock.place_of(id) != "window" or not Rect2i(w.position, w.size).has_point(screen):
 			continue
 		var b := books.get(id) as Compendium

@@ -44,21 +44,57 @@ func _init() -> void:
 	var button: Button = app._view_buttons.compendium
 	button.pressed.emit()
 	await process_frame
-	_check(app.dock.place_of("compendium") == "window" and button.button_pressed, "Compendium opens its own window")
+	_check(app.dock.place_of("compendium") == "float" and button.button_pressed, "Compendium floats over the table, like the chat (TASK-80)")
 	button.pressed.emit()
 	await process_frame
 	_check(not app.dock.is_shown("compendium") and not button.button_pressed, "pressed again: closed")
 	button.pressed.emit()
 	await process_frame
-	(app.dock.panels.compendium.window as Window).close_requested.emit()
+	(app.dock.panels.compendium.frame as DockPanel).pop_out()
+	_check(app.dock.place_of("compendium") == "window", "popped out: its own window")
+	((app.dock.panels.compendium.frame as DockPanel).window as Window).close_requested.emit()
 	await process_frame
 	_check(not app.dock.is_shown("compendium"), "closing the window closes it too")
+	# --- TASK-80: past the program's edge it pops out, dragged back over it docks again -------
+	button.pressed.emit()
+	await process_frame
+	var f: DockPanel = app.dock.panels.compendium.frame
+	f.dock_back()
+	await process_frame
+	_check(app.dock.place_of("compendium") == "float", "docked back: floating over the table")
+	_check(f.outside(Vector2(-5, 100)) and not f.outside(f.area() * 0.5), "past the edge counts as outside")
+	f._grab = Vector2(40, 10)
+	f.pull_out(Vector2i(4000, 300))
+	_check(f.window != null and f._carrying and f.window.position == Vector2i(3960, 290) and app.dock.place_of("compendium") == "window", "pulled past the edge: its own window, still in the hand")
+	f.carry_to(Vector2i(4100, 320))
+	_check(f.window.position == Vector2i(4060, 310), "it follows the mouse")
+	f.drop_at(Vector2i(4100, 320))
+	_check(f.window != null and not f._carrying and int(f.place.win[0]) == 4060, "let go beside the program: it stays a window there")
+	f.start_carry(Vector2i(40, 10))
+	var main_win := app.get_window()
+	f.drop_at(main_win.position + Vector2i(main_win.size / 2))
+	_check(f.window == null and app.dock.place_of("compendium") == "float" and str(f.place.dock) == "float", "let go over the program: docked again, floating there")
+	var cfg := ConfigFile.new()
+	cfg.load(f.place_file)
+	var saved: Dictionary = cfg.get_value("panel_compendium", "place", {})
+	_check(not bool(saved.get("window", true)) and (saved.get("win", []) as Array).size() == 4 and str(saved.get("dock", "")) == "float", "where it is and its window's rect are remembered (%s)" % [saved])
+	f.pop_out()
+	await process_frame
+	var chat: ChatBox = app.table_ui.chat
+	_check(chat is DockPanel and chat.has_method("pull_out"), "the chat docks the same way (one DockPanel)")
+	var popped := ConfigFile.new()
+	popped.load(f.place_file)
+	_check(bool((popped.get_value("panel_compendium", "place", {}) as Dictionary).get("window", false)), "popped out: next time it comes back in its own window")
+	button.pressed.emit()  # closed again
+	await process_frame
 	# --- Dragging between the windows (Godot ends it as "not dropped") ------------------------
 	button.pressed.emit()
 	app._view_buttons.world.pressed.emit()
 	await process_frame
-	var comp_win := app.dock.panels.compendium.window as Window
-	var book_win := app.dock.panels.world.window as Window
+	(app.dock.panels.compendium.frame as DockPanel).pop_out()
+	(app.dock.panels.world.frame as DockPanel).pop_out()
+	var comp_win := (app.dock.panels.compendium.frame as DockPanel).window
+	var book_win := (app.dock.panels.world.frame as DockPanel).window
 	var comp: Compendium = app.books.compendium
 	if not comp.db.is_loaded:
 		await comp.db.loaded

@@ -30,6 +30,7 @@ func _init() -> void:
 
 	# history: an hour later Borin walks an L-shaped trail, then gets hurt and poisoned
 	log.advance_time(log.day, maxi(log.time, 0) + 60, "walk")
+	dm.say("off we go")
 	var trail := [start, start + Vector2i(1, 0), start + Vector2i(2, 0), start + Vector2i(2, 1)]
 	dm._handle_move(1, BORIN, start + Vector2i(2, 1), trail)
 	var moved: Dictionary = log.events.back()
@@ -141,6 +142,25 @@ func _init() -> void:
 	_check(bar.cursor_event() == m_walk, "the cursor on the walk's box means its last event (%d)" % bar.cursor_event())
 	bar.line.set_cursor(-1)
 	_check(bar.cursor_event() == -1, "and now is -1")
+
+	# the chat follows the cursor (Nico 2026-11-02)
+	dm.say("hello there")
+	await _until(func() -> bool: return bob.rolls.any(func(r: Dictionary) -> bool: return str(r.get("text", "")) == "hello there"))
+	var chat := ChatBox.new()
+	chat.table = bob
+	home.add_child(chat)
+	await _frames(2)
+	var said := -1
+	for i in bob.rolls.size():
+		if str(bob.rolls[i].get("text", "")) == "off we go":
+			said = i
+	bar.line.set_cursor(int(mw.at))
+	chat.follow_time(bar.happened())
+	_check(said >= 0 and chat._until_last == said, "back at the walk: the chat goes to what was said by then (%d / %d)" % [chat._until_last, said])
+	_check(not chat.log_text.scroll_following and chat.log_text.get_parsed_text().contains("hello there"), "later lines are still there (faint)")
+	bar.line.set_cursor(-1)
+	chat.follow_time(bar.happened())
+	_check(chat.log_text.scroll_following and chat.until.is_empty(), "at now the chat follows new lines again")
 
 	dm.multiplayer.multiplayer_peer.close()
 	await process_frame

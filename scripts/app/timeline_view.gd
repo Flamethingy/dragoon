@@ -21,6 +21,8 @@ var undo_button: Button
 var edit_button: Button
 var editor: ConfirmationDialog
 var _fields := {}  ## data key -> LineEdit while correcting
+var day_edit: SpinBox  ## when it happened: the in-world day ...
+var time_edit: LineEdit  ## ... and time ("HH:MM"; empty = the start of the day)
 var _editing := 0
 var _range_button: Button
 
@@ -73,8 +75,8 @@ func _ready() -> void:
 	actions.add_child(undo_button)
 	edit_button = Button.new()
 	edit_button.name = "Edit"
-	edit_button.text = "Correct values…"
-	edit_button.tooltip_text = "Change what happened: a correction takes its place in the timeline"
+	edit_button.text = "Correct…"
+	edit_button.tooltip_text = "Change what happened, or when: a correction takes its place in the timeline"
 	edit_button.pressed.connect(edit_selected)
 	actions.add_child(edit_button)
 	editor = ConfirmationDialog.new()
@@ -153,7 +155,7 @@ func _update_actions() -> void:
 		return
 	var ok := _may_change(selected_id())
 	undo_button.disabled = not ok
-	edit_button.disabled = not ok or (event_log.get_event(selected_id()).get("data", {}) as Dictionary).is_empty()
+	edit_button.disabled = not ok  # values and the time it happened
 
 
 ## DM: the selected event stops counting.
@@ -178,6 +180,24 @@ func edit_selected() -> void:
 	var grid := GridContainer.new()
 	grid.columns = 2
 	_fields.clear()
+	var day_label := Label.new()
+	day_label.text = "day"
+	grid.add_child(day_label)
+	day_edit = SpinBox.new()
+	day_edit.name = "Day"
+	day_edit.min_value = 0
+	day_edit.max_value = 1000000
+	day_edit.value = int(e.day)
+	day_edit.tooltip_text = "The in-world day (%s)" % (calendar.format_day(int(e.day)) if calendar != null else "day %d" % int(e.day))
+	grid.add_child(day_edit)
+	var time_label := Label.new()
+	time_label.text = "time"
+	grid.add_child(time_label)
+	time_edit = LineEdit.new()
+	time_edit.name = "Time"
+	time_edit.placeholder_text = "HH:MM (empty: start of the day)"
+	time_edit.text = "" if int(e.time) < 0 else "%02d:%02d" % [int(e.time) / 60, int(e.time) % 60]
+	grid.add_child(time_edit)
 	var data: Dictionary = e.data
 	for key: String in data:
 		if key == "corrects":
@@ -218,9 +238,21 @@ func correction_data() -> Dictionary:
 	return out
 
 
+## The form's time: minutes since midnight, -1 for the start of the day (or empty), or the
+## event's own time if it can't be read.
+func correction_time() -> int:
+	var t := time_edit.text.strip_edges() if time_edit != null else ""
+	if t == "" or t == "-":
+		return -1
+	var parts := t.split(":")
+	if parts.size() == 2 and parts[0].is_valid_int() and parts[1].is_valid_int():
+		return clampi(int(parts[0]), 0, 999) * 60 + clampi(int(parts[1]), 0, 59)
+	return int(event_log.get_event(_editing).get("time", -1))
+
+
 func _save_correction() -> void:
 	if _may_change(_editing):
-		event_log.correct(_editing, correction_data())
+		event_log.correct(_editing, correction_data(), "dm", int(day_edit.value), correction_time())
 		_changed()
 
 

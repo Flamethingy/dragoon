@@ -105,7 +105,8 @@ func _ready() -> void:
 	timeline_bar.follow(table.timeline_sync, table.notes.calendar)
 	timeline_bar.cursor_changed.connect(func(at: int) -> void:  # the table follows in real time
 		var seg := timeline_bar.segment()
-		table.look_back(int(seg.upto), at, int(seg.toward), float(seg.f)))
+		table.look_back(int(seg.upto), at, int(seg.toward), float(seg.f))
+		chat.follow_time(timeline_bar.happened()))
 	timeline_bar.show_toggled.connect(func(on: bool) -> void: table.show_everyone(on))
 	timeline_bar.time_requested.connect(func(minutes: int, reason: String) -> void: table.advance_clock(minutes, reason))
 	timeline_bar.rewind_requested.connect(func(upto: int) -> void:  # TASK-86

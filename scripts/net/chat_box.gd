@@ -11,6 +11,10 @@ var table: NetTable
 var active_ref := Callable()  ## -> String: who "/r" rolls for (the HUD's active one)
 var log_text: RichTextLabel
 var line: LineEdit
+## Looking back on the timeline (Nico 2026-11-02): the events that had happened by then (id ->
+## true); later messages are faint and the chat scrolls to the last one said by then. {} = now.
+var until := {}
+var _until_last := -2  ## the entry scrolled to, so dragging only rebuilds when it changes
 
 
 func _init() -> void:
@@ -152,10 +156,44 @@ func send() -> void:
 	table.say(text, str(active_ref.call()) if active_ref.is_valid() else "")
 
 
+## Follows the timeline's cursor: `happened` as from TimelineBar.happened() ({} = now).
+func follow_time(happened: Dictionary) -> void:
+	until = happened
+	var last := -1 if not until.is_empty() else -2
+	if table != null and not until.is_empty():
+		for i in table.rolls.size():
+			if until.has(int(table.rolls[i].get("id", 0))):
+				last = i
+	if last == _until_last:
+		return
+	_until_last = last
+	refresh()
+
+
 func refresh() -> void:
 	if table == null:
 		return
-	var parts := PackedStringArray()
-	for r: Dictionary in table.rolls:
-		parts.append(NetTable.roll_bbcode(r, table.notes.names))
-	log_text.text = "\n\n".join(parts) if not parts.is_empty() else "[color=#%s]Nothing said yet.[/color]" % Markdown.MUTED.to_html(false)
+	if table.rolls.is_empty():
+		log_text.text = "[color=#%s]Nothing said yet.[/color]" % Markdown.MUTED.to_html(false)
+		return
+	log_text.clear()
+	log_text.scroll_following = until.is_empty()
+	var at_par := 0
+	var faint := "[color=#%s]" % Color(Markdown.MUTED, 0.6).to_html(true)
+	for i in table.rolls.size():
+		var r: Dictionary = table.rolls[i]
+		if i > 0:
+			log_text.append_text("\n\n")
+		if i == _until_last:
+			at_par = log_text.get_paragraph_count() - 1
+		var later := not until.is_empty() and not until.has(int(r.get("id", 0)))
+		var text := NetTable.roll_bbcode(r, table.notes.names)
+		log_text.append_text(faint + _plain(text) + "[/color]" if later else text)
+	if not until.is_empty():
+		log_text.scroll_to_paragraph(at_par if _until_last >= 0 else 0)
+
+
+## A message said after the moment looked at: its words without colours or links.
+static func _plain(bb: String) -> String:
+	var re := RegEx.create_from_string("\\[/?(color|url|b|i|u|font_size|bgcolor|hint)[^\\]]*\\]")
+	return re.sub(bb, "", true)

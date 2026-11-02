@@ -152,6 +152,22 @@ func cursor_event() -> int:
 ## The cursor as a stretch between two moments, for the table in real time (Nico 2026-11-02):
 ## {upto: the last event of the moment at or before it (-1 now, 0 before everything), toward:
 ## the last event of the next one (-1: now), f: how far between them (0..1)}.
+## The events that had happened by the cursor (id -> true; every moment up to it), or {}
+## at now. The chat follows with it (Nico 2026-11-02).
+func happened() -> Dictionary:
+	var at := line.cursor_at
+	if at < 0:
+		return {}
+	var out := {}
+	for m: Dictionary in line.moments():
+		if int(m.at) > at:
+			break
+		for id: Variant in m.get("events", []):
+			out[int(id)] = true
+	out[-1] = true  # not empty: something is looked back at, even before the first moment
+	return out
+
+
 func segment() -> Dictionary:
 	var at := line.cursor_at
 	var ms := line.moments()

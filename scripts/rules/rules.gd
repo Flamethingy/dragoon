@@ -569,6 +569,43 @@ static func save_effect(entry: Dictionary, caster := {}) -> Dictionary:
 		"half": "half as much" in lower or "half damage" in lower, "conditions": conds, "duration": duration}
 
 
+## A spell with a spell attack (TASK-49): {name, to_hit, damage: [{dice, type}], ranged}; {}
+## for none. Damage from the entry's `damage`, else its text ("3d6 fire damage").
+static func spell_attack_of(entry: Dictionary, caster: Dictionary) -> Dictionary:
+	var text := str(entry.get("description", entry.get("text", ""))).get_slice("**At Higher Levels", 0)
+	var lower := text.to_lower()
+	if not "spell attack" in lower:
+		return {}
+	var damage := []
+	if entry.get("damage") is Array:
+		for d: Variant in entry.damage:
+			if d is Dictionary and Dice.is_formula(str(d.get("dice", ""))):
+				damage.append({"dice": str(d.dice).replace(" ", ""), "type": str(d.get("type", ""))})
+	if damage.is_empty():
+		var re := RegEx.create_from_string("(\\d+d\\d+(?:\\s*[+-]\\s*\\d+)?)\\)?\\s+(\\w+)\\s+damage")
+		for m: RegExMatch in re.search_all(lower):
+			var t := m.get_string(2)
+			damage.append({"dice": m.get_string(1).replace(" ", ""), "type": t if t in _damage_ids() else ""})
+	return {"name": str(entry.get("name", "")), "to_hit": spell_attack(caster), "damage": damage, "ranged": "ranged spell attack" in lower}
+
+
+## How a spell is cast at the table: "attack" (a spell attack: pick targets), "save" (targets
+## save), else "other" (rolled into the chat).
+static func spell_kind(entry: Dictionary) -> String:
+	var lower := str(entry.get("description", entry.get("text", ""))).to_lower()
+	if "spell attack" in lower:
+		return "attack"
+	if not save_effect(entry).is_empty():
+		return "save"
+	return "other"
+
+
+## Which action a spell or feature takes by its casting time: "bonus", "reaction" or "action".
+static func casting_kind(entry: Dictionary) -> String:
+	var t := str(entry.get("casting_time", "")).to_lower()
+	return "bonus" if "bonus" in t else "reaction" if "reaction" in t else "action"
+
+
 static func _damage_ids() -> Array:
 	var out := []
 	for d: Variant in core().get("damage_types", []):

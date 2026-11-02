@@ -335,14 +335,49 @@ func roll_check(query: String) -> void:
 
 
 ## A quick button (TASK-48): a check rolls, a spell / an item is posted in the chat with its
-## rolls (NetTable.use_action; nothing is spent yet, TASK-49).
+## rolls (NetTable.use_action); a spell is cast through cast_menu (TASK-49).
 func use_quick(kind: String, ref: String) -> void:
 	if active == "" or table == null or editor != null:
 		return
 	if kind == "check":
 		roll_check(ref)
+	elif kind == "spell":
+		cast_menu(ref)
 	else:
 		table.use_action(active, ref)
+
+
+var cast_popup: PopupMenu
+
+## Casting a spell (TASK-49): a cantrip at once; a levelled spell at its level, or a menu of
+## the levels with slots (upcast) and "as a ritual" when there is a choice.
+func cast_menu(spell: String) -> PopupMenu:
+	var s: Dictionary = table.sheets.get(active, {})
+	var info: Dictionary = (s.get("_refs", {}) as Dictionary).get(spell, {}) if s.get("_refs") is Dictionary else {}
+	var base := int(info.get("level", 0))
+	var options := []  # [label, level, ritual]
+	if base > 0:
+		var slots := Rules.slots(s)
+		for lvl in range(base, slots.size() + 1):
+			var left := int(slots[lvl - 1]) - Replay.slots_used(s, lvl)
+			if int(slots[lvl - 1]) > 0 and (left > 0 or lvl == base):
+				options.append(["Level %d%s (%d left)" % [lvl, " (upcast)" if lvl > base else "", maxi(left, 0)], lvl, false])
+		if bool(info.get("ritual", false)):
+			options.append(["As a ritual (no slot, +10 minutes)", base, true])
+	if options.size() <= 1:
+		table.cast(active, spell, base)
+		return null
+	if cast_popup != null:
+		cast_popup.queue_free()
+	cast_popup = PopupMenu.new()
+	cast_popup.name = "CastMenu"
+	add_child(cast_popup)
+	for i in options.size():
+		cast_popup.add_item(str(options[i][0]), i)
+	var who := active
+	cast_popup.id_pressed.connect(func(i: int) -> void: table.cast(who, spell, int(options[i][1]), bool(options[i][2])))
+	cast_popup.popup(Rect2i(Vector2i(get_viewport().get_mouse_position()), Vector2i.ZERO))
+	return cast_popup
 
 
 ## Spent spell slots of a level, `spent` in all: resource.used / resource.restored

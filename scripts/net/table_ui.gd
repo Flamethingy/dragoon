@@ -391,9 +391,9 @@ func _build_attack_bar(root: Control) -> void:
 
 ## Starts an attack of `ref`: click the targets on the map (a second click drops one), then
 ## Roll. A creature's Multiattack (`multi`) rolls its listed attacks in a row.
-func begin_attack(ref: String, query: String, multi := false, kind := "attack") -> void:
+func begin_attack(ref: String, query: String, multi := false, kind := "attack", opts := {}) -> void:
 	cancel_attack()
-	attack = {"ref": ref, "query": query, "multi": multi, "targets": [], "kind": kind}
+	attack = {"ref": ref, "query": query, "multi": multi, "targets": [], "kind": kind, "opts": opts}
 	_adv.visible = kind == "attack"  # a save: the targets' own conditions decide
 	attack_bar.visible = true
 	_update_attack_label()
@@ -416,7 +416,7 @@ func _toggle_target(id: String) -> void:
 
 
 func _update_attack_label() -> void:
-	var what := "Multiattack" if bool(attack.get("multi", false)) else str(attack.get("query", "")).capitalize()
+	var what := "Multiattack" if bool(attack.get("multi", false)) else HudWidgets._name_of(str(attack.get("query", ""))).capitalize()
 	var n: int = (attack.get("targets", []) as Array).size()
 	_attack_label.text = "%s: %s" % [what, "click the targets on the map" if n == 0 else "%d target%s" % [n, "" if n == 1 else "s"]]
 
@@ -425,12 +425,14 @@ func _update_attack_label() -> void:
 func roll_attack() -> void:
 	if attack.is_empty() or (attack.targets as Array).is_empty():
 		return
-	var opts := {"cover": str(_cover.get_item_metadata(_cover.selected)), "multi": bool(attack.multi)}
+	var opts: Dictionary = (attack.get("opts", {}) as Dictionary).duplicate()  # a spell's slot level (TASK-49)
+	opts.merge({"cover": str(_cover.get_item_metadata(_cover.selected)), "multi": bool(attack.multi)}, true)
 	var adv := int(_adv.get_item_metadata(_adv.selected))
 	if adv != 2:
 		opts["advantage"] = adv
 	if str(attack.get("kind", "attack")) == "save":
-		table.save_action(str(attack.ref), str(attack.query), (attack.targets as Array).duplicate(), {"cover": opts.cover})
+		opts.erase("multi")
+		table.save_action(str(attack.ref), str(attack.query), (attack.targets as Array).duplicate(), opts)
 	else:
 		table.attack(str(attack.ref), str(attack.query), (attack.targets as Array).duplicate(), opts)
 	cancel_attack()

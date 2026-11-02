@@ -74,7 +74,6 @@ func _init() -> void:
 
 	var lines := dm.rolls.size()
 	_next_to(dm, CHIEF)
-	_check(_line(dm, "Initiative 20: lair action", lines), "a new round: the lair action reminder")
 	_check(_line(dm, "Regeneration: regains 5 HP", lines), "the chief's turn: regeneration reminder")
 	_check(_line(dm, "Fire Breath (Recharge 5-6): recharge", lines), "the chief's turn: a recharge roll")
 	u = dm.turn_usage(CHIEF)
@@ -114,6 +113,8 @@ func _init() -> void:
 	if not card.is_empty():
 		dm.answer_save(int(card[0].id), BORIN)
 	_check(not _has(dm, BORIN, "frightened"), "Borin's save ends it")
+
+	_check(_line(dm, "Initiative 20: lair action"), "each round: the lair action reminder (initiative 20, losing ties)")
 
 	# the clock: a minute out of combat
 	dm.end_combat()

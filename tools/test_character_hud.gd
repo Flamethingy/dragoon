@@ -325,12 +325,15 @@ func _init() -> void:
 	_check(torch != null and (torch.get_node("Button/Badge") as Label).text == "0", "an item not held shows 0")
 	var rolls_before := ann.rolls.size()
 	(spell_button.get_node("Button") as Button).pressed.emit()
+	if hud.cast_popup != null and is_instance_valid(hud.cast_popup):  # TASK-49: a levelled spell asks for its slot level
+		hud.cast_popup.id_pressed.emit(0)
 	await _until(func() -> bool: return ann.rolls.size() > rolls_before)
 	var cast: Dictionary = ann.rolls[ann.rolls.size() - 1] if ann.rolls.size() > rolls_before else {}
 	_check(str(cast.get("action", "")) == spell_ref and str(cast.get("text", "")).begins_with("casts ") and str(cast.get("who", "")) == "Borin Stoneshield",
 		"a click casts the spell: posted in the chat (%s)" % [cast])
 	_check(NetTable.roll_bbcode(cast).contains("casts "), "the chat shows it")
-	_check(Replay.slots_used(ann.sheets["characters/borin"], 1) == 2, "nothing is spent yet (TASK-49)")
+	await _until(func() -> bool: return Replay.slots_used(ann.sheets["characters/borin"], 1) == 3)
+	_check(Replay.slots_used(ann.sheets["characters/borin"], 1) == 3, "the slot is spent (TASK-49)")
 	rolls_before = ann.rolls.size()
 	(hud.find_child("W_check", true, false).get_node("Button") as Button).pressed.emit()
 	await _until(func() -> bool: return ann.rolls.size() > rolls_before)

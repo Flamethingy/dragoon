@@ -28,7 +28,7 @@ signal roll_shown(entry: Dictionary)  ## a new roll card with dice in my feed: t
 signal entry_imported(entry: Dictionary)
 signal condition_menu_requested(ref: String)
 signal concentration_confirm(ref: String, old_name: String, new_name: String, go: Callable)  ## a second concentration spell (TASK-59)
-signal attack_requested(ref: String, query: String, multi: bool, kind: String)  ## a sheet's attack or save link: pick targets (TASK-54/55)  ## a token's right click, a sheet's or roll card's link (TASK-56)  ## DM: a core entry was copied into the world
+signal attack_requested(ref: String, query: String, multi: bool, kind: String, opts: Dictionary)  ## a sheet's attack or save link: pick targets (TASK-54/55)  ## a token's right click, a sheet's or roll card's link (TASK-56)  ## DM: a core entry was copied into the world
 
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
@@ -1763,7 +1763,8 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 		var refs := {}  # spells and items: name (and level) for the HUD's quick buttons (TASK-48)
 		for v: Variant in sheet.get("spells", []):
 			var e := catalog_entry(str(v))
-			refs[str(v)] = {"name": str(e.get("name", HudWidgets._name_of(v))), "level": int(e.get("level", 0))}
+			refs[str(v)] = {"name": str(e.get("name", HudWidgets._name_of(v))), "level": int(e.get("level", 0)),
+				"cast": Rules.spell_kind(e), "ritual": bool(e.get("ritual", false))}  # TASK-49
 		for it: Variant in sheet.get("inventory", []):
 			var r := str(it.get("item", "")) if it is Dictionary else str(it)
 			refs[r] = {"name": str(catalog_entry(r).get("name", HudWidgets._name_of(r)))}
@@ -2380,8 +2381,8 @@ func request_attack(ref: String, query: String, targets: Array, opts: Dictionary
 
 
 ## Asks the table's UI to pick targets for an attack (a sheet's or the HUD's attack link).
-func begin_attack(ref: String, query: String, multi := false, kind := "attack") -> void:
-	attack_requested.emit(ref, query, multi, kind)
+func begin_attack(ref: String, query: String, multi := false, kind := "attack", opts := {}) -> void:
+	attack_requested.emit(ref, query, multi, kind, opts)
 
 
 func _handle_attack(sender: int, ref: String, query: String, targets: Array, opts: Dictionary) -> Array:
@@ -2393,6 +2394,17 @@ func _handle_attack(sender: int, ref: String, query: String, targets: Array, opt
 	var features: Dictionary = timeline.entries("features")
 	var names: Array = Dice.multiattack(sheet, features) if bool(opts.get("multi", false)) else [query]
 	var cards := []
+	if query.begins_with("spells/"):  # TASK-49: a spell attack
+		var entry := catalog_entry(query)
+		var atk := Rules.spell_attack_of(entry, sheet)
+		if atk.is_empty():
+			_deny_roll(sender, "%s has no spell attack" % str(entry.get("name", query)))
+			return []
+		_cast_costs(ref, sheet, query, entry, opts, player)
+		if in_combat():
+			event_log.append("action.used", ref, {"kind": Rules.casting_kind(entry), "what": str(atk.name)}, player)
+		cards.append(_attack_card(player, ref, sheet, atk, targets, opts))
+		return cards
 	if in_combat() and not names.is_empty():  # TASK-62: the action (once for a Multiattack)
 		var kind := "action" if bool(opts.get("multi", false)) else _action_kind(sheet, str(names[0]).trim_prefix("attack with "))
 		event_log.append("action.used", ref, {"kind": kind, "what": "Multiattack" if bool(opts.get("multi", false)) else str(names[0])}, player)
@@ -2645,8 +2657,10 @@ func _handle_save_action(sender: int, ref: String, what: String, targets: Array,
 	if str(fx.name) == "":
 		fx.name = HudWidgets._name_of(what)
 	if in_combat():  # TASK-62
-		event_log.append("action.used", ref, {"kind": "action" if _is_ref(what) else _action_kind(sheet, what), "what": str(fx.name)}, player)
+		event_log.append("action.used", ref, {"kind": Rules.casting_kind(entry) if _is_ref(what) else _action_kind(sheet, what), "what": str(fx.name)}, player)
 	_spend_feature(ref, sheet, what, player)
+	if what.begins_with("spells/"):  # TASK-49: the slot (concentration follows below)
+		_cast_costs(ref, sheet, what, entry, opts, player, false)
 	var rolls := []
 	for d: Dictionary in fx.damage:
 		var r := Dice.roll(str(d.dice), rng)
@@ -2883,23 +2897,75 @@ func catalog_entry(ref: String) -> Dictionary:
 	return (_catalog[kind] as Dictionary).get(id, {})
 
 
-## Casts a spell / uses an item of `ref` (a quick button): for now it is posted in the chat
-## with what it rolls (HudActions); nothing is spent yet (TASK-49).
-func use_action(ref: String, what: String) -> void:
+## Casts a spell / uses an item of `ref` (a quick button): posted in the chat with what it
+## rolls (HudActions); the slot, charge or item is spent (TASK-49; opts: {level, ritual}).
+func use_action(ref: String, what: String, opts := {}) -> void:
 	if is_dm():
-		_handle_use(1, ref, what)
+		_handle_use(1, ref, what, opts)
 	elif is_online():
-		request_use.rpc_id(1, ref, what)
+		request_use.rpc_id(1, ref, what, opts)
 
 
 ## Player -> DM.
 @rpc("any_peer", "call_remote", "reliable")
-func request_use(ref: String, what: String) -> void:
+func request_use(ref: String, what: String, opts: Dictionary) -> void:
 	if is_dm():
-		_handle_use(multiplayer.get_remote_sender_id(), ref.left(200), what.left(200))
+		_handle_use(multiplayer.get_remote_sender_id(), ref.left(200), what.left(200), opts)
 
 
-func _handle_use(sender: int, ref: String, what: String) -> Dictionary:
+## Casts `spell` of `ref` at `level` (-1: its own; a ritual spends no slot) (TASK-49): a spell
+## attack or a save picks its targets first (the attack bar), anything else goes to the chat.
+func cast(ref: String, spell: String, level := -1, ritual := false) -> void:
+	var s: Dictionary = sheets.get(ref, {})
+	if is_dm() and s.is_empty():
+		s = sheet_for(Reveal.DM, ref)
+	var info: Dictionary = (s.get("_refs", {}) as Dictionary).get(spell, {}) if s.get("_refs") is Dictionary else {}
+	var opts := {"level": level if level > 0 else int(info.get("level", 0)), "ritual": ritual}
+	match str(info.get("cast", "other")):
+		"attack", "save":
+			attack_requested.emit(ref, spell, false, str(info.cast), opts)
+		_:
+			use_action(ref, spell, opts)
+
+
+## A spell's slot (TASK-49, Auto): the chosen level (upcast), spent as resource.used; none
+## left: cast anyway, the DM is told. Cantrips and rituals spend nothing. Concentration
+## spells hand over to TASK-59.
+func _cast_costs(ref: String, sheet: Dictionary, spell: String, entry: Dictionary, opts: Dictionary, player: String, concentrate := true) -> void:
+	var base := int(entry.get("level", 0))
+	var level := maxi(int(opts.get("level", base)), base)
+	if base > 0 and not bool(opts.get("ritual", false)) and automation("resources") == "auto":
+		var slots := Rules.slots(sheet)
+		var total := int(slots[level - 1]) if level <= slots.size() else 0
+		if Replay.slots_used(sheet, level) >= total:
+			_dm_line(ref, "no level %d slot left for %s (cast anyway)" % [level, str(entry.get("name", spell))])
+		var e := event_log.append("resource.used", ref, {"resource": "spell_slots.%d" % level, "amount": 1, "spell": spell}, player)
+		_after_change(ref, e)
+	if concentrate and bool(entry.get("concentration", false)):
+		_handle_concentrate(1, ref, spell, str(entry.get("name", spell)))
+
+
+## Using an item (TASK-49): a charge (charges.<item>) or, if it is used up (a potion, a
+## scroll, ammunition...), one of them (item.lost). A potion's healing goes to its drinker.
+func _item_costs(ref: String, sheet: Dictionary, item: String, entry: Dictionary, player: String) -> bool:
+	if automation("resources") != "auto":
+		return false
+	var ch := Rules.item_charges(entry)
+	if not ch.is_empty():
+		for r: Dictionary in resources_of(sheet):
+			if r.id == "charges.%s" % item and int(r.used) >= int(r.max):
+				_dm_line(ref, "%s has no charges left (used anyway)" % str(entry.get("name", item)))
+		var e := event_log.append("resource.used", ref, {"resource": "charges.%s" % item, "amount": 1}, player)
+		_after_change(ref, e)
+		return false
+	var kind := ("%s %s" % [str(entry.get("type", "")), str(entry.get("name", ""))]).to_lower()
+	if "potion" in kind or "scroll" in kind or "consumable" in kind or "ammunition" in kind or bool(entry.get("consumable", false)):
+		_handle_item(1, ref, item, -1)
+		return "potion" in kind
+	return false
+
+
+func _handle_use(sender: int, ref: String, what: String, opts := {}) -> Dictionary:
 	var player := _sender_player(sender)
 	if player == "" or ref == "" or not may_see_sheet(player, ref):
 		_deny_roll(sender, "that's not your sheet")
@@ -2908,12 +2974,27 @@ func _handle_use(sender: int, ref: String, what: String) -> Dictionary:
 	var kind := what.get_slice("/", 0)
 	if sheet.is_empty() or kind not in ["spells", "items"]:
 		return {}
-	var use := HudActions.spell(sheet, catalog_entry(what), what) if kind == "spells" else HudActions.item(sheet, catalog_entry(what), what)
+	var spec := catalog_entry(what)
+	var use := HudActions.spell(sheet, spec, what) if kind == "spells" else HudActions.item(sheet, spec, what)
+	var drink := false
+	if kind == "spells":  # TASK-49: the slot (upcast), concentration
+		_cast_costs(ref, sheet, what, spec, opts, player)
+		var lvl := int(opts.get("level", 0))
+		if lvl > int(spec.get("level", 0)):
+			use.text = str(use.text).replace("(level %d" % int(spec.level), "(level %d, upcast from %d" % [lvl, int(spec.level)])
+		if bool(opts.get("ritual", false)):
+			use.text = str(use.text) + " · as a ritual"
+		if in_combat() and not bool(opts.get("ritual", false)):
+			event_log.append("action.used", ref, {"kind": Rules.casting_kind(spec), "what": str(spec.get("name", what))}, player)
+	else:
+		drink = _item_costs(ref, sheet, what, spec, player)
 	var results := []
 	for a: Dictionary in use.asked:
 		var r := Dice.roll(str(a.formula), rng)
 		r["label"] = a.label
 		results.append(r)
+	if drink and not results.is_empty() and str(results[0].label).ends_with("healing") and automation("damage") == "auto":
+		_handle_hp(1, ref, int(results[0].total), str(spec.get("name", what)))  # a healing potion heals its drinker
 	var data := {"text": use.text, "action": what, "who": str(sheet.get("name", "")), "results": results}
 	var e: Dictionary
 	if results.is_empty():

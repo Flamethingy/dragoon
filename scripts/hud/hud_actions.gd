@@ -1,8 +1,8 @@
 class_name HudActions
 extends RefCounted
 ## What a spell or item quick button posts in the chat (TASK-48, Nico 2026-11-01: "for now
-## just post it into the chat"). Nothing is spent yet: the usage engine (does it need a slot,
-## is one free, spend it, apply effects) comes later (TASK-49). The host builds this from the
+## just post it into the chat"). What it spends is NetTable's (TASK-49: slots, charges, a
+## potion; attack and save spells go through the attack bar). The host builds this from the
 ## spell / item entry and rolls what it finds: a spell attack, its first dice (damage or
 ## healing), the save DC.
 

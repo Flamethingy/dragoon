@@ -119,6 +119,12 @@ func _on_meta(meta: Variant) -> void:
 		table.begin_attack(ref, m.substr(8), false, "save")
 	elif m == "death" and table != null:  # TASK-57
 		table.roll_death_save(ref)
+	elif m.begins_with("res:") and table != null:  # TASK-64: a use spent / back
+		table.use_resource(ref, m.substr(8), 1 if m.begins_with("res:use:") else -1)
+	elif m == "rest:short" and table != null:
+		short_rest_dialog()
+	elif m == "rest:long" and table != null and table.is_dm():
+		table.long_rest()
 	elif m == "cond:add" and table != null:  # TASK-56: the condition menu
 		table.condition_menu_requested.emit(ref)
 	elif m.begins_with("cond:off:") and table != null:
@@ -146,6 +152,46 @@ func add_entry(e: Dictionary) -> bool:
 		return false
 	table.change_field(ref, change[0], change[1])
 	return true
+
+
+var rest_dialog: ConfirmationDialog
+
+## The short rest (TASK-64): how many of each hit die to spend.
+func short_rest_dialog() -> ConfirmationDialog:
+	if rest_dialog != null:
+		rest_dialog.queue_free()
+	rest_dialog = ConfirmationDialog.new()
+	rest_dialog.name = "ShortRest"
+	rest_dialog.title = "Short rest: %s" % str(sheet.get("name", ""))
+	var box := VBoxContainer.new()
+	rest_dialog.add_child(box)
+	var spins := {}
+	for r: Dictionary in sheet.get("_resources", []):
+		if str(r.id).begins_with("hit_dice."):
+			var row := HBoxContainer.new()
+			box.add_child(row)
+			var l := Label.new()
+			l.text = "%s, %d left" % [r.name, int(r.max) - int(r.used)]
+			l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(l)
+			var sp := SpinBox.new()
+			sp.name = "Dice_" + str(r.id).get_slice(".", 1)
+			sp.max_value = int(r.max) - int(r.used)
+			row.add_child(sp)
+			spins[int(str(r.id).get_slice(".d", 1))] = sp
+	if spins.is_empty():
+		var l := Label.new()
+		l.text = "No hit dice (short rest uses still come back)."
+		box.add_child(l)
+	rest_dialog.confirmed.connect(func() -> void:
+		var dice := {}
+		for sides: int in spins:
+			if int(spins[sides].value) > 0:
+				dice[sides] = int(spins[sides].value)
+		table.short_rest(ref, dice))
+	add_child(rest_dialog)
+	rest_dialog.popup_centered(Vector2i(320, 120))
+	return rest_dialog
 
 
 func close_sheet() -> void:
@@ -182,11 +228,7 @@ static func to_bbcode(s: Dictionary) -> String:
 			var done := int(ds.get("successes", 0)) >= 3 or "dead" in (s.get("conditions", []) as Array)
 			bb += StatBlock._field("Death Saves", "%d successes, %d failures%s" % [int(ds.get("successes", 0)), int(ds.get("failures", 0)),
 				"" if done or int(s.get("hp", 1)) > 0 else " · [url=death]roll[/url]"])
-		if s.get("resources_used") is Dictionary and not s.resources_used.is_empty():
-			var used := PackedStringArray()
-			for r: Variant in s.resources_used:
-				used.append("%s %d" % [str(r).replace("_", " ").replace(".", " ").capitalize(), int(s.resources_used[r])])
-			bb += StatBlock._field("Used", Markdown.escape(", ".join(used)))
+		bb += _resources(s)
 		if s.get("currency") is Dictionary and not s.currency.is_empty():
 			var coins := PackedStringArray()
 			for coin in ["pp", "gp", "ep", "sp", "cp"]:
@@ -237,6 +279,23 @@ static func to_bbcode(s: Dictionary) -> String:
 		bb += StatBlock._heading("About") + Markdown.to_bbcode(str(s.description))
 	if not bool(s.get("_full", false)):
 		bb += "\n\n[color=#%s][i]Only its player and the DM see the stats.[/i][/color]" % Markdown.MUTED.to_html(false)
+	return bb
+
+
+## Uses, hit dice and charges as pips (TASK-64): a click on the name spends one, + gets one
+## back; then the rests.
+static func _resources(s: Dictionary) -> String:
+	var res: Array = s.get("_resources", [])
+	var parts := PackedStringArray()
+	for r: Dictionary in res:
+		var left := int(r.max) - int(r.used)
+		var pips := "●".repeat(left) + "○".repeat(int(r.used)) if int(r.max) <= 10 else "%d/%d" % [left, int(r.max)]
+		parts.append("[url=res:use:%s]%s[/url] %s [url=res:back:%s]+[/url]" % [r.id, Markdown.escape(str(r.name)), pips, r.id])
+	var bb := ""
+	if not parts.is_empty():
+		bb += StatBlock._field("Uses", " · ".join(parts))
+	if str(s.get("_kind", "")) == "characters":
+		bb += StatBlock._field("Rest", "[url=rest:short]Short rest[/url] · [url=rest:long]Long rest (party, DM)[/url]")
 	return bb
 
 

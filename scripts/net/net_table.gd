@@ -494,6 +494,166 @@ func _handle_mark(sender: int, ref: String, kind: String, on: bool, what: String
 	return e
 
 
+# --- Uses and rests (TASK-64) -------------------------------------------------------------------
+
+## Everything `sheet` spends and gets back: [{id, name, max, used, reset}]: class resources,
+## feature uses ("feature.<id>"), hit dice ("hit_dice.d8"), item charges ("charges.<item>").
+func resources_of(sheet: Dictionary) -> Array:
+	var used: Dictionary = sheet.get("resources_used", {}) if sheet.get("resources_used") is Dictionary else {}
+	var out := []
+	for r: Dictionary in Rules.resources(sheet):
+		out.append({"id": r.id, "name": r.name, "max": int(r.max), "reset": r.reset})
+	var features: Dictionary = timeline.entries("features")
+	for key in ["features", "traits", "actions", "bonus_actions", "reactions", "legendary_actions"]:
+		for fid: Variant in sheet.get(key, []):
+			var f: Variant = features.get(str(fid))
+			if f is Dictionary:
+				var uses := Rules.feature_uses(f)
+				if not uses.is_empty():
+					out.append({"id": "feature.%s" % fid, "name": str(f.get("name", fid)), "max": int(uses.max), "reset": uses.reset})
+	var hd := Rules.hit_dice(sheet)
+	for sides: Variant in hd:
+		if int(hd[sides]) > 0:
+			out.append({"id": "hit_dice.d%d" % int(sides), "name": "Hit Dice (d%d)" % int(sides), "max": int(hd[sides]), "reset": "long"})
+	var inv: Variant = sheet.get("inventory", [])
+	var items: Array = (inv as Dictionary).keys() if inv is Dictionary else (inv as Array).map(func(it: Variant) -> String: return str((it as Dictionary).get("item", "")) if it is Dictionary else str(it))
+	for item: Variant in items:
+		var ch := Rules.item_charges(catalog_entry(str(item)))
+		if not ch.is_empty():
+			out.append({"id": "charges.%s" % item, "name": "%s charges" % str(catalog_entry(str(item)).get("name", HudWidgets._name_of(item))),
+				"max": int(ch.max), "reset": ch.reset, "regain": str(ch.regain)})
+	for r: Dictionary in out:
+		r["used"] = mini(int(used.get(r.id, 0)), int(r.max))
+	return out
+
+
+## A feature with uses spends one when it is used (Auto); none left: used anyway, the DM is told.
+func _spend_feature(ref: String, sheet: Dictionary, name: String, player: String) -> void:
+	if automation("resources") != "auto":
+		return
+	var f := _effect_entry(sheet, name)
+	if f.is_empty() or Rules.feature_uses(f).is_empty():
+		return
+	var id := "feature.%s" % str(f.get("id", ""))
+	for r: Dictionary in resources_of(sheet):
+		if r.id == id:
+			if int(r.used) >= int(r.max):
+				_dm_line(ref, "%s: no uses left (used anyway)" % str(f.name))
+			var e := event_log.append("resource.used", ref, {"resource": id, "amount": 1}, player)
+			_after_change(ref, e)
+
+
+## A short rest (`dice`: {sides: how many hit dice}): each die + CON, up to max HP; the short
+## rest resources come back.
+func short_rest(ref: String, dice: Dictionary) -> void:
+	if is_dm():
+		_handle_short_rest(1, ref, dice)
+	elif is_online():
+		request_short_rest.rpc_id(1, ref, dice)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_short_rest(ref: String, dice: Dictionary) -> void:
+	if is_dm():
+		_handle_short_rest(multiplayer.get_remote_sender_id(), ref, dice)
+
+
+func _handle_short_rest(sender: int, ref: String, dice: Dictionary) -> Dictionary:
+	var sheet := _editable_sheet(sender, ref)
+	if sheet.is_empty():
+		return {}
+	var res := resources_of(sheet)
+	var spent := {}
+	var rolled := PackedStringArray()
+	var heal := 0
+	var con := Rules.mod(sheet, "con")
+	for sides: Variant in dice:
+		var id := "hit_dice.d%d" % int(sides)
+		var have := 0
+		for r: Dictionary in res:
+			if r.id == id:
+				have = int(r.max) - int(r.used)
+		var n := clampi(int(dice[sides]), 0, have)
+		for i in n:
+			var v := int(Dice.roll("1d%d" % int(sides), rng).total)
+			heal += maxi(0, v + con)
+			rolled.append("d%d: %d%s" % [int(sides), v, HudWidgets._signed(con)])
+		if n > 0:
+			spent[id] = n
+	var hp_max := int(sheet.get("_hp_max", 0))
+	var hp := mini(int(sheet.get("hp", 0)) + heal, hp_max) if hp_max > 0 else int(sheet.get("hp", 0)) + heal
+	var restores := res.filter(func(r: Dictionary) -> bool: return r.reset == "short").map(func(r: Dictionary) -> String: return str(r.id))
+	var e := event_log.append("rest.taken", ref, {"kind": "short", "hp": hp, "hit_dice": spent, "restores": restores}, _sender_player(sender))
+	_after_change(ref, e)
+	var line := _log_entry(e)
+	line["text"] = "short rest: %s%s" % ["healed %d (%s)" % [hp - int(sheet.get("hp", 0)), ", ".join(rolled)] if not rolled.is_empty() else "no hit dice spent",
+		"; back: " + ", ".join(res.filter(func(r: Dictionary) -> bool: return r.reset == "short").map(func(r: Dictionary) -> String: return str(r.name))) if not restores.is_empty() else ""]
+	line["hidden"] = false  # everyone sees the rest
+	_post_roll(line)
+	return e
+
+
+## DM: a long rest for `refs` (default: the party, every character): full HP, hit dice back
+## (2014 half, 2024 all), slots and uses, exhaustion -1; then 8 hours on the clock.
+func long_rest(refs: Array = []) -> Array:
+	if not is_dm():
+		return []
+	if refs.is_empty():
+		for id: String in timeline.entries("characters"):
+			refs.append("characters/" + id)
+	var out := []
+	for r: Variant in refs:
+		var ref := str(r)
+		var sheet := sheet_for(Reveal.DM, ref)
+		if sheet.is_empty() or "dead" in (sheet.get("conditions", []) as Array):
+			continue
+		var edition := Rules.edition_of(sheet, rules_settings())
+		var back := {}
+		var hd := Rules.hit_dice(sheet)
+		var total := 0
+		for sides: Variant in hd:
+			total += int(hd[sides])
+		var budget := Rules.hit_dice_back(total, edition)
+		for sides: Variant in hd:  # the biggest dice first
+			var id := "hit_dice.d%d" % int(sides)
+			var used := int((sheet.get("resources_used", {}) as Dictionary).get(id, 0)) if sheet.get("resources_used") is Dictionary else 0
+			var n := mini(used, budget)
+			back[id] = n
+			budget -= n
+		var data := {"kind": "long", "hp": maxi(int(sheet.get("_hp_max", 0)), int(sheet.get("hp", 0))), "hit_dice_back": back}
+		if "exhaustion" in (sheet.get("conditions", []) as Array):
+			data["exhaustion"] = int(sheet.get("exhaustion", 1)) - 1
+		var e := event_log.append("rest.taken", ref, data, Reveal.DM)
+		_after_change(ref, e)
+		out.append(e)
+	if not out.is_empty():
+		var line := _log_entry(out[0])
+		line["text"] = "long rest: %s (HP, hit dice, slots and uses back)" % ", ".join(out.map(func(e: Dictionary) -> String: return timeline.name_of(str(e.entity))))
+		line["hidden"] = false  # everyone sees the rest
+		_post_roll(line)
+		advance_clock(8 * 60, "long rest")
+	return out
+
+
+## Item charges that come back at dawn: rolled when the clock passes 06:00.
+func _dawn() -> void:
+	for ref: String in _clock_refs():
+		var sheet := sheet_for(Reveal.DM, ref)
+		for r: Dictionary in sheet.get("_resources", []):
+			if r.reset == "dawn" and int(r.used) > 0:
+				var n := int(Dice.roll(str(r.regain), rng).total) if Dice.is_formula(str(r.regain)) else int(str(r.regain))
+				var back := mini(int(r.used), maxi(n, 0))
+				if back > 0:
+					var e := event_log.append("resource.restored", ref, {"resource": r.id, "amount": back, "reason": "dawn"}, Reveal.DM)
+					_after_change(ref, e)
+				_dm_line(ref, "dawn: %s +%d (rolled %d)" % [str(r.name), back, n])
+
+
+## "spells/fireball" is a catalog ref, "Battle Cry (1/Day)" a feature's name.
+static func _is_ref(what: String) -> bool:
+	return RegEx.create_from_string("^[a-z_-]+/[^ ]").search(what) != null
+
+
 ## A sheet's features (all its lists) as entries.
 func _feature_list(sheet: Dictionary) -> Array:
 	var features: Dictionary = timeline.entries("features")
@@ -650,7 +810,10 @@ func advance_clock(minutes: int, reason := "") -> Dictionary:
 	if not is_dm() or minutes <= 0:
 		return {}
 	var t := maxi(event_log.time, 0) + minutes
+	var dawns := (event_log.day * 1440 + t - 360 + 1440) / 1440 - (event_log.day * 1440 + maxi(event_log.time, 0) - 360 + 1440) / 1440
 	var e := event_log.advance_time(event_log.day + t / 1440, t % 1440, reason)
+	if dawns > 0:  # TASK-64: 06:00 passed
+		_dawn()
 	if not in_combat():
 		var now := event_log.day * 1440 + event_log.time
 		for ref: String in _clock_refs():
@@ -1605,6 +1768,7 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 			var r := str(it.get("item", "")) if it is Dictionary else str(it)
 			refs[r] = {"name": str(catalog_entry(r).get("name", HudWidgets._name_of(r)))}
 		sheet["_refs"] = refs
+		sheet["_resources"] = resources_of(sheet)  # TASK-64
 		# the HUD and the sheet pages (TASK-47): its own, a creature copy its template's
 		var tpl := layout_template(ref)
 		var source: Dictionary = timeline.world_entries(tpl.get_slice("/", 0)).get(tpl.get_slice("/", 1), {}) if tpl != "" else sheet
@@ -2232,6 +2396,8 @@ func _handle_attack(sender: int, ref: String, query: String, targets: Array, opt
 	if in_combat() and not names.is_empty():  # TASK-62: the action (once for a Multiattack)
 		var kind := "action" if bool(opts.get("multi", false)) else _action_kind(sheet, str(names[0]).trim_prefix("attack with "))
 		event_log.append("action.used", ref, {"kind": kind, "what": "Multiattack" if bool(opts.get("multi", false)) else str(names[0])}, player)
+	if not names.is_empty():
+		_spend_feature(ref, sheet, str(names[0]).trim_prefix("attack with "), player)
 	for n: Variant in names:
 		var atk := Dice.attack_of(sheet, str(n), features)
 		if atk.is_empty():
@@ -2454,7 +2620,7 @@ func _save_features(sheet: Dictionary) -> Array:
 
 ## The entry behind `what`: a spell / item ref, else one of the sheet's features by name.
 func _effect_entry(sheet: Dictionary, what: String) -> Dictionary:
-	if "/" in what:
+	if _is_ref(what):
 		return catalog_entry(what)
 	var features: Dictionary = timeline.entries("features")
 	for key in ["features", "traits", "actions", "bonus_actions", "reactions", "legendary_actions"]:
@@ -2479,7 +2645,8 @@ func _handle_save_action(sender: int, ref: String, what: String, targets: Array,
 	if str(fx.name) == "":
 		fx.name = HudWidgets._name_of(what)
 	if in_combat():  # TASK-62
-		event_log.append("action.used", ref, {"kind": "action" if "/" in what else _action_kind(sheet, what), "what": str(fx.name)}, player)
+		event_log.append("action.used", ref, {"kind": "action" if _is_ref(what) else _action_kind(sheet, what), "what": str(fx.name)}, player)
+	_spend_feature(ref, sheet, what, player)
 	var rolls := []
 	for d: Dictionary in fx.damage:
 		var r := Dice.roll(str(d.dice), rng)

@@ -101,12 +101,37 @@ static func apply(s: Dictionary, e: Dictionary) -> void:
 			if d.has("hp"):
 				s["hp"] = int(d.hp)
 			if str(d.get("kind", "")) == "long":
+				var hd := {}  # TASK-64: hit dice come back only in part (hit_dice_back)
+				var charges := {}  # item charges come back at dawn, not with the rest
+				if s.get("resources_used") is Dictionary:
+					for r: String in s.resources_used:
+						if r.begins_with("hit_dice."):
+							hd[r] = int(s.resources_used[r])
+						elif r.begins_with("charges."):
+							charges[r] = int(s.resources_used[r])
 				s.erase("resources_used")
 				s.erase("death_saves")
 				s.erase("temp_hp")
+				var back: Dictionary = d.get("hit_dice_back", {}) if d.get("hit_dice_back") is Dictionary else {}
+				for r: String in hd:
+					var left := int(hd[r]) - int(back.get(r, hd[r] if not d.has("hit_dice_back") else 0))
+					if left > 0:
+						_dict(s, "resources_used")[r] = left
+				for r: String in charges:
+					_dict(s, "resources_used")[r] = charges[r]
+				if d.has("exhaustion"):  # one level less
+					if int(d.exhaustion) > 0:
+						s["exhaustion"] = int(d.exhaustion)
+					else:
+						_list(s, "conditions").erase("exhaustion")
+						s.erase("exhaustion")
 			else:
 				for r: Variant in d.get("restores", []):
 					_dict(s, "resources_used").erase(str(r))
+				var spent: Dictionary = d.get("hit_dice", {}) if d.get("hit_dice") is Dictionary else {}
+				for r: Variant in spent:  # TASK-64: hit dice spent on a short rest
+					var used := _dict(s, "resources_used")
+					used[str(r)] = int(used.get(str(r), 0)) + int(spent[r])
 		"death_save.rolled":
 			if d.has("hp"):  # a natural 20: back up with this HP
 				s["hp"] = int(d.hp)

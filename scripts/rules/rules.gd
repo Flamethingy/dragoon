@@ -376,6 +376,39 @@ static func resources(s: Dictionary) -> Array:
 	return out
 
 
+## A feature's uses (TASK-64): {max, reset: "long" | "short"} from "3/Day", "1/Day each",
+## "Recharges after a Short or Long Rest"; {} for none (and for Recharge 5-6, a turn roll).
+static func feature_uses(feature: Dictionary) -> Dictionary:
+	var src := ("%s %s" % [str(feature.get("uses", "")), str(feature.get("name", ""))]).to_lower()
+	var m := RegEx.create_from_string("(\\d+)\\s*/\\s*day").search(src)
+	if m != null:
+		return {"max": int(m.get_string(1)), "reset": "long"}
+	if "short or long rest" in src:
+		return {"max": 1, "reset": "short"}
+	if "after a long rest" in src:
+		return {"max": 1, "reset": "long"}
+	return {}
+
+
+## An item's charges: {max, regain (a formula or a number), reset: "dawn"} from "has 7 charges
+## ... regains 1d6 + 1 expended charges daily at dawn"; {} without.
+static func item_charges(item: Dictionary) -> Dictionary:
+	if item.get("charges") is int or item.get("charges") is float:
+		return {"max": int(item.charges), "regain": str(item.get("regain", item.charges)), "reset": "dawn"}
+	var t := str(item.get("description", item.get("text", ""))).to_lower()
+	var m := RegEx.create_from_string("has (\\d+) charges").search(t)
+	if m == null:
+		return {}
+	var r := RegEx.create_from_string("regains (\\d+d\\d+(?:\\s*[+-]\\s*\\d+)?|\\d+|all)(?: expended)? charges(?: daily)? at dawn").search(t)
+	var regain := m.get_string(1) if r == null or r.get_string(1) == "all" else r.get_string(1).replace(" ", "")
+	return {"max": int(m.get_string(1)), "regain": regain, "reset": "dawn" if r != null else "none"}
+
+
+## Hit dice back on a long rest: 2014 half the total (at least 1), 2024 all of them.
+static func hit_dice_back(total: int, edition := "2014") -> int:
+	return total if edition == "2024" else maxi(1, total / 2)
+
+
 ## Hit dice of the sheet: {sides: count} (d8 per level of a d8 class ...).
 static func hit_dice(s: Dictionary) -> Dictionary:
 	var out := {}

@@ -93,6 +93,10 @@ var _applied := {}  ## host: "<card id>:<target>" -> hp.changed id applied from 
 var _pending_saves := {}  ## host: card id -> the save card waiting for players' saves (TASK-55)
 var _pending_conc := {}  ## host: ref -> DC of the concentration save it still has to make (TASK-59)
 var _catalog := {}  ## kind -> id -> entry of the packages (spells, items), read once (TASK-48)
+var _class_features := {}  ## id -> the packages' class features (TASK-69), read once
+var _class_loaded := false
+var _class_index := {}  ## class id -> [feature] (ClassFeatures.index_of)
+var _class_index_size := -1
 
 var _ui: TableUI
 
@@ -618,7 +622,7 @@ func resources_of(sheet: Dictionary) -> Array:
 	var out := []
 	for r: Dictionary in Rules.resources(sheet):
 		out.append({"id": r.id, "name": r.name, "max": int(r.max), "reset": r.reset})
-	var features: Dictionary = timeline.entries("features")
+	var features: Dictionary = _features()
 	for key in ["features", "traits", "actions", "bonus_actions", "reactions", "legendary_actions"]:
 		for fid: Variant in sheet.get(key, []):
 			var f: Variant = features.get(str(fid))
@@ -771,7 +775,7 @@ static func _is_ref(what: String) -> bool:
 
 ## A sheet's features (all its lists) as entries.
 func _feature_list(sheet: Dictionary) -> Array:
-	var features: Dictionary = timeline.entries("features")
+	var features: Dictionary = _features()
 	var out := []
 	for key in ["features", "traits", "actions", "bonus_actions", "reactions", "legendary_actions"]:
 		for fid: Variant in sheet.get(key, []):
@@ -956,7 +960,7 @@ func _clock_refs() -> Array:
 
 ## Which pip an attack or feature takes: its place on the sheet (bonus_actions, reactions).
 func _action_kind(sheet: Dictionary, name: String) -> String:
-	var features: Dictionary = timeline.entries("features")
+	var features: Dictionary = _features()
 	for pair: Array in [["bonus_actions", "bonus"], ["reactions", "reaction"]]:
 		for fid: Variant in sheet.get(pair[0], []):
 			if str((features.get(str(fid), {}) as Dictionary).get("name", "")).to_lower() == name.to_lower():
@@ -1868,8 +1872,17 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 		sheet["_hp_max"] = int(timeline.entry(ref).get("hp", 0))
 		if sheet.has("classes"):
 			sheet["_class"] = timeline.class_text(sheet)
+		var auto := class_features_of(sheet) if sheet.get("classes") is Array else []  # TASK-69
+		if not auto.is_empty():
+			var own: Array = (sheet.get("features", []) as Array).duplicate() if sheet.get("features") is Array else []
+			var mine := own.map(func(v: Variant) -> String: return str(v).trim_prefix("features/"))
+			for id: String in auto:
+				if not id in mine:
+					own.append(id)
+			sheet["features"] = own
+		sheet["_class_features"] = auto
 		var attacks := []
-		var features := timeline.entries("features")
+		var features := _features()
 		for key in ["features", "actions", "bonus_actions", "reactions"]:
 			for fid: Variant in sheet.get(key, []):
 				var f: Variant = features.get(str(fid), {})
@@ -1887,6 +1900,9 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 		for it: Variant in sheet.get("inventory", []):
 			var r := str(it.get("item", "")) if it is Dictionary else str(it)
 			refs[r] = {"name": str(catalog_entry(r).get("name", HudWidgets._name_of(r)))}
+		for id: String in auto:  # class features: their names and levels (TASK-69)
+			var f: Dictionary = features.get(id, {})
+			refs[id] = {"name": str(f.get("name", id)), "level": int(f.get("level", 0)), "class": str(f.get("class", ""))}
 		sheet["_refs"] = refs
 		sheet["_resources"] = resources_of(sheet)  # TASK-64
 		# the HUD and the sheet pages (TASK-47): its own, a creature copy its template's
@@ -2450,7 +2466,7 @@ func _handle_roll(sender: int, query: String, ref: String, hidden: bool) -> Dict
 		_deny_roll(sender, "that's not your sheet")
 		return {}
 	var sheet := sheet_for(Reveal.DM, ref) if ref != "" else {}
-	var asked := Dice.resolve(sheet, query, timeline.entries("features"), rules_settings()) if not sheet.is_empty() else []
+	var asked := Dice.resolve(sheet, query, _features(), rules_settings()) if not sheet.is_empty() else []
 	if asked.is_empty():
 		if not Dice.is_formula(query):
 			_deny_roll(sender, "I don't know how to roll \"%s\"" % query.strip_edges())
@@ -2510,7 +2526,7 @@ func _handle_attack(sender: int, ref: String, query: String, targets: Array, opt
 		_deny_roll(sender, "that's not your sheet")
 		return []
 	var sheet := sheet_for(Reveal.DM, ref)
-	var features: Dictionary = timeline.entries("features")
+	var features: Dictionary = _features()
 	var names: Array = Dice.multiattack(sheet, features) if bool(opts.get("multi", false)) else [query]
 	var cards := []
 	if query.begins_with("spells/"):  # TASK-49: a spell attack
@@ -2748,7 +2764,7 @@ func request_save_action(ref: String, what: String, targets: Array, opts: Dictio
 ## The save-based features of a sheet (names), for its links.
 func _save_features(sheet: Dictionary) -> Array:
 	var out := []
-	var features: Dictionary = timeline.entries("features") if timeline != null else {}
+	var features: Dictionary = _features()
 	for key in ["features", "actions", "bonus_actions", "reactions", "legendary_actions"]:
 		for fid: Variant in sheet.get(key, []):
 			var f: Variant = features.get(str(fid), {})
@@ -2761,7 +2777,7 @@ func _save_features(sheet: Dictionary) -> Array:
 func _effect_entry(sheet: Dictionary, what: String) -> Dictionary:
 	if _is_ref(what):
 		return catalog_entry(what)
-	var features: Dictionary = timeline.entries("features")
+	var features: Dictionary = _features()
 	for key in ["features", "traits", "actions", "bonus_actions", "reactions", "legendary_actions"]:
 		for fid: Variant in sheet.get(key, []):
 			var f: Variant = features.get(str(fid), {})
@@ -3032,6 +3048,35 @@ func catalog_entry(ref: String) -> Dictionary:
 								by_id[str(e.id)] = e
 		_catalog[kind] = by_id
 	return (_catalog[kind] as Dictionary).get(id, {})
+
+
+## The features sheets look up: the world's and the timeline's, and the packages' class
+## features (TASK-69); the world's win.
+func _features() -> Dictionary:
+	var own: Dictionary = timeline.entries("features") if timeline != null else {}
+	if not _class_loaded:
+		_class_loaded = true
+		catalog_entry("features/-")  # reads the packages' features once
+		var all: Dictionary = _catalog.get("features", {})
+		for id: String in all:
+			if str((all[id] as Dictionary).get("kind", "")) == "class":
+				_class_features[id] = all[id]
+	if _class_features.is_empty():
+		return own
+	var out := _class_features.duplicate()
+	out.merge(own, true)
+	return out
+
+
+## The class features a sheet has from its classes and levels (TASK-69): feature ids, lowest
+## level first. A feature without a level (0) is not given; the DM sets one in the editor.
+func class_features_of(sheet: Dictionary) -> Array:
+	var all := _features()
+	var key := all.size() * 100003 + (timeline.events_log.events.size() if timeline != null else 0)  # an edited level counts too
+	if key != _class_index_size:
+		_class_index = ClassFeatures.index_of(all)
+		_class_index_size = key
+	return ClassFeatures.granted(sheet, _class_index).map(func(f: Dictionary) -> String: return str(f.id))
 
 
 ## Casts a spell / uses an item of `ref` (a quick button): posted in the chat with what it

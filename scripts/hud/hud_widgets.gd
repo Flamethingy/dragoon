@@ -729,7 +729,8 @@ static func _list_bbcode(s: Dictionary, keys: Array) -> String:
 	var lines := PackedStringArray()
 	for key: String in keys:
 		for v: Variant in s.get(key, []):
-			lines.append("• " + Markdown.escape(_name_of(v)))
+			var ref: Variant = (s.get("_refs", {}) as Dictionary).get(str(v)) if s.get("_refs") is Dictionary else null
+			lines.append("• " + Markdown.escape(str(ref.name) if ref is Dictionary and ref.has("name") else _name_of(v)))
 	return "\n".join(lines)
 
 

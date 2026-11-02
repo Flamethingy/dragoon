@@ -81,6 +81,8 @@ static func sheet_change(sheet: Dictionary, e: Dictionary) -> Array:
 		return []
 	var key: String = SHEET_LISTS[kind]
 	var list: Array = (sheet.get(key, []) as Array).duplicate(true) if sheet.get(key) is Array else []
+	if key == "features" and sheet.get("_class_features") is Array:  # TASK-69: given by the classes, not stored
+		list = list.filter(func(v: Variant) -> bool: return not (str(v) in (sheet._class_features as Array)))
 	var ref := "%s/%s" % [kind, e.get("id", "")]
 	if kind == "items":
 		for it: Variant in list:

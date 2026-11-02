@@ -28,7 +28,8 @@
   "paladin": [{"id": "channel_divinity", "name": "Channel Divinity", "reset": "short", "by_level": [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]},
    {"id": "lay_on_hands", "name": "Lay on Hands", "reset": "long", "per_level": 5}],
   "fighter": [{"id": "second_wind", "name": "Second Wind", "reset": "short", "by_level": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]},
-   {"id": "action_surge", "name": "Action Surge", "reset": "short", "by_level": [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2]}],
+   {"id": "action_surge", "name": "Action Surge", "reset": "short", "by_level": [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2]},
+   {"id": "indomitable", "name": "Indomitable", "reset": "long", "by_level": [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]}],
   "druid": [{"id": "wild_shape", "name": "Wild Shape", "reset": "short", "by_level": [0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 99]}],
   "warlock": [],
   "wizard": [{"id": "arcane_recovery", "name": "Arcane Recovery", "reset": "long", "by_level": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]}]

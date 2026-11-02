@@ -180,9 +180,12 @@ func _input(event: InputEvent) -> void:
 	if k.ctrl_pressed or k.alt_pressed or _typing():
 		return
 	var code := k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode
-	if editor != null:  # the editor is open: F2 / Esc close it (saved)
+	if editor != null:  # the editor is open: F2 / Esc close it (saved), 1-9 edit that page (TASK-78)
 		if code in [KEY_F2, KEY_ESCAPE]:
 			editor.finish(true)
+			get_viewport().set_input_as_handled()
+		elif code >= KEY_1 and code <= KEY_9:
+			editor.show_page(code - KEY_1)
 			get_viewport().set_input_as_handled()
 		return
 	if code == KEY_Q or code == KEY_E:
@@ -267,55 +270,74 @@ func may_edit() -> bool:
 	return active != "" and bool((table.sheets.get(active, {}) as Dictionary).get("_editable", false))
 
 
-## F2: edits the sheet page that is open, else the HUD.
+## F2: edit mode on (TASK-78): one editor for the HUD and the sheet pages, on the page that
+## is open, else on the HUD. In it, 1-9 switch pages (the same key again: the HUD), F2 ends it.
 func edit() -> void:
-	if pages != null and pages.visible:
-		edit_pages()
-	else:
-		edit_hud()
+	open_editor(pages.current + 1 if pages != null and pages.visible else 0)
 
 
-## The HUD editor: the screen, shown smaller, with the catalog around it.
+## The editor on the HUD.
 func edit_hud() -> void:
+	open_editor(0)
+
+
+## The editor on the sheet page shown (else the first).
+func edit_pages() -> void:
+	open_editor(1 + (pages.current if pages != null and pages.visible else 0))
+
+
+## The editor: set 0 is the HUD (the screen behind it, shown smaller), then the pages (paper).
+func open_editor(at := 0) -> void:
 	if not may_edit() or editor != null:
 		return
+	var screen := size if size.x > 0 and size.y > 0 else get_viewport_rect().size
+	var page_canvas := pages.grid_rect().size if pages != null else screen * Vector2(0.72, 0.78)
+	var sets: Array = [{"name": "HUD", "items": layout(), "home": true, "grid": HudWidgets.HUD_GRID, "canvas": screen, "backdrop": true}]
+	for p: Dictionary in page_list():
+		sets.append({"name": p.name, "items": p.items, "grid": HudWidgets.PAGE_GRID, "canvas": page_canvas, "backdrop": false})
 	var ed := LayoutEditor.new()
-	ed.grid = HudWidgets.HUD_GRID
-	ed.sets = [{"name": "HUD", "items": layout()}]
-	ed.sheet = table.sheets.get(active, {})
-	ed.hud = self
-	ed.canvas = size if size.x > 0 and size.y > 0 else get_viewport_rect().size
-	ed.screen_backdrop = true
-	_open_editor(ed, "hud")
-
-
-## The sheet page editor (the page shown, else the first).
-func edit_pages() -> void:
-	if not may_edit() or editor != null or pages == null:
-		return
-	var at := pages.current if pages.visible else 0
-	pages.open(at)
-	var ed := LayoutEditor.new()
-	ed.grid = HudWidgets.PAGE_GRID
 	ed.multi = true
-	ed.sets = page_list()
-	ed.current = clampi(at, 0, ed.sets.size() - 1)
+	ed.sets = sets
+	ed.current = clampi(at, 0, sets.size() - 1)
 	ed.sheet = table.sheets.get(active, {})
 	ed.hud = self
-	ed.canvas = pages.grid_rect().size
-	_open_editor(ed, "sheet_pages")
+	_show_behind(ed.current)
+	ed.set_shown.connect(_show_behind)
+	_open_editor(ed)
 
 
-func _open_editor(ed: LayoutEditor, field: String) -> void:
+## Behind the editor: the page being edited, or nothing for the HUD.
+func _show_behind(index: int) -> void:
+	if pages == null:
+		return
+	if index <= 0:
+		pages.close()
+	else:
+		pages.open(index - 1)
+
+
+func _open_editor(ed: LayoutEditor) -> void:
 	editor = ed
 	var ref := active
+	var hud_before: Array = layout().duplicate(true)
+	var pages_before: Array = page_list().duplicate(true)
 	ed.finished.connect(func(sets: Array, saved: bool) -> void:
 		editor = null
 		if saved:
-			var value: Variant = sets[0].items if field == "hud" else sets
 			var s: Dictionary = table.sheets.get(ref, {})
-			s["_hud" if field == "hud" else "_pages"] = value  # right away; the table confirms
-			table.save_layout(ref, field, value)
+			var new_hud: Array = []
+			var new_pages: Array = []
+			for one: Dictionary in sets:
+				if bool(one.get("home", false)):
+					new_hud = one.items
+				else:
+					new_pages.append({"name": str(one.get("name", "Page")), "items": one.items})
+			if new_hud != hud_before:
+				s["_hud"] = new_hud  # right away; the table confirms
+				table.save_layout(ref, "hud", new_hud)
+			if new_pages != pages_before:
+				s["_pages"] = new_pages
+				table.save_layout(ref, "sheet_pages", new_pages)
 		_fill())
 	get_parent().add_child(ed)
 	_fill()

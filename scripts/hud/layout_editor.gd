@@ -14,8 +14,13 @@ extends Control
 ## quick button is for; with several selected, what they share (changes go to all of them).
 ## The sheet pages: one tab each, add / delete. Done saves (also F2 / Esc), Cancel drops
 ## the changes.
+## One editor for the HUD and the pages (TASK-78): a set may bring its own `grid`, `canvas`
+## and `backdrop` (the HUD: the screen behind it; a page: paper), and the one marked `home` is
+## the HUD (its tab "HUD"). Keys 1-9 switch to editing that page, the same key again back to
+## the HUD (show_page).
 
 signal finished(sets: Array, saved: bool)
+signal set_shown(index: int)  ## another set (the HUD, a page) is edited now
 
 const HANDLE := 16.0  ## the resize corner, in screen pixels
 const MARGIN := 16.0
@@ -65,6 +70,10 @@ var _boxing := false
 var _box := Rect2()  ## the selection box being drawn, canvas pixels
 var _box_add := false  ## Shift: the box adds to the selection
 var _inspector: VBoxContainer
+var _paper: Panel
+var _lines: Control
+var _title: Label
+var _delete_page: Button
 
 
 func _init() -> void:
@@ -89,14 +98,14 @@ func _ready() -> void:
 	_screen.name = "Screen"
 	_screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_screen)
-	if not screen_backdrop:
-		var paper := Panel.new()
-		paper.name = "Paper"
-		paper.theme_type_variation = UISkin.V_PAGE
-		paper.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		paper.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		_screen.add_child(paper)
+	_paper = Panel.new()
+	_paper.name = "Paper"
+	_paper.theme_type_variation = UISkin.V_PAGE
+	_paper.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_paper.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_screen.add_child(_paper)
 	var lines := Control.new()  # the grid, above the backdrop
+	_lines = lines
 	lines.name = "Grid"
 	lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	lines.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -117,8 +126,62 @@ func _ready() -> void:
 	_build_tray()
 	_build_inspector()
 	resized.connect(_layout)
+	_take_set()
 	_layout()
 	grab_focus()
+
+
+## The current set's own grid, size and backdrop (TASK-78).
+func _take_set() -> void:
+	if current >= sets.size():
+		return
+	var s: Dictionary = sets[current]
+	if s.get("grid") is Vector2i:
+		grid = s.grid
+	if s.get("canvas") is Vector2:
+		canvas = s.canvas
+	if s.has("backdrop"):
+		screen_backdrop = bool(s.backdrop)
+	if _paper != null:
+		_paper.visible = not screen_backdrop
+	if _lines != null:
+		_lines.queue_redraw()
+	if _title != null:
+		_title.text = "HUD" if is_home(current) else ("Sheet page %d" % (pages().find(current) + 1) if multi else "HUD")
+	if _delete_page != null:
+		_delete_page.disabled = is_home(current) or pages().size() <= 1
+
+
+func is_home(index: int) -> bool:
+	return index >= 0 and index < sets.size() and bool((sets[index] as Dictionary).get("home", false))
+
+
+## The sets that are sheet pages (indices), in order.
+func pages() -> Array:
+	var out := []
+	for i in sets.size():
+		if not is_home(i):
+			out.append(i)
+	return out
+
+
+## The HUD's set (-1 if only pages are edited).
+func home() -> int:
+	for i in sets.size():
+		if is_home(i):
+			return i
+	return -1
+
+
+## Key n (0-based) in the editor: edit page n; on it already, back to the HUD.
+func show_page(n: int) -> void:
+	var list := pages()
+	if n < 0 or n >= list.size():
+		return
+	if current == int(list[n]) and home() >= 0:
+		show_set(home())
+	else:
+		show_set(int(list[n]))
 
 
 func items() -> Array:
@@ -209,9 +272,11 @@ func _build_tray() -> void:
 	side.add_theme_constant_override("separation", 4)
 	row.add_child(side)
 	var title := Label.new()
+	title.name = "Title"
 	title.text = "Sheet pages" if multi else "HUD"
 	title.theme_type_variation = UISkin.V_HEADING
 	side.add_child(title)
+	_title = title
 	if multi:
 		_tabs = HBoxContainer.new()
 		_tabs.name = "Pages"
@@ -219,9 +284,9 @@ func _build_tray() -> void:
 		var pages_row := HBoxContainer.new()
 		side.add_child(pages_row)
 		_tool_button(pages_row, "+ Page", add_page)
-		_tool_button(pages_row, "Delete page", delete_page)
+		_delete_page = _tool_button(pages_row, "Delete page", delete_page)
 	var hint := Label.new()
-	hint.text = "Click or drag a card onto the screen.\nClick a piece: select · Shift: more\nDouble-click: variant · Del: remove"
+	hint.text = "Click or drag a card onto the screen.\nClick a piece: select · Shift: more\nDouble-click: variant · Del: remove" + ("\n1-9: edit that page · again: the HUD" if home() >= 0 else "")
 	hint.add_theme_font_size_override("font_size", 11)
 	hint.add_theme_color_override("font_color", UISkin.INK_SOFT)
 	side.add_child(hint)
@@ -614,38 +679,64 @@ func cycle_variant(index: int) -> void:
 	_rebuild()
 
 
+## Back to the default: the HUD's (on the HUD), else the default pages.
 func reset() -> void:
-	if multi:
-		sets = HudWidgets.DEFAULT_PAGES.duplicate(true)
-		current = 0
+	if is_home(current) or not multi:
+		(sets[current] as Dictionary)["items"] = HudWidgets.DEFAULT_HUD.duplicate(true)
 	else:
-		sets = [{"name": "HUD", "items": HudWidgets.DEFAULT_HUD.duplicate(true)}]
+		var keep := _page_keys()
+		var out := []
+		var h := home()
+		if h >= 0:
+			out.append(sets[h])
+		for p: Dictionary in HudWidgets.DEFAULT_PAGES.duplicate(true):
+			p.merge(keep)
+			out.append(p)
+		sets = out
+		current = pages()[0]
 	selected = []
 	_rebuild()
+
+
+## What a page set brings besides its name and pieces (grid, canvas, backdrop).
+func _page_keys() -> Dictionary:
+	var out := {}
+	var list := pages()
+	if not list.is_empty():
+		var p: Dictionary = sets[list[0]]
+		for k: String in ["grid", "canvas", "backdrop"]:
+			if p.has(k):
+				out[k] = p[k]
+	return out
 
 
 func add_page() -> void:
-	if sets.size() >= 9:
+	if pages().size() >= 9:
 		return
-	sets.append({"name": "Page %d" % (sets.size() + 1), "items": []})
-	current = sets.size() - 1
-	selected = []
-	_rebuild()
+	var p := {"name": "Page %d" % (pages().size() + 1), "items": []}
+	p.merge(_page_keys())
+	sets.append(p)
+	show_set(sets.size() - 1)
 
 
 func delete_page() -> void:
-	if sets.size() <= 1:
+	if is_home(current) or pages().size() <= 1:
 		return
 	sets.remove_at(current)
-	selected = []
-	current = clampi(current, 0, sets.size() - 1)
-	_rebuild()
+	show_set(clampi(current, 0, sets.size() - 1) if not is_home(clampi(current, 0, sets.size() - 1)) else pages()[0])
 
 
 func show_set(index: int) -> void:
+	var before := current
 	current = clampi(index, 0, maxi(sets.size() - 1, 0))
 	selected = []
-	_rebuild()
+	if _screen != null:
+		_take_set()
+		_layout()
+	else:
+		_rebuild()
+	if current != before:
+		set_shown.emit(current)
 
 
 func finish(save: bool) -> void:
@@ -704,11 +795,15 @@ func _rebuild(inspect := true) -> void:
 		for c in _tabs.get_children():
 			_tabs.remove_child(c)
 			c.queue_free()
+		var n := 0
 		for i in sets.size():
-			var b := _tool_button(_tabs, str(i + 1), show_set.bind(i))
+			if not is_home(i):
+				n += 1
+			var b := _tool_button(_tabs, "HUD" if is_home(i) else str(n), show_set.bind(i))
+			b.name = "Set_%d" % i
 			b.toggle_mode = true
 			b.button_pressed = i == current
-			b.tooltip_text = str(sets[i].get("name", ""))
+			b.tooltip_text = "The HUD over the screen" if is_home(i) else "%s (key %d)" % [sets[i].get("name", ""), n]
 	if _frames != null:
 		_frames.queue_redraw()
 	if inspect:

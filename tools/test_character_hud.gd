@@ -225,6 +225,16 @@ func _init() -> void:
 	_check(ed.find_child("Card_spell_square_spells/cure-wounds".validate_node_name(), true, false) != null, "a card per spell (Spells tab)")
 	ed.show_tab("Items")
 	_check((ed.find_child("Cards", true, false).get_child(0) is Label), "Borin carries nothing: the Items tab says so")
+	# TASK-78: one editor for the HUD and the pages; 1-9 switch to a page, the same key back
+	var key2 := f2.duplicate() as InputEventKey
+	key2.physical_keycode = KEY_2
+	_check(ed.current == 0 and ed.is_home(0) and ed.pages().size() == hud.page_list().size(), "the HUD first, then the pages, in one editor")
+	hud._input(key2)
+	_check(ed.current == 2 and ed.grid == HudWidgets.PAGE_GRID and hud.pages.visible and hud.pages.current == 1 and (ed.find_child("Paper", true, false) as Control).visible, "2 in edit mode: editing page 2 on paper (%d)" % ed.current)
+	hud._input(key2)
+	_check(ed.current == 0 and ed.grid == HudWidgets.HUD_GRID and not hud.pages.visible and not (ed.find_child("Paper", true, false) as Control).visible, "2 again: back to the HUD")
+	ed.canvas = Vector2(1600, 950)
+	ed.size = Vector2(1600, 950)
 	ed.add("skills")
 	ed.place(8, Rect2i(10, 18, 9, 9))
 	ed.remove(2)  # no spell slots

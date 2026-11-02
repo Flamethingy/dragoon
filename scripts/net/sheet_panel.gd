@@ -117,6 +117,8 @@ func _on_meta(meta: Variant) -> void:
 		table.begin_attack(ref, m.substr(7), m == "attack:multiattack")
 	elif m.begins_with("saveact:") and table != null:  # TASK-55: a save-based action
 		table.begin_attack(ref, m.substr(8), false, "save")
+	elif m == "death" and table != null:  # TASK-57
+		table.roll_death_save(ref)
 	elif m == "cond:add" and table != null:  # TASK-56: the condition menu
 		table.condition_menu_requested.emit(ref)
 	elif m.begins_with("cond:off:") and table != null:
@@ -175,8 +177,11 @@ static func to_bbcode(s: Dictionary) -> String:
 			bb += StatBlock._field("Spellcasting", "DC %s · attack %s · %s" % [_derived(d, "spell_dc", false), _derived(d, "spell_attack"), Rules.casting_ability(s).to_upper()])
 		# State from the TASK-17 events.
 		bb += _conditions(s)
-		if s.get("death_saves") is Dictionary:
-			bb += StatBlock._field("Death Saves", "%d successes, %d failures" % [int(s.death_saves.get("successes", 0)), int(s.death_saves.get("failures", 0))])
+		if s.get("death_saves") is Dictionary or (int(s.get("hp", 1)) == 0 and str(s.get("_kind", "characters")) == "characters" and s.has("classes")):
+			var ds: Dictionary = s.get("death_saves", {}) if s.get("death_saves") is Dictionary else {}
+			var done := int(ds.get("successes", 0)) >= 3 or "dead" in (s.get("conditions", []) as Array)
+			bb += StatBlock._field("Death Saves", "%d successes, %d failures%s" % [int(ds.get("successes", 0)), int(ds.get("failures", 0)),
+				"" if done or int(s.get("hp", 1)) > 0 else " · [url=death]roll[/url]"])
 		if s.get("resources_used") is Dictionary and not s.resources_used.is_empty():
 			var used := PackedStringArray()
 			for r: Variant in s.resources_used:

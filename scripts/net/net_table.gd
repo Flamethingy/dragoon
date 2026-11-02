@@ -555,11 +555,27 @@ func next_turn() -> Dictionary:
 		if turn >= maxi(order.size(), 1):
 			turn = 0
 			round_now += 1
-		if round_now != 1 or str(rules_settings().edition) == "2024" or order.is_empty() or not _surprised(c, order[turn]):
+		if order.is_empty():
+			break
+		if _defeated(order[turn]):  # TASK-57: out of the fight
+			skipped.append(timeline.name_of(str(order[turn].entity)))
+			continue
+		if round_now != 1 or str(rules_settings().edition) == "2024" or not _surprised(c, order[turn]):
 			break
 		skipped.append(timeline.name_of(str(order[turn].entity)))
 	var e := event_log.append("combat.turn", "", {"round": round_now, "turn": turn})
-	_set_status("Round %d, turn %d%s" % [round_now, turn + 1, " (surprised, no turn: %s)" % ", ".join(skipped) if not skipped.is_empty() else ""])
+	_set_status("Round %d, turn %d%s" % [round_now, turn + 1, " (no turn: %s)" % ", ".join(skipped) if not skipped.is_empty() else ""])
+	if not order.is_empty():  # a character at 0 HP: its death save prompt
+		var who := str(order[turn].entity)
+		var s := sheet_for(Reveal.DM, who) if who.begins_with("characters/") else {}
+		if not s.is_empty() and int(s.get("hp", 1)) == 0 and "dead" not in (s.get("conditions", []) as Array) and not _stable(s):
+			var prompt := {"id": 0, "by": Reveal.DM, "who": timeline.name_of(who), "ref": who, "results": [], "hidden": false, "action": "death_prompt", "text": "Death save"}
+			for peer_id: int in peers:
+				if str(peers[peer_id]) in (owners.get(who, []) as Array):
+					roll_added.rpc_id(peer_id, prompt)
+			var mine := prompt.duplicate()
+			mine["hidden"] = true
+			_add_roll(mine)
 	_combat_changed()
 	return e
 
@@ -1607,7 +1623,7 @@ func _sender_player(sender: int) -> String:
 	return Reveal.DM if sender == 1 else str(peers.get(sender, ""))
 
 
-func _handle_hp(sender: int, ref: String, delta: int, reason: String) -> Dictionary:
+func _handle_hp(sender: int, ref: String, delta: int, reason: String, crit := false) -> Dictionary:
 	var player := _sender_player(sender)
 	if not may_see_sheet(player, ref):
 		_deny_sheet(sender, "that's not your sheet")
@@ -1628,8 +1644,128 @@ func _handle_hp(sender: int, ref: String, delta: int, reason: String) -> Diction
 	data["delta"] = after - hp
 	data["hp"] = after
 	var e := event_log.append("hp.changed", ref, data, player)
+	_after_hp(ref, sheet, hp, after, delta, crit)
 	_after_change(ref, e)
 	return e
+
+
+# --- 0 HP, death saves, defeated creatures (TASK-57) ---------------------------------------------
+
+## A character drops to 0: Unconscious, death saves; damage at 0 is a failed save (two on a
+## crit), massive damage only warns; healing gets them up (no longer Unconscious, the saves
+## start over). A creature at 0 is defeated: marked dead (the DM can make it Unconscious
+## instead), skipped in the turn order.
+func _after_hp(ref: String, sheet: Dictionary, before: int, after: int, delta: int, crit: bool) -> void:
+	if automation("death_saves") == "off":
+		return
+	var conds: Array = sheet.get("conditions", [])
+	var pc := ref.begins_with("characters/")
+	if delta < 0 and after == 0:
+		var hp_max := int(sheet.get("_hp_max", 0))
+		var left := -delta - before  # what is left after reaching 0
+		if pc and hp_max > 0 and left >= hp_max and "dead" not in conds:
+			_dm_line(ref, "massive damage: %d left after 0 HP is at least the HP maximum (%d), instant death by the rules · your call" % [left, hp_max])
+		if before > 0:
+			if pc:
+				_handle_condition(1, ref, "unconscious", true, 0, {})
+			elif "dead" not in conds and "unconscious" not in conds:
+				_handle_condition(1, ref, "dead", true, 0, {})
+		elif pc and "dead" not in conds and not _stable(sheet):
+			_death_save_event(ref, false, 2 if crit else 1, {"damage": true})
+	elif delta > 0 and before == 0 and after > 0:
+		if "unconscious" in conds:
+			_handle_condition(1, ref, "unconscious", false, 0, {})
+		if "dead" in conds:
+			_dm_line(ref, "healed while marked dead · take Dead off if that's right")
+
+
+static func _stable(sheet: Dictionary) -> bool:
+	return sheet.get("death_saves") is Dictionary and int(sheet.death_saves.get("successes", 0)) >= 3
+
+
+## A hidden line in the DM's feed about `ref`.
+func _dm_line(ref: String, text: String) -> void:
+	_add_roll({"id": 0, "by": Reveal.DM, "who": timeline.name_of(ref), "ref": ref, "results": [], "hidden": true, "action": "log", "text": text})
+
+
+func _death_save_event(ref: String, success: bool, count: int, extra := {}, by := Reveal.DM) -> Dictionary:
+	var data := {"success": success, "count": count}
+	data.merge(extra)
+	var e := event_log.append("death_save.rolled", ref, data, by)
+	var s := sheet_for(Reveal.DM, ref)
+	if s.get("death_saves") is Dictionary and int(s.death_saves.get("failures", 0)) >= 3 and "dead" not in (s.get("conditions", []) as Array):
+		_handle_condition(1, ref, "dead", true, 0, {})
+		_dm_line(ref, "three failed death saves: dead (undo if that's not how it went)")
+	return e
+
+
+## Rolls a death save for a character at 0 HP (its player or the DM): 10+ a success, a
+## natural 1 two failures, a natural 20 back up with 1 HP.
+func roll_death_save(ref: String) -> void:
+	if is_dm():
+		_handle_death_save(1, ref)
+	elif is_online():
+		request_death_save.rpc_id(1, ref)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_death_save(ref: String) -> void:
+	if is_dm():
+		_handle_death_save(multiplayer.get_remote_sender_id(), ref)
+
+
+func _handle_death_save(sender: int, ref: String) -> Dictionary:
+	var player := _sender_player(sender)
+	if player == "" or not may_see_sheet(player, ref):
+		_deny_roll(sender, "that's not your sheet")
+		return {}
+	var s := sheet_for(Reveal.DM, ref)
+	if s.is_empty() or int(s.get("hp", 0)) > 0 or "dead" in (s.get("conditions", []) as Array) or _stable(s):
+		_deny_roll(sender, "no death save needed")
+		return {}
+	var r := Dice.roll("1d20", rng)
+	r["label"] = "Death save"
+	var natural := int(r.total)
+	var outcome := ""
+	var data := {"roll": "Death save", "formula": "1d20", "result": natural, "dice": r.dice, "results": [r], "who": str(s.get("name", "")), "hidden": false}
+	var ev := event_log.append("dice.rolled", ref, data, player)
+	if natural == 20:
+		_death_save_event(ref, true, 1, {"hp": 1, "natural": 20}, player)
+		_handle_condition(1, ref, "unconscious", false, 0, {})
+		outcome = "natural 20: back up with 1 HP!"
+	elif natural == 1:
+		_death_save_event(ref, false, 2, {"natural": 1}, player)
+		outcome = "natural 1: two failures"
+	else:
+		_death_save_event(ref, natural >= 10, 1, {}, player)
+		outcome = "success" if natural >= 10 else "failure"
+	var after := sheet_for(Reveal.DM, ref)
+	var ds: Dictionary = after.get("death_saves", {}) if after.get("death_saves") is Dictionary else {}
+	if _stable(after):
+		outcome += " · stable"
+	elif "dead" in (after.get("conditions", []) as Array):
+		outcome += " · dead"
+	var entry := _roll_entry(ev)
+	entry["text"] = "%s (%d successes, %d failures)" % [outcome, int(ds.get("successes", 0)), int(ds.get("failures", 0))] if natural != 20 else outcome
+	entry["action"] = "death_save"
+	_sheet_changed(ref)
+	return _post_roll(entry)
+
+
+## True if the order entry is out of the fight: dead, or a creature (not a character) at 0 HP.
+## A group: all its members.
+func _defeated(o: Dictionary) -> bool:
+	var refs: Array = o.get("members", [o.entity])
+	if refs.is_empty():
+		return false
+	for r: Variant in refs:
+		var s := sheet_for(Reveal.DM, str(r))
+		if s.is_empty():
+			return false
+		var conds: Array = s.get("conditions", [])
+		if not ("dead" in conds or (not str(r).begins_with("characters/") and int(s.get("hp", 1)) <= 0)):
+			return false
+	return true
 
 
 func _handle_field(sender: int, ref: String, path: String, value: Variant) -> Dictionary:
@@ -1824,7 +1960,7 @@ func _attack_card(player: String, ref: String, sheet: Dictionary, atk: Dictionar
 				row.damage.append({"formula": f, "rolled": int(dr.total), "type": str(d.type), "amount": int(after.amount), "note": str(after.note)})
 				row.amount = int(row.amount) + int(after.amount)
 			if mode == "auto" and int(row.amount) > 0:
-				var e := _handle_hp(1, tref, -int(row.amount), atk.name)
+				var e := _handle_hp(1, tref, -int(row.amount), atk.name, crit)
 				row["applied"] = int(e.get("id", 0))
 			elif mode == "assist" and int(row.amount) > 0:
 				row["pending"] = true
@@ -2422,6 +2558,10 @@ static func roll_bbcode(entry: Dictionary, names := {}) -> String:
 		lines = _attack_lines(entry)
 	elif entry.get("save") is Dictionary:  # TASK-55
 		lines = _save_lines(entry)
+	if str(entry.get("action", "")) == "death_prompt":  # TASK-57
+		lines.insert(0, "[b][url=death:%s]Death save · Roll[/url][/b]" % entry.get("ref", ""))
+	elif str(entry.get("action", "")) == "death_save":
+		lines.append("[i]%s[/i]" % Markdown.escape(str(entry.get("text", ""))))
 	if str(entry.get("action", "")) == "save_prompt":
 		lines.insert(0, "[b][url=save:%d:%s]%s · Roll[/url][/b]" % [int(entry.get("id", 0)), entry.get("ref", ""), Markdown.escape(str(entry.get("text", "")))])
 	elif str(entry.get("action", "")) == "save_prompt_dm":

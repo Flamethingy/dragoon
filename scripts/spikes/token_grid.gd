@@ -186,6 +186,9 @@ func set_token_conditions(id: String, conditions: Array, exhaustion := 0) -> voi
 			var abbr := str(cond.abbr) + (str(exhaustion) if str(c) == "exhaustion" and exhaustion > 0 else "")
 			list.append({"abbr": abbr, "color": Color(str(cond.color)), "name": str(cond.name)})
 	marks.conditions = list
+	# TASK-57: a dead (or knocked out) creature is greyed
+	var down := "dead" in conditions or ("unconscious" in conditions and not id.begins_with("characters/"))
+	tokens[id].self_modulate = Color(0.45, 0.45, 0.45, 0.8) if down else Color.WHITE
 
 
 ## Turns a token (n, ne, e ... nw): the triangle at its edge, and the picture mirrored when

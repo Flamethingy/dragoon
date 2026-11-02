@@ -444,7 +444,7 @@ func open_condition_menu(ref: String, at := Vector2(-1, -1)) -> PopupMenu:
 	m.clear()
 	m.add_separator(table.timeline.name_of(ref) if table.is_dm() and table.timeline != null else "Conditions")
 	var ids: Array = Rules.conditions().keys().filter(func(id: String) -> bool:
-		return id != "exhaustion" and not bool(Rules.conditions()[id].get("marker", false)))
+		return id != "exhaustion" and (id == "dead" or not bool(Rules.conditions()[id].get("marker", false))))
 	ids.sort()
 	for i in ids.size():
 		var c := Rules.condition(ids[i], edition)

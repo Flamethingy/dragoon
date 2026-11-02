@@ -14,7 +14,7 @@ extends PanelContainer
 signal place_changed
 signal closed  ## its own window was closed and `close_hides` is set
 
-const TOP := 2  ## rows left free at the top (the app's buttons)
+const TOP := 0  ## rows left free at the top (none: the app's buttons are in the Esc menu)
 const EDGE := 8.0  ## pixels at the inner edge that resize
 const ZONE := 0.08  ## the dock zones: this part of the screen at each edge
 const SIDE_CELLS := Vector2i(6, 24)  ## width of a side dock, min / max

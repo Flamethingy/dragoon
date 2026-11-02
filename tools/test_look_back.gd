@@ -96,6 +96,29 @@ func _init() -> void:
 	await _until(func() -> bool: return log.events.size() > n)
 	_check(log.events.size() == n + 1, "at now Bob can move again")
 
+	# real time: between two moments the tokens stand that far along their way
+	dm.look_back(walked - 1, -1, walked, 0.0)
+	await process_frame
+	var cs := dm.grid.cell_center(start, 1.0)
+	_check(dm.grid.is_past() and (dm.grid.past[BORIN].position as Vector2).is_equal_approx(cs), "at the start of the stretch: where he was (%s)" % dm.grid.past[BORIN].position)
+	dm.look_back(walked - 1, -1, walked, 0.5)
+	var half := dm.grid.cell_center(start + Vector2i(1, 0), 1.0).lerp(dm.grid.cell_center(start + Vector2i(2, 0), 1.0), 0.5)
+	_check((dm.grid.past[BORIN].position as Vector2).is_equal_approx(half), "halfway: halfway along his trail (%s / %s)" % [dm.grid.past[BORIN].position, half])
+	dm.look_back(walked - 1, -1, walked, 1.0)
+	_check((dm.grid.past[BORIN].position as Vector2).is_equal_approx(dm.grid.cell_center(start + Vector2i(2, 1), 1.0)), "at the end: where he went")
+	dm.look_back(-1)
+	# a player too: one request per stretch, the rest on his own screen
+	bob.look_back(walked - 1, -1, walked, 0.25)
+	await _until(func() -> bool: return bob.grid.is_past() and bob.grid.past.has(BORIN))
+	await _frames(2)
+	var quarter := dm.grid.cell_center(start, 1.0).lerp(dm.grid.cell_center(start + Vector2i(2, 1), 1.0), 0.0)
+	var pos_q: Vector2 = bob.grid.past[BORIN].position
+	bob.look_back(walked - 1, -1, walked, 0.75)
+	var pos_t: Vector2 = bob.grid.past[BORIN].position
+	_check(not pos_q.is_equal_approx(pos_t) and not pos_q.is_equal_approx(quarter), "Bob's token moves with his cursor at once (%s -> %s)" % [pos_q, pos_t])
+	bob.look_back(-1)
+	await _frames(5)
+
 	# the DM looks back too (acting there: test_past_edits)
 	dm.look_back(walked)
 	_check(dm.grid.is_past() and not dm.grid.locked, "the DM looks back (and may change it)")

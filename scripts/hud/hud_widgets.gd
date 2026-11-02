@@ -86,11 +86,6 @@ const DEFAULT_HUD := [
 	{"w": "portrait", "r": [0, 19, 4, 5]},
 	{"w": "hp", "r": [0, 24, 4, 1]},
 	{"w": "slots", "r": [0, 25, 4, 2]},
-	{"w": "combat", "r": [31, 0, 3, 1]},
-	{"w": "rules", "r": [34, 0, 3, 1]},
-	{"w": "compendium", "r": [37, 0, 4, 1]},
-	{"w": "book", "r": [41, 0, 3, 1]},
-	{"w": "leave", "r": [44, 0, 3, 1]},
 ]
 const DEFAULT_PAGES := [
 	{"name": "Sheet", "items": [
@@ -222,9 +217,7 @@ static func catalog(s: Dictionary, shape := "square") -> Array:
 		var r := str(it.get("item", "")) if it is Dictionary else str(it)
 		if r != "":
 			out.append({"tab": "Items", "w": "item", "v": shape, "ref": r, "label": quick_name("item", r, s)})
-	for kind: String in APP_BUTTONS:
-		out.append({"tab": "App", "w": kind, "v": "", "ref": "", "label": str(KINDS[kind].label)})
-	return out
+	return out  # the app's buttons are in the Esc menu now (Nico, 2026-11-02)
 
 
 ## A quick button's name: the spell's / item's (the sheet's `_refs`), a check's ("DEX save").

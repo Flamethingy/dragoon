@@ -30,14 +30,22 @@ func _init() -> void:
 	_check(app.host(red, 47833) == OK, "hosted")
 	await process_frame
 	var shown := app._view_buttons.keys().filter(func(v: String) -> bool: return (app._view_buttons[v] as Button).visible)
-	_check(shown == ["compendium", "world", "rules"] and (app._view_buttons.world as Button).text == "Book" and app._bar.find_child("Leave", true, false).visible, "only Compendium, Book, Rules and Leave (%s)" % [shown])
-	_check(app._bar.anchor_left == 1.0, "at the top right")
+	_check(not app._bar.visible, "no buttons at the top right: they are in the Esc menu")
+	var esc := InputEventKey.new()
+	esc.keycode = KEY_ESCAPE
+	esc.pressed = true
+	app._unhandled_input(esc)
+	_check(app.esc_menu.visible, "Esc opens the menu")
+	var names := ["Start combat", "Rules", "Compendium", "Book", "End the session"]
+	_check(names.all(func(t: String) -> bool: return app.esc_menu.button(t) != null), "with combat, rules, the books and leaving")
+	app._unhandled_input(esc)
+	_check(not app.esc_menu.visible, "Esc again closes it")
 	_check(not app.table_ui._bar.visible and not app.dock.panels.keys().any(app.dock.is_shown), "no table bar, no panels")
 	_check(not app.table.show_map_info, "no help line on the map")
 	var fake := LayoutEditor.new()  # TASK-77: the bar never sits over the F2 editor
 	app.table_ui.hud.editor = fake
 	app._hud_shown()
-	_check(not app._bar.visible, "F2 editor open: no Compendium / Book / Leave bar")
+	_check(not app._bar.visible, "F2 editor open: no bar either")
 	app.table_ui.hud.editor = null
 	fake.free()
 	app._hud_shown()
@@ -126,7 +134,8 @@ func _init() -> void:
 		var before := app.table.event_log.events.size()
 		var on_map := app.drop_outside(card.entry, main.position + Vector2i(main.size / 2), comp_win)
 		_check(on_map and app.table.event_log.events.size() > before, "over the main window: placed on the map")
-	(app._bar.find_child("Leave", true, false) as Button).pressed.emit()
+	app.esc_menu.open()
+	app.esc_menu.button("End the session").pressed.emit()
 	await process_frame
 	_check(app.view == "" and app.start.visible, "Leave goes back to the start screen")
 	print("minimal: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))

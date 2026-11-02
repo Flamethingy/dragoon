@@ -111,6 +111,10 @@ var _backs := {}  ## host: peer id -> the event id that player looks back at (th
 var _inserted := 0  ## host: the last event the DM put into the past (TASK-85)
 var _insert_queued := false
 var looking_at := -1  ## my cursor in seconds (the bar's), -1 = now
+var _toward := -2  ## the next moment's last event while the cursor is between two (-1: now; -2: none)
+var _frac := 0.0  ## how far between them (0..1)
+var _shown_seg := []  ## [upto, toward] of the past view on my grid
+var _peer_seg := {}  ## host, Show everyone: peer id -> the [upto, toward] they were sent
 ## TASK-84, "Show everyone": the DM: on while every player follows my cursor; a player: on while
 ## the DM shows me their moment (I can't look elsewhere then).
 var showing := false
@@ -2204,7 +2208,7 @@ func _ids_upto(last_id: int) -> Dictionary:
 
 ## Host: the table as `player` ("" = the DM) saw it at the moment ending with event `upto`,
 ## with the ways the tokens went since the moment `from` (-1 = now): {map, tokens, paths, upto}.
-func past_view(player: String, upto: int, from := -1) -> Dictionary:
+func past_view(player: String, upto: int, from := -1, toward := -2) -> Dictionary:
 	var then := _ids_upto(upto)
 	var before := _ids_upto(from)
 	_cut = then
@@ -2217,12 +2221,14 @@ func past_view(player: String, upto: int, from := -1) -> Dictionary:
 	var shown := {}
 	for t: Dictionary in view.tokens:
 		shown[str(t.id)] = true
-	var paths := _paths_between(before, then)
+	# the way back from where they were, or (toward) on to the next moment
+	var paths := _paths_between(before, then) if toward == -2 else _paths_between(then, _ids_upto(toward))
 	for id: String in paths.keys():
 		if not shown.has(id):
 			paths.erase(id)
 	view["paths"] = paths
 	view["upto"] = upto
+	view["toward"] = toward
 	return view
 
 
@@ -2262,32 +2268,55 @@ func _paths_between(a: Dictionary, b: Dictionary) -> Dictionary:
 
 ## Looks at the moment ending with event `upto` (-1: back to now). Only my screen changes;
 ## while I look back I can't act (the DM acting in the past comes with TASK-85).
-func look_back(upto: int, at := -1) -> void:
+## `toward` / `f` (Nico 2026-11-02, real time): the cursor is `f` of the way from that moment to
+## the one ending with event `toward` (-1: now); the tokens stand that far along their way, and
+## moving within the same stretch needs nothing from the host.
+func look_back(upto: int, at := -1, toward := -2, f := 0.0) -> void:
 	if not is_dm() and showing:
 		return  # the DM is showing everyone a moment
-	if upto == looking_back or not is_online():
+	if not is_online():
 		return
-	var from := looking_back
-	looking_back = upto
-	looking_at = at if upto >= 0 else -1
-	grid.locked = upto >= 0
 	if upto < 0:
+		if looking_back < 0:
+			return
+		looking_back = -1
+		looking_at = -1
+		_toward = -2
+		_shown_seg = []
+		grid.locked = false
 		grid.end_past()
 		if is_dm():
 			event_log.stop_inserting()
 		else:
 			request_now.rpc_id(1)
-	elif is_dm():
+		_set_status("Back to now")
+		past_changed.emit()
+		if is_dm() and showing:
+			_show_everyone()
+		return
+	if upto == looking_back and toward == -2 and _toward == -2:
+		return
+	var entering := looking_back < 0
+	var from := looking_back
+	looking_back = upto
+	looking_at = at
+	_toward = toward
+	_frac = f
+	grid.locked = not (is_dm() and upto > 0)
+	if is_dm():
 		# TASK-85: the DM can act in the past: moves, conditions ... go in after this moment
 		if upto > 0:
 			event_log.insert_at(upto)
 		else:
 			event_log.stop_inserting()
-		grid.locked = upto == 0
-		_show_past(past_view("", upto, from))
+	if toward != -2 and _shown_seg == [upto, toward] and grid.is_past():
+		grid.past_progress(f)  # the same stretch: only how far along
+	elif is_dm():
+		_show_past(past_view("", upto, from, toward))
 	else:
-		request_past.rpc_id(1, upto, from)
-	_set_status("Looking back in time (Now or Home: back to the present)" if upto >= 0 else "Back to now")
+		request_past.rpc_id(1, upto, from, toward)
+	if entering:
+		_set_status("Looking back in time (Now or Home: back to the present)")
 	past_changed.emit()
 	if is_dm() and showing:
 		_show_everyone()
@@ -2304,6 +2333,7 @@ func show_everyone(on: bool) -> void:
 	else:
 		for peer_id: int in peers:
 			_backs.erase(peer_id)
+			_peer_seg.erase(peer_id)
 			dm_showing.rpc_id(peer_id, false, -1, -1)
 	showing_changed.emit()
 
@@ -2318,35 +2348,46 @@ func _show_everyone(only := 0) -> void:
 			_backs[peer_id] = looking_back
 		else:
 			_backs.erase(peer_id)
-		dm_showing.rpc_id(peer_id, true, looking_at, looking_back)
-		if looking_back >= 0:
-			past_shown.rpc_id(peer_id, past_view(str(peers[peer_id]), looking_back, from))
+			_peer_seg.erase(peer_id)
+		dm_showing.rpc_id(peer_id, true, looking_at, looking_back, _toward, _frac)
+		var seg := [looking_back, _toward]
+		if looking_back >= 0 and (_toward == -2 or _peer_seg.get(peer_id, []) != seg):
+			_peer_seg[peer_id] = seg
+			past_shown.rpc_id(peer_id, past_view(str(peers[peer_id]), looking_back, from, _toward))
 
 
 ## DM -> players: the DM shows everyone the moment at `at` s (event `upto`; -1 = now), or stopped.
 @rpc("authority", "call_remote", "reliable")
-func dm_showing(on: bool, at: int, upto: int) -> void:
+func dm_showing(on: bool, at: int, upto: int, toward := -2, f := 0.0) -> void:
+	var was_on := showing
 	showing = on
 	var was := looking_back
 	looking_back = upto if on else -1
 	looking_at = at if on else -1
+	_toward = toward if on else -2
+	_frac = f
 	grid.locked = looking_back >= 0
 	if looking_back < 0:
 		grid.end_past()
+		_shown_seg = []
+	elif toward != -2 and _shown_seg == [upto, toward] and grid.is_past():
+		grid.past_progress(f)
 	if was != looking_back:
 		past_changed.emit()
 	showing_changed.emit()
+	if was_on == on and (was >= 0) == (looking_back >= 0):
+		return
 	_set_status(("The DM is showing everyone a moment" if upto >= 0 else "The DM is showing everyone the present") if on else "Back to your own timeline (now)")
 
 
 ## Player -> DM: show me the moment ending with event `upto` (I came from `from`).
 @rpc("any_peer", "call_remote", "reliable")
-func request_past(upto: int, from: int) -> void:
+func request_past(upto: int, from: int, toward := -2) -> void:
 	var sender := multiplayer.get_remote_sender_id()
 	if not is_dm() or not peers.has(sender):
 		return
 	_backs[sender] = upto
-	past_shown.rpc_id(sender, past_view(str(peers[sender]), upto, from))
+	past_shown.rpc_id(sender, past_view(str(peers[sender]), upto, from, toward))
 
 
 ## Player -> DM: I'm back at now.
@@ -2463,7 +2504,9 @@ func _show_past(view: Dictionary) -> void:
 		list.append({"info": t, "texture": tex})
 	if not missing.is_empty() and not is_dm():
 		_fetch(missing)
-	grid.show_past(list, view.get("paths", {}))
+	var toward := int(view.get("toward", -2))
+	_shown_seg = [int(view.get("upto", looking_back)), toward]
+	grid.show_past(list, view.get("paths", {}), _frac if toward != -2 else -1.0)
 
 
 func _deny(sender: int, entity: String, reason: String) -> void:

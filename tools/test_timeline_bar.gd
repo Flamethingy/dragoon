@@ -107,19 +107,51 @@ func _init() -> void:
 	line.list_requested.emit(b)
 	_check(asked.size() == 1 and asked[0] == b.events, "a box asks for its events in the list")
 
-	# Pass time (DM, at now): the clock moves on, a new box
+	# dragging: the cursor follows freely (the table between two moments), let go: it snaps
+	line.size = Vector2(1500, 60)
+	line.fit()
+	ms = line.moments()
+	var a2: Dictionary = ms[ms.size() - 3]
+	var b2: Dictionary = ms[ms.size() - 2]
+	var mid := (float(a2.at) + float(b2.at)) * 0.5
+	line.drag_to(line.x_of(mid))
+	_check(absi(line.cursor_at - int(mid)) <= 1, "dragging, the cursor isn't snapped (%d / %d)" % [line.cursor_at, int(mid)])
+	var seg := bar.segment()
+	_check(int(seg.upto) == int(a2.last_id) and int(seg.toward) == int(b2.last_id) and absf(float(seg.f) - 0.5) < 0.05, "it stands halfway between two moments (%s)" % [seg])
+	line.let_go(line.x_of(mid + (float(b2.at) - float(a2.at)) * 0.3))
+	_check(line.cursor_at == int(b2.at) or line.cursor_at == int(a2.at), "let go: it snaps to the nearest box (%d)" % line.cursor_at)
+	line.set_cursor(-1)
+
+	# the DM drags into the future: time passes
 	bar.dm = true
-	bar._on_cursor(-1)
-	_check(bar.time_button.visible, "the DM can pass time at now")
+	line.can_extend = true
 	bar.time_requested.connect(func(minutes: int, reason: String) -> void: dm.advance_clock(minutes, reason))
 	var boxes := (dm.timeline_sync.data.moments as Array).size()
 	var clock := log.day * 1440 + maxi(log.time, 0)
-	bar.time_button.get_popup().id_pressed.emit(2)  # 1 hour
+	line.span = 4 * 3600.0
+	line.view_from = float(line.now_at()) - 3600.0
+	line.drag_to(line.x_of(float(line.now_at()) + 3600.0))
+	_check(line.future_at > 0 and line.cursor_at == -1 and line.future_minutes() == 60, "past now the DM drags into the future (+%d min)" % line.future_minutes())
+	line.let_go(line.x_of(float(line.now_at()) + 3600.0))
 	await _frames(5)
-	_check(log.day * 1440 + log.time == clock + 60, "an hour passes")
+	_check(log.day * 1440 + log.time == clock + 60, "let go: an hour passes")
 	_check((dm.timeline_sync.data.moments as Array).size() == boxes + 1, "a new box (%d -> %d)" % [boxes, (dm.timeline_sync.data.moments as Array).size()])
-	bar._on_cursor(int(ms[0].at))
-	_check(not bar.time_button.visible, "not while looking back")
+	line.can_extend = false
+	line.drag_to(line.x_of(float(line.now_at()) + 3600.0))
+	_check(line.future_at == -1 and line.cursor_at == -1, "players stop at now")
+	line.let_go(0)
+
+	# docked at a side: bottom to top
+	line.size = Vector2(300, 900)
+	line.fit()
+	_check(line.vertical(), "tall: vertical")
+	var mv: Dictionary = line.moments()[0]
+	var u := line.x_of(float(mv.at))
+	var p := line._p(u, line._line_y())
+	_check(absf(p.y - (900.0 - u)) < 0.01 and absf(p.x - line._line_y()) < 0.01, "time runs from the bottom up (%s)" % p)
+	_check(line._get_tooltip(p) != "", "hovering a box there works too")
+	line.size = Vector2(1500, 60)
+	_check(not line.vertical(), "wide: horizontal")
 
 	dm.multiplayer.multiplayer_peer.close()
 	await process_frame

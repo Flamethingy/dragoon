@@ -65,6 +65,7 @@ var past := {}  ## id -> Sprite2D of the moment looked back at (TASK-83); the li
 var locked := false  ## no moves, steps, selection or token menus (looking back, TASK-83)
 var _past_layer: Node2D
 var _past_drag: Sprite2D  ## a past token the DM drags (TASK-85)
+var _seg := {}  ## id -> its way to the next moment while the cursor is between two (real time)
 var _glide := {}  ## id -> trail (cells) the next confirmed move of it glides along
 var _right_at := Vector2.ZERO  ## where the right button went down (a click opens the token's menu)
 var _box_from := Vector2.ZERO  ## map position where a selection box started
@@ -190,7 +191,9 @@ func _token_sprite(info: Dictionary, texture: Texture2D) -> Sprite2D:
 ## Shows the tokens of a past moment over the hidden live ones: `list` [{info (token view with
 ## its cell), texture}], `paths` {id: [Vector2i...]}: the way each token went from the moment
 ## shown before (it walks it, also backwards). The live tokens go on underneath unseen.
-func show_past(list: Array, paths: Dictionary) -> void:
+## `progress` >= 0: the cursor is between two moments; `paths` lead to the next one and each
+## token stands that far along its way (no animation: the cursor drives it).
+func show_past(list: Array, paths: Dictionary, progress := -1.0) -> void:
 	if _past_layer == null:
 		_past_layer = Node2D.new()
 		_past_layer.name = "Past"
@@ -214,9 +217,11 @@ func show_past(list: Array, paths: Dictionary) -> void:
 			past[id] = s
 			_past_layer.add_child(s)
 			s.position = cell_center(at, s.get_meta("cells"))
-		else:
+		elif progress < 0.0:
 			s.set_meta("info", info)
 			_walk(s, paths.get(id, []), at)
+		else:
+			s.set_meta("info", info)
 		s.set_meta("cell", at)
 		if str(info.get("facing", "")) != "":
 			_face(s, str(info.facing))
@@ -225,6 +230,29 @@ func show_past(list: Array, paths: Dictionary) -> void:
 		if not keep.has(id):
 			past[id].queue_free()
 			past.erase(id)
+	_seg = paths if progress >= 0.0 else {}
+	if progress >= 0.0:
+		past_progress(progress)
+
+
+## The cursor moved between the same two moments: every token stands `f` along its way.
+func past_progress(f: float) -> void:
+	for id: String in past:
+		var s: Sprite2D = past[id]
+		var running: Tween = s.get_meta("tween") if s.has_meta("tween") else null
+		if running != null and running.is_valid():
+			running.kill()
+		var path: Array = _seg.get(id, [])
+		var cells: float = s.get_meta("cells")
+		if path.size() < 2:
+			s.position = cell_center(s.get_meta("cell"), cells)
+			continue
+		var x := clampf(f, 0.0, 1.0) * (path.size() - 1)
+		var i := mini(floori(x), path.size() - 2)
+		s.position = cell_center(path[i], cells).lerp(cell_center(path[i + 1], cells), x - i)
+		var face := facing_of(Vector2i(path[i + 1]) - Vector2i(path[i]))
+		if face != "":
+			_face(s, face)
 
 
 ## Back to now: the past tokens go, the live ones show.
@@ -234,6 +262,7 @@ func end_past() -> void:
 	_past_layer.queue_free()
 	_past_layer = null
 	past.clear()
+	_seg = {}
 	for t: Sprite2D in tokens.values():
 		t.visible = true
 

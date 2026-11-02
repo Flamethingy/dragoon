@@ -224,6 +224,8 @@ func _fill() -> void:
 	var s: Dictionary = table.sheets.get(active, {})
 	var cell := cell_size()
 	for it: Dictionary in layout():
+		if str(it.w) in HudWidgets.APP_BUTTONS:
+			continue  # old layouts: these moved to the Esc menu
 		var r: Array = it.r
 		var rect := Rect2(Vector2(float(r[0]), float(r[1])) * cell, Vector2(float(r[2]), float(r[3])) * cell).grow(-2)
 		var w := HudWidgets.build(str(it.w), s, self, rect.size, it)
@@ -265,7 +267,7 @@ func refresh() -> void:
 
 ## True if the HUD shows the app's buttons (Compendium, Book, Leave) itself.
 func shows_app_buttons() -> bool:
-	return visible and layout().any(func(it: Dictionary) -> bool: return str(it.w) in HudWidgets.APP_BUTTONS and actions.has(str(it.w)))
+	return false  # they moved to the Esc menu (Nico, 2026-11-02)
 
 
 func cell_size() -> Vector2:

@@ -9,7 +9,7 @@ extends DockPanel
 signal cursor_changed(at: int)  ## the moment looked at, in seconds; -1 = now (live)
 signal list_requested(ids: Array)  ## DM: that moment's events in the Timeline list
 signal show_toggled(on: bool)  ## DM: Show everyone (TASK-84)
-signal time_requested(minutes: int, reason: String)  ## DM: Pass time (the clock moves on: a new box)
+signal time_requested(minutes: int, reason: String)  ## DM dragged the cursor into the future: time passes (a new box)
 signal rewind_requested(upto: int)  ## DM: set the timeline back to this moment (TASK-86), confirmed
 signal restore_requested(rewind_id: int)  ## DM: bring a cut-off branch back, confirmed  ## DM: that moment's events in the Timeline list
 
@@ -21,10 +21,6 @@ var show_button: Button  ## DM: everyone's timeline follows mine (TASK-84)
 var shown := false  ## a player: the DM is showing me a moment (no cursor of my own)
 var dm := false  ## the DM's bar: set back, restore, change the past
 var back_button: Button  ## DM looking back: set the timeline back to here (TASK-86)
-var time_button: MenuButton  ## DM at now: Pass time
-## Pass time's choices: [text, minutes, reason]
-const PASS_TIME := [["1 minute", 1, ""], ["10 minutes", 10, ""], ["1 hour", 60, ""], ["4 hours", 240, ""],
-	["8 hours", 480, ""], ["1 day", 1440, ""], ["1 week", 10080, ""]]
 var confirm: ConfirmationDialog
 var _confirmed := Callable()
 
@@ -56,20 +52,6 @@ func _init() -> void:
 	show_button.visible = false
 	_head.add_child(show_button)
 	_head.move_child(show_button, 4)
-	time_button = MenuButton.new()
-	time_button.name = "PassTime"
-	time_button.text = "Pass time"
-	time_button.tooltip_text = "The in-world clock moves on (a new box on the timeline)"
-	time_button.focus_mode = Control.FOCUS_NONE
-	time_button.flat = false
-	time_button.add_theme_font_size_override("font_size", 12)
-	time_button.visible = false
-	for i in PASS_TIME.size():
-		time_button.get_popup().add_item(str(PASS_TIME[i][0]), i)
-	time_button.get_popup().id_pressed.connect(func(i: int) -> void:
-		time_requested.emit(int(PASS_TIME[i][1]), str(PASS_TIME[i][2])))
-	_head.add_child(time_button)
-	_head.move_child(time_button, 2)
 	back_button = _small_button("Set back to here", "Cut off everything after this moment (it can be restored from the faded branch)", _ask_rewind)
 	back_button.visible = false
 	_head.add_child(back_button)
@@ -90,6 +72,7 @@ func _init() -> void:
 	line.cursor_moved.connect(_on_cursor)
 	line.list_requested.connect(func(m: Dictionary) -> void: list_requested.emit(m.get("events", [])))
 	body.add_child(line)
+	line.future_requested.connect(func(minutes: int) -> void: time_requested.emit(minutes, ""))
 	line.restore_requested.connect(func(id: int, cut: int) -> void:
 		if dm:
 			_ask("Bring back the %d cut-off moment%s? They count again, after what happened since." % [cut, "" if cut == 1 else "s"],
@@ -150,7 +133,6 @@ func _ask_rewind() -> void:
 func _on_cursor(at: int) -> void:
 	now_button.visible = at >= 0 and not shown
 	back_button.visible = at >= 0 and dm
-	time_button.visible = at < 0 and dm
 	_show_when()
 	cursor_changed.emit(at)
 
@@ -165,6 +147,31 @@ func cursor_event() -> int:
 			break
 		found = int(m.last_id)
 	return found
+
+
+## The cursor as a stretch between two moments, for the table in real time (Nico 2026-11-02):
+## {upto: the last event of the moment at or before it (-1 now, 0 before everything), toward:
+## the last event of the next one (-1: now), f: how far between them (0..1)}.
+func segment() -> Dictionary:
+	var at := line.cursor_at
+	var ms := line.moments()
+	if at < 0 or ms.is_empty():
+		return {"upto": -1, "toward": -2, "f": 0.0}
+	var i := -1
+	for m: Dictionary in ms:
+		if int(m.at) > at:
+			break
+		i += 1
+	if i < 0:
+		return {"upto": 0, "toward": int(ms[0].last_id), "f": 0.0}
+	var a: Dictionary = ms[i]
+	var next_at := line.now_at()
+	var toward := -1
+	if i + 1 < ms.size():
+		next_at = int(ms[i + 1].at)
+		toward = int(ms[i + 1].last_id)
+	var f := clampf(float(at - int(a.at)) / maxf(1.0, float(next_at - int(a.at))), 0.0, 1.0)
+	return {"upto": int(a.last_id), "toward": toward, "f": f}
 
 
 func _show_when() -> void:

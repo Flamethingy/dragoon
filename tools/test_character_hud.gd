@@ -225,7 +225,7 @@ func _init() -> void:
 	hud._input(f2)
 	_check(hud.editor != null and not hud.visible, "F2 opens the HUD editor")
 	var ed := hud.editor
-	_check(ed.items().size() == 8, "it starts with the default HUD (portrait, health, slots, Combat, Rules, Compendium, Book, Leave)")
+	_check(ed.items().size() == 3, "it starts with the default HUD (portrait, health, slots)")
 	_check(ed.find_child("Grid", true, false) != null, "with a grid to build on")
 	ed.canvas = Vector2(1600, 950)  # headless: the HUD has no real screen size
 	ed.size = Vector2(1600, 950)
@@ -246,26 +246,25 @@ func _init() -> void:
 	ed.canvas = Vector2(1600, 950)
 	ed.size = Vector2(1600, 950)
 	ed.add("skills")
-	ed.place(8, Rect2i(10, 18, 9, 9))
+	ed.place(3, Rect2i(10, 18, 9, 9))
 	ed.remove(2)  # no spell slots
-	_check(ed.items().map(func(i: Dictionary) -> String: return i.w) == ["portrait", "hp", "combat", "rules", "compendium", "book", "leave", "skills"], "add, move, remove")
-	ed.place(7, Rect2i(10, 18, 1, 1))
-	_check(ed.items()[7].r[2] >= 5 and ed.items()[7].r[3] >= 6, "resizing stops at the minimum (%s)" % [ed.items()[7].r])
-	ed.place(7, Rect2i(10, 18, 9, 9))
+	_check(ed.items().map(func(i: Dictionary) -> String: return i.w) == ["portrait", "hp", "skills"], "add, move, remove")
+	ed.place(2, Rect2i(10, 18, 1, 1))
+	_check(ed.items()[2].r[2] >= 5 and ed.items()[2].r[3] >= 6, "resizing stops at the minimum (%s)" % [ed.items()[2].r])
+	ed.place(2, Rect2i(10, 18, 9, 9))
 	ed.add_item("portrait", "small")
-	ed.cycle_variant(8)
-	_check(ed.items()[8].v == "token", "double-click: the next variant")
-	ed.remove(8)
+	ed.cycle_variant(3)
+	_check(ed.items()[3].v == "token", "double-click: the next variant")
+	ed.remove(3)
 	hud._input(f2)
 	_check(hud.editor == null and hud.visible, "F2 again saves and closes it")
-	await _until(func() -> bool: return dm.timeline.entry("characters/borin").is_empty() == false and (Replay.entity_state(dm.timeline.entry("characters/borin"), dm.event_log.effective("characters/borin")).get("hud", []) as Array).size() == 8)
+	await _until(func() -> bool: return dm.timeline.entry("characters/borin").is_empty() == false and (Replay.entity_state(dm.timeline.entry("characters/borin"), dm.event_log.effective("characters/borin")).get("hud", []) as Array).size() == 3)
 	var saved: Array = Replay.entity_state(dm.timeline.entry("characters/borin"), dm.event_log.effective("characters/borin")).get("hud", [])
-	_check(saved.size() == 8 and saved[7].w == "skills" and saved[7].r == [10, 18, 9, 9], "saved in Borin as an event (%s)" % [saved])
-	# a player gets Leave, not the DM's Compendium and Book
+	_check(saved.size() == 3 and saved[2].w == "skills" and saved[2].r == [10, 18, 9, 9], "saved in Borin as an event (%s)" % [saved])
+	# the app's buttons moved to the Esc menu (Nico, 2026-11-02): never on the HUD
 	hud.actions = {"leave": func() -> void: pass}
 	hud.refresh()
-	_check((hud.find_child("W_leave", true, false) as Control).visible and not (hud.find_child("W_book", true, false) as Control).visible, "app buttons only for who may use them")
-	_check(hud.shows_app_buttons(), "the HUD shows the app's buttons itself")
+	_check(hud.find_child("W_leave", true, false) == null and not hud.shows_app_buttons(), "no app buttons on the HUD")
 	await process_frame
 	_check(hud.find_child("W_skills", true, false) != null and hud.find_child("W_slots", true, false) == null, "the HUD shows the new layout")
 	# F2 with a sheet page open: the page editor (one key for both)

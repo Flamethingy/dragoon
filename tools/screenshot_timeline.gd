@@ -62,5 +62,18 @@ func _init() -> void:
 	for i in 20:
 		await process_frame
 	root.get_texture().get_image().save_png(out.path_join("timeline_zoom.png"))
+	# docked at a side: bottom to top
+	bar.line.set_cursor(-1)
+	bar.dock("left")
+	await process_frame
+	bar.line.fit()
+	for i in 20:
+		await process_frame
+	root.get_texture().get_image().save_png(out.path_join("timeline_side.png"))
+	bar.dock("top")
+	app.esc_menu.open()
+	for i in 10:
+		await process_frame
+	root.get_texture().get_image().save_png(out.path_join("esc_menu.png"))
 	print("saved to %s" % out)
 	quit()

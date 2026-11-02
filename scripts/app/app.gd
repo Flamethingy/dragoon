@@ -41,7 +41,8 @@ var dock: Dock  ## the panels around the table (TASK-37)
 var minimal := true
 
 var _layer: CanvasLayer
-var _bar: PanelContainer
+var _bar: PanelContainer  ## the views' buttons (not on the calm table: there the Esc menu has them)
+var esc_menu: EscMenu  ## Esc in a session: combat, rules, books, leave (Nico, 2026-11-02)
 var _view_buttons := {}
 
 
@@ -81,6 +82,7 @@ func _ready() -> void:
 	dock.panel_hidden.connect(func(_id: String) -> void: _sync_buttons())
 	dock.panel_shown.connect(func(_id: String) -> void: _sync_buttons())
 	_build_bar(root)
+	_build_esc_menu(root)
 	if minimal:
 		table_ui.minimal = true
 		table.show_map_info = false
@@ -203,7 +205,9 @@ func show_view(which: String) -> void:
 		which = "table"  # the DM's views
 	view = which
 	start.visible = which == ""
-	_bar.visible = which != ""
+	_bar.visible = which != "" and not minimal
+	if which == "":
+		esc_menu.close()
 	dock.visible = which != ""
 	if which == "":
 		start.refresh(start.world_dir(), start.timeline_dir())
@@ -428,8 +432,8 @@ func _hud_actions() -> void:
 
 
 func _hud_shown() -> void:
-	if _bar != null and minimal:  # TASK-77: never over the F2 editor; else only if the HUD lacks the buttons
-		_bar.visible = view != "" and table_ui.hud.editor == null and not table_ui.hud.shows_app_buttons()
+	if _bar != null and minimal:  # the calm table: the Esc menu has them
+		_bar.visible = false
 
 
 func _build_bar(root: Control) -> void:
@@ -459,6 +463,36 @@ func _build_bar(root: Control) -> void:
 	leave_button.tooltip_text = "End the session (DM) or leave the table, back to the start screen"
 	leave_button.pressed.connect(leave)
 	row.add_child(leave_button)
+
+
+## The Esc menu (Nico, 2026-11-02): the buttons that sat at the top right, and leaving.
+func _build_esc_menu(root: Control) -> void:
+	esc_menu = EscMenu.new()
+	root.add_child(esc_menu)
+	var dm := func() -> bool: return table.is_dm()
+	esc_menu.entries = [
+		{"text": func() -> String: return "End combat" if table.in_combat() else "Start combat", "shown": dm,
+			"action": func() -> void:
+				if table.in_combat():
+					table.end_combat()
+				else:
+					table.start_combat()},
+		{"text": "Rules", "shown": dm, "action": toggle_view.bind("rules")},
+		{"text": "Compendium", "shown": dm, "action": toggle_view.bind("compendium")},
+		{"text": "Book", "shown": dm, "action": toggle_view.bind("world")},
+		{"text": func() -> String: return "End the session" if table.is_dm() else "Leave the table", "action": leave},
+	]
+
+
+## Esc: the menu, after the table's own uses of Esc (placing an area, drawing walls ...).
+func _unhandled_input(event: InputEvent) -> void:
+	var k := event as InputEventKey
+	if k == null or not k.pressed or k.echo or k.keycode != KEY_ESCAPE or view == "":
+		return
+	if table_ui != null and table_ui.hud != null and table_ui.hud.editor != null:
+		return  # the F2 editor uses Esc
+	esc_menu.toggle()
+	get_viewport().set_input_as_handled()
 
 
 # --- Settings --------------------------------------------------------------------------------

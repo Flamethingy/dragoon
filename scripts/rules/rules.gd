@@ -612,6 +612,47 @@ static func range_of(v: Variant) -> Dictionary:
 	return {"normal": normal, "long": float(m.get_string(2)) if m.get_string(2) != "" else normal}
 
 
+## Upcasting and cantrip scaling (TASK-68): `damage` [{dice, type}] of a spell of
+## `base_level` cast at `cast_level` by `caster`, with `scaling` ({per_slot, above} | {cantrip}
+## | {targets_per_slot}). Returns {damage, note ("+2d6, slot 5", "2d10, level 5"), targets: extra}.
+static func scaled(damage: Array, scaling: Dictionary, base_level: int, cast_level: int, caster: Dictionary) -> Dictionary:
+	var out := damage.duplicate(true)
+	var note := ""
+	var targets := 0
+	if scaling.has("per_slot") and not out.is_empty():
+		var steps := cast_level - maxi(int(scaling.get("above", base_level)), base_level)
+		var per := str(scaling.per_slot)
+		if steps > 0 and Dice.is_formula(per):
+			var m := RegEx.create_from_string("^(\\d+)d(\\d+)$").search(per)
+			var first := str(out[0].dice)
+			var fm := RegEx.create_from_string("^(\\d+)d(\\d+)(.*)$").search(first)
+			if m != null and fm != null and fm.get_string(2) == m.get_string(2):  # same die: more of them
+				out[0]["dice"] = "%dd%s%s" % [int(fm.get_string(1)) + steps * int(m.get_string(1)), fm.get_string(2), fm.get_string(3)]
+			else:
+				out[0]["dice"] = first + "+" + "+".join(PackedStringArray(range(steps).map(func(_i: int) -> String: return per)))
+			var added := "%dd%s" % [steps * int(m.get_string(1)), m.get_string(2)] if m != null else "%d× %s" % [steps, per]
+			note = "+%s, slot %d" % [added, cast_level]
+	elif scaling.has("cantrip") and not out.is_empty():
+		var n := cantrip_dice(caster)
+		var fm := RegEx.create_from_string("^(\\d+)d(\\d+)(.*)$").search(str(out[0].dice))
+		if n > 1 and fm != null:
+			out[0]["dice"] = "%dd%s%s" % [int(fm.get_string(1)) * n, fm.get_string(2), fm.get_string(3)]
+			note = "%dd%s, level %d" % [int(fm.get_string(1)) * n, fm.get_string(2), level(caster)]
+	if scaling.has("targets_per_slot"):
+		targets = maxi(0, cast_level - maxi(int(scaling.get("above", base_level)), base_level)) * int(scaling.targets_per_slot)
+		if targets > 0:
+			note = "+%d target%s, slot %d" % [targets, "" if targets == 1 else "s", cast_level]
+	return {"damage": out, "note": note, "targets": targets}
+
+
+## A spell entry's scaling: its effects', else from its text.
+static func scaling_of(entry: Dictionary) -> Dictionary:
+	for fx: Variant in entry.get("effects", []):
+		if fx is Dictionary and fx.get("scaling") is Dictionary:
+			return fx.scaling
+	return Effects._scaling(str(entry.get("description", entry.get("text", ""))), int(entry.get("level", -1)))
+
+
 ## How a spell is cast at the table: "attack" (a spell attack: pick targets), "save" (targets
 ## save), else "other" (rolled into the chat).
 static func spell_kind(entry: Dictionary) -> String:

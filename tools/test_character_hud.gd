@@ -194,7 +194,7 @@ func _init() -> void:
 	await _until(func() -> bool: return str(ann.sheets.get("characters/borin", {}).get("inventory", [])).contains("items/torch"))
 	ann.change_item("characters/borin", "items/torch", -1)
 	await _until(func() -> bool: return dm.event_log.events.any(func(ev: Dictionary) -> bool: return ev.type == "item.lost"))
-	await process_frame
+	await _until(func() -> bool: return HudWidgets.quick_amount("item", "items/torch", ann.sheets.get("characters/borin", {})) == "2")  # Ann's copy follows
 	var inv: Variant = ann.sheets["characters/borin"].get("inventory")
 	_check(str(inv).contains("items/torch") and HudWidgets.quick_amount("item", "items/torch", ann.sheets["characters/borin"]) == "2", "items gained and lost as events (%s)" % [inv])
 	ann.change_item("characters/borin", "items/torch", -2)

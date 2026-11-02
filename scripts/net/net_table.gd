@@ -2524,6 +2524,9 @@ func _handle_attack(sender: int, ref: String, query: String, targets: Array, opt
 		_cast_costs(ref, sheet, query, entry, opts, player)
 		if in_combat():
 			event_log.append("action.used", ref, {"kind": Rules.casting_kind(entry), "what": str(atk.name)}, player)
+		var sc := Rules.scaled(atk.damage, Rules.scaling_of(entry), int(entry.get("level", 0)), int(opts.get("level", entry.get("level", 0))), sheet)  # TASK-68
+		atk["damage"] = sc.damage
+		atk["note"] = sc.note
 		cards.append(_attack_card(player, ref, sheet, atk, targets, opts))
 		return cards
 	if in_combat() and not names.is_empty():  # TASK-62: the action (once for a Multiattack)
@@ -2579,7 +2582,7 @@ func _attack_card(player: String, ref: String, sheet: Dictionary, atk: Dictionar
 		rows.append(row)
 	var data := {"roll": "%s attack" % atk.name, "formula": results[0].formula if not results.is_empty() else "", "result": results[0].total if not results.is_empty() else 0,
 		"dice": results[0].dice if not results.is_empty() else [], "results": results, "who": str(sheet.get("name", "")),
-		"hidden": false, "attack": {"name": atk.name, "targets": rows, "cover": cover}}
+		"hidden": false, "attack": {"name": atk.name, "targets": rows, "cover": cover, "note": str(atk.get("note", ""))}}
 	var ev := event_log.append("dice.rolled", ref, data, player)
 	return _post_roll(_roll_entry(ev))
 
@@ -2785,13 +2788,18 @@ func _handle_save_action(sender: int, ref: String, what: String, targets: Array,
 	_spend_feature(ref, sheet, what, player)
 	if what.begins_with("spells/"):  # TASK-49: the slot (concentration follows below)
 		_cast_costs(ref, sheet, what, entry, opts, player, false)
+	var scale_note := ""
+	if _is_ref(what) and what.begins_with("spells/"):  # TASK-68: upcast / cantrip dice
+		var sc := Rules.scaled(fx.damage, Rules.scaling_of(entry), int(entry.get("level", 0)), int(opts.get("level", entry.get("level", 0))), sheet)
+		fx.damage = sc.damage
+		scale_note = str(sc.note)
 	var rolls := []
 	for d: Dictionary in fx.damage:
 		var r := Dice.roll(str(d.dice), rng)
 		rolls.append({"formula": str(d.dice), "rolled": int(r.total), "type": str(d.type)})
 	var cover := Rules.cover_bonus(str(opts.get("cover", ""))) if fx.ability == "dex" else 0
 	var card := {"name": fx.name, "ability": fx.ability, "dc": fx.dc, "half": fx.half, "damage": rolls, "conditions": fx.conditions,
-		"duration": fx.duration, "cover": cover, "targets": [], "from": ref}
+		"duration": fx.duration, "cover": cover, "targets": [], "from": ref, "note": scale_note}
 	if bool(entry.get("concentration", false)):  # TASK-59: the caster concentrates, its conditions are linked
 		_handle_concentrate(1, ref, what, str(fx.name))
 		card["source"] = {"caster": ref, "spell": what}
@@ -3042,6 +3050,18 @@ func request_use(ref: String, what: String, opts: Dictionary) -> void:
 		_handle_use(multiplayer.get_remote_sender_id(), ref.left(200), what.left(200), opts)
 
 
+## A spell's structured heal: {formula ("1d8+3": "+mod" is the casting modifier), scaling}; {}.
+static func _heal_of(spell: Dictionary, caster: Dictionary) -> Dictionary:
+	for fx: Variant in spell.get("effects", []):
+		if fx is Dictionary and fx.has("heal"):
+			var f := str(fx.heal)
+			if f.ends_with("+mod"):
+				var mod := Rules.mod(caster, Rules.casting_ability(caster)) if Rules.casting_ability(caster) != "" else 0
+				f = f.trim_suffix("+mod") + ("%+d" % mod if mod != 0 else "")
+			return {"formula": f, "scaling": fx.get("scaling", {})}
+	return {}
+
+
 ## A spell's or feature's area: its effects', else the text's.
 static func _area_of(e: Dictionary) -> Dictionary:
 	for fx: Variant in e.get("effects", []):
@@ -3118,6 +3138,14 @@ func _handle_use(sender: int, ref: String, what: String, opts := {}) -> Dictiona
 	if kind == "spells":  # TASK-49: the slot (upcast), concentration
 		_cast_costs(ref, sheet, what, spec, opts, player)
 		var lvl := int(opts.get("level", 0))
+		var heal := _heal_of(spec, sheet)  # TASK-68: a structured heal ("1d8+mod") with its scaling
+		if not heal.is_empty():
+			use.asked = [{"label": "%s healing" % str(spec.get("name", what)), "formula": heal.formula}]
+		for a: Dictionary in use.asked:
+			var sc := Rules.scaled([{"dice": str(a.formula), "type": ""}], heal.get("scaling", Rules.scaling_of(spec)), int(spec.get("level", 0)), maxi(lvl, int(spec.get("level", 0))), sheet)
+			a["formula"] = str(sc.damage[0].dice)
+			if str(sc.note) != "":
+				use.text = str(use.text) + " · " + str(sc.note)
 		if lvl > int(spec.get("level", 0)):
 			use.text = str(use.text).replace("(level %d" % int(spec.level), "(level %d, upcast from %d" % [lvl, int(spec.level)])
 		if bool(opts.get("ritual", false)):
@@ -3448,8 +3476,9 @@ static func _save_lines(entry: Dictionary) -> PackedStringArray:
 	var dmg := PackedStringArray()
 	for d: Dictionary in s.get("damage", []):
 		dmg.append("%d %s [color=#%s](%s)[/color]" % [int(d.rolled), str(d.type), muted, Markdown.escape(str(d.formula))])
-	out.append("DC %d %s save%s%s" % [int(s.dc), str(s.ability).to_upper(), " · " + ", ".join(dmg) if not dmg.is_empty() else "",
-		" · half on a success" if bool(s.half) and not dmg.is_empty() else ""])
+	out.append("DC %d %s save%s%s%s" % [int(s.dc), str(s.ability).to_upper(), " · " + ", ".join(dmg) if not dmg.is_empty() else "",
+		" · half on a success" if bool(s.half) and not dmg.is_empty() else "",
+		" [color=#%s](%s)[/color]" % [muted, Markdown.escape(str(s.note))] if str(s.get("note", "")) != "" else ""])
 	var applied := false
 	for row: Dictionary in s.get("targets", []):
 		if row.get("waiting", false):
@@ -3485,6 +3514,8 @@ static func _attack_lines(entry: Dictionary) -> PackedStringArray:
 	var a: Dictionary = entry.attack
 	var out := PackedStringArray()
 	var muted := Markdown.MUTED.to_html(false)
+	if str(a.get("note", "")) != "":  # TASK-68: what upcasting / the caster's level added
+		out.append("[color=#%s](%s)[/color]" % [muted, Markdown.escape(str(a.note))])
 	var applied := false
 	for row: Dictionary in a.get("targets", []):
 		var verdict := "[color=#%s][b]miss[/b][/color]" % UISkin.RED.to_html(false)

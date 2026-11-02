@@ -530,6 +530,8 @@ static func save_effect(entry: Dictionary, caster := {}) -> Dictionary:
 		duration = {"rounds": int(dm.get_string(1)) * (10 if dm.get_string(2) == "minute" else 600 if dm.get_string(2) == "hour" else 1)}
 	elif "until the end of its next turn" in lower or "until the end of your next turn" in lower:
 		duration = {"rounds": 1, "ends": "turn_end"}
+	if "repeat the saving throw at the end of each of its turns" in lower or "repeat the save at the end of each of its turns" in lower:
+		duration["save_ends"] = true  # TASK-63: a save at the end of each of its turns ends it
 	return {"name": str(entry.get("name", "")), "ability": ability, "dc": dc, "damage": damage,
 		"half": "half as much" in lower or "half damage" in lower, "conditions": conds, "duration": duration}
 
@@ -561,6 +563,51 @@ static func speed(s: Dictionary, edition := "2014") -> float:
 	if edition == "2024" and "exhaustion" in (s.get("conditions", []) as Array):
 		m = maxf(0.0, m - 1.5 * clampi(int(s.get("exhaustion", 1)), 1, 6))  # 2024: 5 ft per level
 	return m
+
+
+## A feature's recharge (TASK-63): "Recharge 5-6" -> 5, "Recharge 6" -> 6, else 0.
+static func recharge_of(feature: Dictionary) -> int:
+	var src := "%s %s" % [str(feature.get("uses", "")), str(feature.get("name", ""))]
+	var m := RegEx.create_from_string("(?i)recharge (\\d)").search(src)
+	return int(m.get_string(1)) if m != null else 0
+
+
+## How many legendary actions a creature takes per round (its intro text, else 3; 0 without any).
+static func legendary_count(s: Dictionary) -> int:
+	if (s.get("legendary_actions", []) as Array).is_empty():
+		return 0
+	if s.get("legendary_count") != null and int(s.legendary_count) > 0:
+		return int(s.legendary_count)
+	var m := RegEx.create_from_string("(?i)take (\\d+) legendary actions").search(str(s.get("legendary_intro", "")))
+	return int(m.get_string(1)) if m != null else 3
+
+
+## A legendary action's cost ("Costs 2 Actions").
+static func legendary_cost(feature: Dictionary) -> int:
+	var m := RegEx.create_from_string("(?i)costs (\\d) actions").search("%s %s" % [str(feature.get("uses", "")), str(feature.get("name", ""))])
+	return int(m.get_string(1)) if m != null else 1
+
+
+## Legendary Resistance (N/Day): N, else 0.
+static func legendary_resistance(features: Array) -> int:
+	for f: Variant in features:
+		if f is Dictionary and str(f.get("name", "")).to_lower().begins_with("legendary resistance"):
+			var m := RegEx.create_from_string("(\\d+)\\s*/\\s*day").search(("%s %s" % [str(f.get("uses", "")), str(f.name)]).to_lower())
+			return int(m.get_string(1)) if m != null else 3
+	return 0
+
+
+## Regeneration: {amount, stopped_by: "acid or fire"} from "regains N hit points at the start of its turn".
+static func regeneration(features: Array) -> Dictionary:
+	for f: Variant in features:
+		if not f is Dictionary:
+			continue
+		var t := str(f.get("text", "")).to_lower()
+		var m := RegEx.create_from_string("regains (\\d+) hit points at the start of its turn").search(t)
+		if m != null:
+			var stop := RegEx.create_from_string("takes ([a-z]+(?: or [a-z]+)?) damage").search(t)
+			return {"amount": int(m.get_string(1)), "stopped_by": stop.get_string(1) if stop != null else ""}
+	return {}
 
 
 ## The AC bonus of cover (TASK-54): "half" +2, "three_quarters" +5.

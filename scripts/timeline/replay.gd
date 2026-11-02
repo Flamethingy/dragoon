@@ -69,7 +69,11 @@ static func apply(s: Dictionary, e: Dictionary) -> void:
 			if cond == "exhaustion":  # TASK-56: its level (1-6)
 				s["exhaustion"] = clampi(int(d.get("level", 1)), 1, 6)
 			if d.get("duration") is Dictionary:  # optional (Phase 2 ends it)
-				_dict(s, "condition_durations")[cond] = d.duration
+				var dur: Dictionary = (d.duration as Dictionary).duplicate()
+				dur["since"] = int(e.get("id", 0))  # TASK-63: when it began (event, in-world clock)
+				dur["day"] = int(e.get("day", 0))
+				dur["time"] = int(e.get("time", -1))
+				_dict(s, "condition_durations")[cond] = dur
 			if cond == "concentrating":  # TASK-59: on which spell
 				s["concentration"] = {"spell": str(d.get("spell", "")), "name": str(d.get("name", ""))}
 		"condition.removed":

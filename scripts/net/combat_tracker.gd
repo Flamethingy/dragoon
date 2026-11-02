@@ -94,6 +94,22 @@ func _row(o: Dictionary, index: int, dm: bool, round_now: int) -> Control:
 	if bool(o.get("current", false)):
 		who.theme_type_variation = UISkin.V_HEADING
 	line.add_child(who)
+	var usage: Dictionary = o.get("usage", {}) if o.get("usage") is Dictionary else {}
+	if dm and usage.get("legendary") is Dictionary:  # TASK-63: legendary actions / resistance, a click spends one
+		var la: Dictionary = usage.legendary
+		_small(line, "LA %d/%d" % [int(la.left), int(la.max)], "Legendary actions left this round (a click spends one; back at the start of its turn)",
+			func() -> void: table.mark_action(str(o.entity), "legendary", true, ""))
+	if dm and usage.get("legendary_resistance") is Dictionary:
+		var lr: Dictionary = usage.legendary_resistance
+		_small(line, "LR %d/%d" % [int(lr.left), int(lr.max)], "Legendary Resistance left today (a click spends one: a failed save succeeds)",
+			func() -> void: table.mark_action(str(o.entity), "legendary_resistance", true, ""))
+	if dm and not (usage.get("spent", []) as Array).is_empty():
+		var tag := Label.new()
+		tag.name = "Spent"
+		tag.text = "spent: " + ", ".join(usage.spent)
+		tag.tooltip_text = "Rolls to recharge at the start of its turn"
+		tag.theme_type_variation = UISkin.V_MUTED
+		line.add_child(tag)
 	if bool(o.get("surprised", false)) and round_now <= 1:
 		var tag := Label.new()
 		tag.text = "surprised"
@@ -121,7 +137,7 @@ func _row(o: Dictionary, index: int, dm: bool, round_now: int) -> Control:
 
 func _small(row: Control, text: String, tip: String, action: Callable) -> void:
 	var b := Button.new()
-	b.name = text
+	b.name = text.get_slice(" ", 0).validate_node_name()
 	b.text = text
 	b.tooltip_text = tip
 	b.focus_mode = Control.FOCUS_NONE

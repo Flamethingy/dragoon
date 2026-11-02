@@ -428,9 +428,14 @@ func turn_usage(ref: String) -> Dictionary:
 			start = i
 			break
 	var cells := 0
+	var legendary_spent := 0
 	for i in range(maxi(start, 0), events.size()):
 		var e: Dictionary = events[i]
 		if str(e.entity) != ref:
+			continue
+		if str(e.data.get("kind", "")) in ["legendary", "legendary_resistance"]:
+			if str(e.data.kind) == "legendary":
+				legendary_spent += int(e.data.get("cost", 1)) * (1 if e.type == "action.used" else -1)
 			continue
 		match str(e.type):
 			"action.used":
@@ -447,6 +452,15 @@ func turn_usage(ref: String) -> Dictionary:
 				cells += maxi(absi(int(t[0]) - int(f[0])), absi(int(t[1]) - int(f[1])))
 	out["moved"] = cells * TokenGrid.METRES_PER_CELL
 	var s := sheet_for(Reveal.DM, ref)
+	var la := Rules.legendary_count(s)  # TASK-63: legendary actions back at the start of its turn
+	if la > 0:
+		out["legendary"] = {"left": maxi(0, la - legendary_spent), "max": la}
+	var lr := Rules.legendary_resistance(_feature_list(s))
+	if lr > 0:
+		out["legendary_resistance"] = {"left": maxi(0, lr - _since_rest(ref, "legendary_resistance")), "max": lr}
+	var spent := _spent_recharges(ref, s)
+	if not spent.is_empty():
+		out["spent"] = spent
 	out["speed"] = Rules.speed(s, Rules.edition_of(s, rules_settings())) * (2.0 if out.dash else 1.0)
 	return out
 
@@ -467,11 +481,199 @@ func request_mark(ref: String, kind: String, on: bool, what: String) -> void:
 
 
 func _handle_mark(sender: int, ref: String, kind: String, on: bool, what: String) -> Dictionary:
-	if kind not in ECONOMY or not in_combat() or _editable_sheet(sender, ref).is_empty():
+	var sheet := _editable_sheet(sender, ref)
+	if kind not in ECONOMY + ["legendary", "legendary_resistance"] or sheet.is_empty() or (kind != "legendary_resistance" and not in_combat()):
 		return {}
-	var e := event_log.append("action.used" if on else "action.unused", ref, {"kind": kind, "what": what}, _sender_player(sender))
+	var data := {"kind": kind, "what": what}
+	if kind == "legendary":  # TASK-63: "Costs 2 Actions"
+		for f: Variant in _feature_list(sheet):
+			if str((f as Dictionary).get("name", "")).to_lower() == what.to_lower():
+				data["cost"] = Rules.legendary_cost(f)
+	var e := event_log.append("action.used" if on else "action.unused", ref, data, _sender_player(sender))
 	_combat_changed()
 	return e
+
+
+## A sheet's features (all its lists) as entries.
+func _feature_list(sheet: Dictionary) -> Array:
+	var features: Dictionary = timeline.entries("features")
+	var out := []
+	for key in ["features", "traits", "actions", "bonus_actions", "reactions", "legendary_actions"]:
+		for fid: Variant in sheet.get(key, []):
+			var f: Variant = features.get(str(fid))
+			if f is Dictionary:
+				out.append(f)
+	return out
+
+
+## How often `ref` used a `kind` since its last long rest (rest.taken, TASK-64).
+func _since_rest(ref: String, kind: String) -> int:
+	var n := 0
+	for e: Dictionary in event_log.effective(ref):
+		if e.type == "rest.taken" and str(e.data.get("kind", "long")) == "long":
+			n = 0
+		elif str(e.data.get("kind", "")) == kind:
+			n += 1 if e.type == "action.used" else -1
+	return maxi(n, 0)
+
+
+## The recharge features `ref` used and that have not come back yet (in this combat).
+func _spent_recharges(ref: String, sheet: Dictionary) -> Array:
+	var names := {}
+	for f: Variant in _feature_list(sheet):
+		if Rules.recharge_of(f) > 0:
+			names[str(f.name).to_lower()] = str(f.name)
+	if names.is_empty():
+		return []
+	var spent := {}
+	for e: Dictionary in event_log.effective(ref):
+		var w := str(e.data.get("what", e.data.get("feature", ""))).to_lower()
+		if e.type == "combat.started" or e.type == "rest.taken":
+			spent.clear()
+		elif e.type == "action.used" and names.has(w):
+			spent[w] = true
+		elif e.type == "feature.recharged" and names.has(w):
+			spent.erase(w)
+	return spent.keys().map(func(k: String) -> String: return names[k])
+
+
+## Turn engine (TASK-63), host: the end of `before`'s turn and the start of `now`'s (after the
+## combat.turn): durations run out (a log line, undoable), "save ends" saves, recharge rolls,
+## regeneration and lair action reminders. Bookkeeping only: the DM decides the rest.
+func _turn_engine(before: String, before_entry: Dictionary, now_entry: Dictionary, wrapped: bool) -> void:
+	var ending := _members(before_entry) if before != "" else []
+	var starting := _members(now_entry)
+	for who: String in _combatants():
+		var s := sheet_for(Reveal.DM, who)
+		var durs: Dictionary = s.get("condition_durations", {}) if s.get("condition_durations") is Dictionary else {}
+		for cond: String in durs.keys():
+			var dur: Dictionary = durs[cond]
+			var of := str(dur.get("of", who))
+			if not dur.has("rounds"):
+				pass
+			elif str(dur.get("ends", "")) == "turn_end":
+				if of in ending and _turns_of(of, int(dur.get("since", 0))) >= int(dur.rounds):
+					_expire(who, cond, "end of %s's turn" % timeline.name_of(of))
+					continue
+			elif of in starting and _turns_of(of, int(dur.get("since", 0))) >= int(dur.rounds):
+				_expire(who, cond, "start of %s's turn" % timeline.name_of(of))
+				continue
+			if dur.get("save_ends") is Dictionary and who in ending and automation("durations") != "off":
+				_save_ends(who, cond, dur.save_ends)
+	for who: String in starting:
+		var s := sheet_for(Reveal.DM, who)
+		var feats := _feature_list(s)
+		for name: String in _spent_recharges(who, s):  # recharge: a d6 at the start of its turn
+			var at := 6
+			for f: Variant in feats:
+				if str(f.name) == name:
+					at = Rules.recharge_of(f)
+			var r := int(Dice.roll("1d6", rng).total)
+			if r >= at:
+				event_log.append("feature.recharged", who, {"feature": name, "roll": r}, Reveal.DM)
+			_dm_line(who, "%s: recharge %d (needs %d+) - %s" % [name, r, at, "ready again" if r >= at else "not yet"])
+		var regen := Rules.regeneration(feats)
+		if not regen.is_empty() and int(s.get("hp", 0)) > 0:
+			_dm_line(who, "Regeneration: regains %d HP now%s" % [int(regen.amount), " (not if it took %s damage since its last turn)" % regen.stopped_by if str(regen.stopped_by) != "" else ""])
+	if _lair_crossed(before_entry, now_entry, wrapped):
+		for who: String in _combatants():
+			var s := sheet_for(Reveal.DM, who)
+			if not (s.get("lair_actions", []) as Array).is_empty() or _feature_list(s).any(func(f: Dictionary) -> bool: return "lair action" in str(f.get("name", "")).to_lower()):
+				_dm_line(who, "Initiative 20: lair action (losing ties)")
+
+
+func _members(entry: Dictionary) -> Array:
+	return (entry.members as Array).map(func(m: Variant) -> String: return str(m)) if entry.has("members") else [str(entry.get("entity", ""))]
+
+
+## Everyone in the combat (group members one by one).
+func _combatants() -> Array:
+	var out := []
+	for c: Dictionary in combat_state().order:
+		out.append_array(_members(c))
+	return out
+
+
+## How many of `ref`'s turns (or its group's) began after event `since`.
+func _turns_of(ref: String, since: int) -> int:
+	var group := ""
+	for c: Dictionary in combat_state().order:
+		if c.has("members") and ref in (c.members as Array):
+			group = str(c.entity)
+	var n := 0
+	for e: Dictionary in event_log.effective():
+		if int(e.get("id", 0)) > since and e.type == "combat.turn" and str(e.data.get("entity", "")) in [ref, group]:
+			n += 1
+	return n
+
+
+func _lair_crossed(before_entry: Dictionary, now_entry: Dictionary, wrapped: bool) -> bool:
+	var now_i := int(now_entry.get("initiative", 0))
+	if wrapped:
+		return now_i < 20
+	return not before_entry.is_empty() and int(before_entry.get("initiative", 0)) >= 20 and now_i < 20
+
+
+## A duration ran out: per the table's setting removed (a log line with undo), a reminder, or nothing.
+func _expire(ref: String, cond: String, when: String) -> void:
+	var cname := str(Rules.condition(cond).get("name", cond)).to_lower()
+	match automation("durations"):
+		"auto":
+			var e := _handle_condition(1, ref, cond, false, 0, {})
+			if not e.is_empty():
+				var line := _log_entry(e)
+				line["text"] = "%s ended (%s)" % [cname, when]
+				_add_roll(line)
+		"assist":
+			_dm_line(ref, "%s has run out (%s): remove it?" % [cname, when])
+
+
+## A "save ends" save at the end of its turn: the DM's creatures roll at once, players are asked.
+func _save_ends(ref: String, cond: String, save: Dictionary) -> void:
+	var cname := str(Rules.condition(cond).get("name", cond))
+	var card := {"name": "%s (save ends)" % cname, "ability": str(save.get("ability", "con")), "dc": int(save.get("dc", 10)), "half": false,
+		"damage": [], "conditions": [], "duration": {}, "cover": 0, "targets": [], "ends": cond}
+	var waiting := not (owners.get(ref, []) as Array).is_empty()
+	card.targets.append({"ref": ref, "name": timeline.name_of(ref), "waiting": true} if waiting else _save_row(ref, card))
+	var data := {"roll": "%s: end %s? (DC %d %s save)" % [timeline.name_of(ref), cname.to_lower(), int(card.dc), str(card.ability).to_upper()],
+		"results": [], "who": timeline.name_of(ref), "hidden": false, "save": card}
+	var ev := event_log.append("dice.rolled", ref, data, Reveal.DM)
+	_post_roll(_roll_entry(ev))
+	if waiting:
+		_pending_saves[int(ev.id)] = card.duplicate(true)
+		_ask_save(int(ev.id), ref, _pending_saves[int(ev.id)])
+
+
+## DM: the in-world clock moves on `minutes` (time.advanced); out of combat, durations in
+## minutes (or rounds: 10 a minute) run out by it.
+func advance_clock(minutes: int, reason := "") -> Dictionary:
+	if not is_dm() or minutes <= 0:
+		return {}
+	var t := maxi(event_log.time, 0) + minutes
+	var e := event_log.advance_time(event_log.day + t / 1440, t % 1440, reason)
+	if not in_combat():
+		var now := event_log.day * 1440 + event_log.time
+		for ref: String in _clock_refs():
+			var s := sheet_for(Reveal.DM, ref)
+			var durs: Dictionary = s.get("condition_durations", {}) if s.get("condition_durations") is Dictionary else {}
+			for cond: String in durs.keys():
+				var dur: Dictionary = durs[cond]
+				var length := int(dur.get("minutes", ceili(float(dur.get("rounds", 0)) / 10.0)))
+				if length > 0 and int(dur.get("time", -1)) >= 0 and now - (int(dur.day) * 1440 + int(dur.time)) >= length:
+					_expire(ref, cond, "after %d min" % length)
+	table_changed.emit()
+	return e
+
+
+func _clock_refs() -> Array:
+	var out := []
+	for id: String in grid.tokens:
+		if "/" in id:
+			out.append(id)
+	for id: String in timeline.entries("characters"):
+		if not ("characters/" + id) in out:
+			out.append("characters/" + id)
+	return out
 
 
 ## Which pip an attack or feature takes: its place on the sheet (bonus_actions, reactions).
@@ -653,7 +855,10 @@ func next_turn() -> Dictionary:
 		if round_now != 1 or str(rules_settings().edition) == "2024" or not _surprised(c, order[turn]):
 			break
 		skipped.append(timeline.name_of(str(order[turn].entity)))
+	var before := str(c.order[int(c.turn)].entity) if int(c.turn) >= 0 and int(c.turn) < order.size() else ""
 	var e := event_log.append("combat.turn", "", {"round": round_now, "turn": turn, "entity": str(order[turn].entity) if not order.is_empty() else ""})
+	if not order.is_empty():
+		_turn_engine(before, order[int(c.turn)] if before != "" else {}, order[turn], round_now != int(c.round) or turn < int(c.turn))
 	_set_status("Round %d, turn %d%s" % [round_now, turn + 1, " (no turn: %s)" % ", ".join(skipped) if not skipped.is_empty() else ""])
 	if not order.is_empty():  # a character at 0 HP: its death save prompt
 		var who := str(order[turn].entity)
@@ -1558,7 +1763,9 @@ func _handle_condition(sender: int, ref: String, condition: String, on: bool, le
 	if on and id == "exhaustion":
 		data["level"] = clampi(level, 1, 6)
 	if on and not duration.is_empty():
-		data["duration"] = duration
+		data["duration"] = duration.duplicate()
+		if not data.duration.has("of"):  # TASK-63: whose turns it counts (default: its own)
+			data.duration["of"] = ref
 	if on:
 		data.merge(extra)
 	var immune := on and Rules.immune_to(sheet, id)
@@ -2250,7 +2457,7 @@ func _effect_entry(sheet: Dictionary, what: String) -> Dictionary:
 	if "/" in what:
 		return catalog_entry(what)
 	var features: Dictionary = timeline.entries("features")
-	for key in ["features", "actions", "bonus_actions", "reactions", "legendary_actions"]:
+	for key in ["features", "traits", "actions", "bonus_actions", "reactions", "legendary_actions"]:
 		for fid: Variant in sheet.get(key, []):
 			var f: Variant = features.get(str(fid), {})
 			if f is Dictionary and str(f.get("name", "")).to_lower() == what.to_lower():
@@ -2279,7 +2486,7 @@ func _handle_save_action(sender: int, ref: String, what: String, targets: Array,
 		rolls.append({"formula": str(d.dice), "rolled": int(r.total), "type": str(d.type)})
 	var cover := Rules.cover_bonus(str(opts.get("cover", ""))) if fx.ability == "dex" else 0
 	var card := {"name": fx.name, "ability": fx.ability, "dc": fx.dc, "half": fx.half, "damage": rolls, "conditions": fx.conditions,
-		"duration": fx.duration, "cover": cover, "targets": []}
+		"duration": fx.duration, "cover": cover, "targets": [], "from": ref}
 	if bool(entry.get("concentration", false)):  # TASK-59: the caster concentrates, its conditions are linked
 		_handle_concentrate(1, ref, what, str(fx.name))
 		card["source"] = {"caster": ref, "spell": what}
@@ -2315,6 +2522,13 @@ func _save_row(tref: String, card: Dictionary, by := Reveal.DM) -> Dictionary:
 	var ok := int(r.total) >= int(card.dc)  # a natural 20 or 1 means nothing special on a save
 	var row := {"ref": tref, "name": timeline.name_of(tref), "total": int(r.total), "formula": formula, "success": ok,
 		"label": str(asked[0].label) if not asked.is_empty() else "", "damage": [], "amount": 0, "by": by}
+	if card.has("ends"):  # TASK-63: a "save ends" save
+		if ok and str(card.ends) in (ts.get("conditions", []) as Array):
+			var gone := _handle_condition(1, tref, str(card.ends), false, 0, {})
+			if not gone.is_empty():
+				row["ended"] = str(card.ends)
+				row["applied_conditions"] = [int(gone.id)]
+		return row
 	if not ok or bool(card.half):
 		for d: Dictionary in card.damage:
 			var amount := int(d.rolled) if not ok else int(d.rolled) / 2
@@ -2331,7 +2545,12 @@ func _save_row(tref: String, card: Dictionary, by := Reveal.DM) -> Dictionary:
 		var done := []
 		for c: Variant in card.conditions:
 			if automation("conditions") == "auto":
-				var e := _handle_condition(1, tref, str(c), true, 1, card.get("duration", {}), {"source": card.source} if card.has("source") else {})
+				var dur: Dictionary = (card.get("duration", {}) as Dictionary).duplicate()
+				if not dur.is_empty():  # TASK-63: "for 1 minute" counts the actor's turns, "its next turn" the target's
+					dur["of"] = tref if str(dur.get("ends", "")) == "turn_end" or str(card.get("from", "")) == "" else str(card.from)
+				if bool(dur.get("save_ends", false)):
+					dur["save_ends"] = {"ability": card.ability, "dc": card.dc}
+				var e := _handle_condition(1, tref, str(c), true, 1, dur, {"source": card.source} if card.has("source") else {})
 				if not e.is_empty():
 					done.append(int(e.id))
 		row["conditions"] = card.conditions
@@ -2862,6 +3081,8 @@ static func _save_lines(entry: Dictionary) -> PackedStringArray:
 			line += " · " + ", ".join(bits)
 		if not (row.get("conditions", []) as Array).is_empty():
 			line += " · " + ", ".join((row.conditions as Array).map(func(c: Variant) -> String: return str(c)))
+		if row.has("ended"):  # TASK-63: a "save ends" save
+			line += " · %s ends" % Markdown.escape(str(row.ended))
 		if row.get("pending", false):
 			line += " · [url=apply:%d:%s]apply %d[/url]" % [int(entry.get("id", 0)), row.ref, int(row.amount)]
 		if int(row.get("applied", 0)) > 0 or not (row.get("applied_conditions", []) as Array).is_empty():

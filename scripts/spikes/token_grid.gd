@@ -10,6 +10,7 @@ extends Node2D
 signal move_requested(entity: String, cell: Vector2i)
 ## A token was clicked (pressed and released without dragging), e.g. to open its sheet.
 signal token_clicked(entity: String)
+signal token_menu(entity: String)  ## right click on a token without panning (TASK-56)
 ## WASD / arrow keys with tokens selected (TASK-42): step one cell in `dir` (8 directions),
 ## or with Shift only turn that way. Whoever owns the state decides.
 signal step_requested(entity: String, dir: Vector2i, turn_only: bool)
@@ -55,6 +56,7 @@ var _drag_group := {}  ## the other selected tokens dragged along: id -> true
 var _drag_started := false  ## the mouse moved since the press: the ghosts are out
 var plans: MovePlans  ## planned moves: ghosts, dotted trails, Space to go (TASK-45)
 var _glide := {}  ## id -> trail (cells) the next confirmed move of it glides along
+var _right_at := Vector2.ZERO  ## where the right button went down (a click opens the token's menu)
 var _box_from := Vector2.ZERO  ## map position where a selection box started
 var _boxing := false
 var _box: Node2D
@@ -158,6 +160,24 @@ func add_token_view(info: Dictionary, texture: Texture2D, at: Vector2i) -> void:
 	add_child(token)
 	set_token_cell(id, at, false)
 	set_token_facing(id, facing)
+
+
+## The condition marks on a token (TASK-56): a small coloured disc with its short name each.
+func set_token_conditions(id: String, conditions: Array, exhaustion := 0) -> void:
+	if not tokens.has(id):
+		return
+	var marks := tokens[id].get_node_or_null("Marks") as TokenMarks
+	if marks == null:
+		return
+	var list := []
+	for c: Variant in conditions:
+		var cond := Rules.condition(str(c))
+		if cond.is_empty():
+			list.append({"abbr": str(c).left(3).capitalize(), "color": Color("#666666"), "name": str(c)})
+		else:
+			var abbr := str(cond.abbr) + (str(exhaustion) if str(c) == "exhaustion" and exhaustion > 0 else "")
+			list.append({"abbr": abbr, "color": Color(str(cond.color)), "name": str(cond.name)})
+	marks.conditions = list
 
 
 ## Turns a token (n, ne, e ... nw): the triangle at its edge, and the picture mirrored when
@@ -508,6 +528,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			_camera.zoom = (_camera.zoom / 1.1).clampf(0.2, 4.0)
 		elif event.button_index in [MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
 			_panning = event.pressed
+			if event.button_index == MOUSE_BUTTON_RIGHT:
+				if event.pressed:
+					_right_at = event.position
+				elif event.position.distance_to(_right_at) < 6.0:
+					var t := _token_under(get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position)
+					if t != null:
+						token_menu.emit(str(t.get_meta("entity")))
 		elif event.button_index == MOUSE_BUTTON_LEFT:
 			var at := get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position
 			if event.pressed:

@@ -62,11 +62,21 @@ static func apply(s: Dictionary, e: Dictionary) -> void:
 					inv.erase(item)
 		# --- TASK-17 ---
 		"condition.applied":
+			var cond := str(d.get("condition", ""))
 			var list := _list(s, "conditions")
-			if str(d.get("condition", "")) not in list:
-				list.append(str(d.get("condition", "")))
+			if cond not in list:
+				list.append(cond)
+			if cond == "exhaustion":  # TASK-56: its level (1-6)
+				s["exhaustion"] = clampi(int(d.get("level", 1)), 1, 6)
+			if d.get("duration") is Dictionary:  # optional (Phase 2 ends it)
+				_dict(s, "condition_durations")[cond] = d.duration
 		"condition.removed":
-			_list(s, "conditions").erase(str(d.get("condition", "")))
+			var cond := str(d.get("condition", ""))
+			_list(s, "conditions").erase(cond)
+			if cond == "exhaustion":
+				s.erase("exhaustion")
+			if s.get("condition_durations") is Dictionary:
+				(s.condition_durations as Dictionary).erase(cond)
 		"resource.used":
 			var used := _dict(s, "resources_used")
 			var r := str(d.get("resource", ""))

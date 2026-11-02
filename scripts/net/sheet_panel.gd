@@ -113,6 +113,10 @@ func _on_meta(meta: Variant) -> void:
 		RollTables.handle_meta(m)
 	elif m.begins_with("roll:") and table != null:
 		table.roll(m.substr(5), ref, Input.is_key_pressed(KEY_SHIFT) and table.is_dm())
+	elif m == "cond:add" and table != null:  # TASK-56: the condition menu
+		table.condition_menu_requested.emit(ref)
+	elif m.begins_with("cond:off:") and table != null:
+		table.set_condition(ref, m.substr(9), false)
 
 
 ## A compendium item, spell or feature dropped on the sheet joins its list (TASK-37):
@@ -166,8 +170,7 @@ static func to_bbcode(s: Dictionary) -> String:
 		if d.has("spell_dc"):
 			bb += StatBlock._field("Spellcasting", "DC %s · attack %s · %s" % [_derived(d, "spell_dc", false), _derived(d, "spell_attack"), Rules.casting_ability(s).to_upper()])
 		# State from the TASK-17 events.
-		if s.get("conditions") is Array and not s.conditions.is_empty():
-			bb += StatBlock._field("Conditions", Markdown.escape(", ".join(s.conditions.map(func(c: Variant) -> String: return str(c).capitalize()))))
+		bb += _conditions(s)
 		if s.get("death_saves") is Dictionary:
 			bb += StatBlock._field("Death Saves", "%d successes, %d failures" % [int(s.death_saves.get("successes", 0)), int(s.death_saves.get("failures", 0))])
 		if s.get("resources_used") is Dictionary and not s.resources_used.is_empty():
@@ -226,6 +229,31 @@ static func to_bbcode(s: Dictionary) -> String:
 	if not bool(s.get("_full", false)):
 		bb += "\n\n[color=#%s][i]Only its player and the DM see the stats.[/i][/color]" % Markdown.MUTED.to_html(false)
 	return bb
+
+
+## The conditions, each with its rules text as a tooltip and (if it may change them) a ×
+## to take it off, then "+ condition" (TASK-56).
+static func _conditions(s: Dictionary) -> String:
+	var list: Array = s.get("conditions", []) if s.get("conditions") is Array else []
+	var editable := bool(s.get("_editable", false))
+	if list.is_empty() and not editable:
+		return ""
+	var edition := Rules.edition_of(s, {})
+	var parts := PackedStringArray()
+	for c: Variant in list:
+		var id := str(c)
+		var lvl := int(s.get("exhaustion", 1))
+		var cond := Rules.condition(id, edition, lvl)
+		var name := str(cond.get("name", id.capitalize())) + (" %d" % lvl if id == "exhaustion" else "")
+		var hint := str(cond.get("text", "")).replace("[", "(").replace("]", ")").replace("\"", "'")
+		var color := str(cond.get("color", "#666666")).trim_prefix("#")
+		var bit := "[color=#%s]●[/color] [hint=\"%s\"]%s[/hint]" % [color, hint, Markdown.escape(name)]
+		if editable:
+			bit += " [url=cond:off:%s]×[/url]" % id
+		parts.append(bit)
+	if editable:
+		parts.append("[url=cond:add]+ condition[/url]")
+	return StatBlock._field("Conditions", "  ".join(parts))
 
 
 ## A derived number as text ("+5"), with a marker (*) where a stored value overrides it.

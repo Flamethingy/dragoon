@@ -74,7 +74,11 @@ func _init() -> void:
 	log_text.scroll_following = true
 	log_text.selection_enabled = true
 	log_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	log_text.meta_clicked.connect(func(meta: Variant) -> void: RollTables.handle_meta(str(meta)))
+	log_text.meta_clicked.connect(func(meta: Variant) -> void:
+		if str(meta).begins_with("cond:") and table != null:  # a roll card's creature: its conditions (TASK-56)
+			table.condition_menu_requested.emit(str(meta).substr(5))
+		else:
+			RollTables.handle_meta(str(meta)))
 	col.add_child(log_text)
 	line = LineEdit.new()
 	line.name = "Line"

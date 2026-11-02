@@ -24,7 +24,8 @@ signal entry_received(ref: String)  ## player: an entry I asked for arrived or c
 signal accounts_changed  ## names or colors of the accounts changed
 signal sheet_received(ref: String)  ## a sheet I opened arrived or changed (TASK-10)
 signal rolls_changed  ## the roll log got a roll (TASK-12)
-signal entry_imported(entry: Dictionary)  ## DM: a core entry was copied into the world
+signal entry_imported(entry: Dictionary)
+signal condition_menu_requested(ref: String)  ## a token's right click, a sheet's or roll card's link (TASK-56)  ## DM: a core entry was copied into the world
 
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
@@ -95,6 +96,7 @@ func _ready() -> void:
 	grid.move_requested.connect(_on_move_requested)
 	grid.step_requested.connect(_on_step_requested)
 	grid.token_clicked.connect(_on_token_clicked)
+	grid.token_menu.connect(func(entity: String) -> void: condition_menu_requested.emit(entity))
 	assets = AssetCache.new(cache_dir)
 	notes = SessionNotes.new()
 	notes.calendar = WorldCalendar.load_file(calendar_path)
@@ -218,6 +220,7 @@ func view_for(player: String) -> Dictionary:
 		if t.is_empty():
 			continue
 		_current_values(t)
+		_conditions_on(t)
 		if facings.has(id):
 			t["facing"] = facings[id]
 		if placed.has(id):
@@ -242,6 +245,18 @@ func _current_values(t: Dictionary) -> void:
 	var now := Replay.entity_state(base, event_log.effective(str(t.id)))
 	for key: String in base:
 		t[key] = now.get(key)
+
+
+## The conditions on a token as they are now (TASK-56): everyone sees them on the table.
+func _conditions_on(t: Dictionary) -> void:
+	var e := timeline.entry(str(t.id))
+	var now := Replay.entity_state({"conditions": (e.get("conditions", []) as Array).duplicate() if e.get("conditions") is Array else [],
+		"exhaustion": e.get("exhaustion", 0)}, event_log.effective(str(t.id)))
+	var list: Array = now.get("conditions", [])
+	if not list.is_empty():
+		t["conditions"] = list
+		if "exhaustion" in list:
+			t["exhaustion"] = int(now.get("exhaustion", 1))
 
 
 ## The group token: where its members are (they always move together), named after them.
@@ -684,10 +699,12 @@ func _apply_state(view: Dictionary) -> void:
 		if token and info.get("image", "") == t.get("image", "") and info.get("token_style") == t.get("token_style"):
 			token.set_meta("info", t)
 			grid.set_token_cell(id, cell, token.get_meta("cell") != cell)
+			grid.set_token_conditions(id, t.get("conditions", []), int(t.get("exhaustion", 0)))
 		else:
 			var pic := assets.texture(t.get("image", "")) if str(t.get("image", "")) != "" else null
 			if pic != null or str(t.get("image", "")) == "":
 				grid.add_token_view(t, TokenArt.compose(pic, t.get("token_style"), str(t.get("kind", ""))), cell)
+				grid.set_token_conditions(id, t.get("conditions", []), int(t.get("exhaustion", 0)))
 	for id: String in grid.tokens.keys():
 		if not keep.has(id):
 			grid.tokens[id].queue_free()
@@ -1193,6 +1210,72 @@ func change_item(ref: String, item: String, qty: int) -> void:
 		request_item.rpc_id(1, ref, item, qty)
 
 
+## Puts a condition on (`on`) or takes it off (TASK-56): condition.applied / condition.removed.
+## Exhaustion has a level (1-6; 0 takes it off). A creature immune to it still gets it, but
+## the DM is warned (warn, never block). `duration` (optional): {rounds | minutes, ends}.
+func set_condition(ref: String, condition: String, on := true, level := 0, duration := {}) -> void:
+	if is_dm():
+		_handle_condition(1, ref, condition, on, level, duration)
+	elif is_online():
+		request_condition.rpc_id(1, ref, condition, on, level, duration)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_condition(ref: String, condition: String, on: bool, level: int, duration: Dictionary) -> void:
+	if is_dm():
+		_handle_condition(multiplayer.get_remote_sender_id(), ref, condition.left(60), on, level, duration)
+
+
+## Who may change `ref`'s conditions: the DM, and the players whose sheet it is.
+func may_change(ref: String) -> bool:
+	return is_dm() or ref == my_pc or (grid != null and grid.tokens.has(ref) and ref != PARTY and _may_drag(ref))
+
+
+## The conditions on `ref` as I know them: {conditions: [...], exhaustion: n}.
+func conditions_of(ref: String) -> Dictionary:
+	var src: Dictionary = {}
+	if grid != null and grid.tokens.has(ref):
+		src = grid.tokens[ref].get_meta("info", {})
+	if src.is_empty() and sheets.has(ref):
+		src = sheets[ref]
+	if is_dm() and timeline != null and src.is_empty():
+		src = sheet_for(Reveal.DM, ref)
+	return {"conditions": (src.get("conditions", []) as Array).duplicate() if src.get("conditions") is Array else [],
+		"exhaustion": int(src.get("exhaustion", 0))}
+
+
+func _handle_condition(sender: int, ref: String, condition: String, on: bool, level: int, duration: Dictionary) -> Dictionary:
+	var sheet := _editable_sheet(sender, ref)
+	var id := condition.to_lower().strip_edges()
+	if sheet.is_empty() or Rules.conditions().get(id) == null:
+		return {}
+	var has: bool = id in (sheet.get("conditions", []) as Array)
+	if id == "exhaustion":
+		on = level > 0
+		if on and has and int(sheet.get("exhaustion", 1)) == clampi(level, 1, 6):
+			return {}
+	elif on == has:
+		return {}
+	if not on and not has:
+		return {}
+	var data := {"condition": id}
+	if on and id == "exhaustion":
+		data["level"] = clampi(level, 1, 6)
+	if on and not duration.is_empty():
+		data["duration"] = duration
+	var immune := on and Rules.immune_to(sheet, id)
+	if immune:
+		data["immune"] = true
+	var e := event_log.append("condition.applied" if on else "condition.removed", ref, data, _sender_player(sender))
+	_after_change(ref, e)
+	if immune:  # warn, never block: the DM sees it
+		var warn := _log_entry(e)
+		warn["text"] = "is immune to %s (applied anyway, undo if that was a mistake)" % str(Rules.condition(id).name).to_lower()
+		_add_roll(warn)
+		_set_status("%s is immune to %s" % [timeline.name_of(ref), Rules.condition(id).name])
+	return e
+
+
 ## A class reaches `level` (level.gained): the class in `classes` changes (TASK-51).
 func gain_level(ref: String, cls: String, level: int) -> void:
 	if is_dm():
@@ -1272,7 +1355,8 @@ func _after_change(ref: String, e: Dictionary) -> void:
 
 
 ## Event types a player's own change can be: shown to the DM as log lines.
-const LOGGED := ["sheet.changed", "hp.changed", "item.gained", "item.lost", "resource.used", "resource.restored", "level.gained"]
+const LOGGED := ["sheet.changed", "hp.changed", "item.gained", "item.lost", "resource.used", "resource.restored", "level.gained",
+	"condition.applied", "condition.removed"]
 
 
 ## A player's change as a line in the DM's feed (hidden from the players).
@@ -1296,6 +1380,12 @@ static func log_text(e: Dictionary) -> String:
 			return "%s %d %s" % ["used" if e.type == "resource.used" else "got back", int(d.get("amount", 1)), _resource_name(str(d.get("resource", "")))]
 		"level.gained":
 			return "reached level %d %s" % [int(d.get("level", 1)), HudWidgets._name_of(d.get("class", ""))]
+		"condition.applied":
+			if str(d.get("condition", "")) == "exhaustion":
+				return "exhaustion level %d" % int(d.get("level", 1))
+			return "is %s" % str(d.get("condition", "")).replace("_", " ")
+		"condition.removed":
+			return "is no longer %s" % str(d.get("condition", "")).replace("_", " ")
 	return str(e.get("type", ""))
 
 
@@ -1439,7 +1529,7 @@ func _handle_roll(sender: int, query: String, ref: String, hidden: bool) -> Dict
 		_deny_roll(sender, "that's not your sheet")
 		return {}
 	var sheet := sheet_for(Reveal.DM, ref) if ref != "" else {}
-	var asked := Dice.resolve(sheet, query, timeline.entries("features")) if not sheet.is_empty() else []
+	var asked := Dice.resolve(sheet, query, timeline.entries("features"), rules_settings()) if not sheet.is_empty() else []
 	if asked.is_empty():
 		if not Dice.is_formula(query):
 			_deny_roll(sender, "I don't know how to roll \"%s\"" % query.strip_edges())
@@ -1565,6 +1655,8 @@ static func _roll_entry(e: Dictionary) -> Dictionary:
 	var d: Dictionary = e.get("data", {})
 	var entry := {"id": e.get("id", 0), "by": e.get("by", ""), "who": d.get("who", ""), "results": d.get("results", []),
 		"hidden": bool(d.get("hidden", false)), "real": e.get("real", "")}
+	if str(e.get("entity", "")) != "":
+		entry["ref"] = str(e.entity)
 	if e.get("type") == "chat.message" or d.has("text"):
 		entry["text"] = str(d.get("text", ""))
 	if d.has("action"):  # a quick button: a spell cast, an item used (TASK-48)
@@ -1815,6 +1907,8 @@ static func roll_bbcode(entry: Dictionary, names := {}) -> String:
 	var who := str(entry.get("who", ""))
 	var by := str(names.get(entry.get("by", ""), entry.get("by", "")))
 	var head := Markdown.escape(who if who != "" else by)
+	if who != "" and str(entry.get("ref", "")) != "":  # TASK-56: click for its conditions
+		head = "[url=cond:%s]%s[/url]" % [entry.ref, head]
 	if by != "" and who != "" and who != by:
 		head += " [color=#%s](%s)[/color]" % [Markdown.MUTED.to_html(false), Markdown.escape(by)]
 	if entry.get("hidden", false):

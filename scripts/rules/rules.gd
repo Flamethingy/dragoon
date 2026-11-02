@@ -442,6 +442,25 @@ static func suggested_advantage(s: Dictionary, kind: String, edition := "2014") 
 	return signi(adv - dis)
 
 
+## The names of the conditions behind suggested_advantage ("Poisoned", "Prone").
+static func advantage_reasons(s: Dictionary, kind: String, edition := "2014") -> PackedStringArray:
+	var out := PackedStringArray()
+	for c: Variant in s.get("conditions", []):
+		if suggested_advantage({"conditions": [c], "exhaustion": s.get("exhaustion", 1)}, kind, edition) != 0:
+			out.append(str(condition(str(c), edition).get("name", str(c).capitalize())))
+	return out
+
+
+## True if the creature can't get `condition` (its condition immunities: "poisoned",
+## "conditions/poisoned" or "Poisoned").
+static func immune_to(s: Dictionary, condition_id: String) -> bool:
+	for v: Variant in _list(s, "condition_immunities"):
+		var id := str(v).get_file().to_lower().strip_edges()
+		if id == condition_id.to_lower():
+			return true
+	return false
+
+
 ## Exhaustion's d20 penalty (2024: -2 per level), 0 otherwise.
 static func d20_penalty(s: Dictionary, edition := "2014") -> int:
 	if edition != "2024" or "exhaustion" not in (s.get("conditions", []) as Array):

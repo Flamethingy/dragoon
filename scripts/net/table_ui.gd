@@ -53,6 +53,8 @@ var _next_session: Button
 var _rolls_text: RichTextLabel
 var roll_edit: LineEdit
 var _roll_hidden: CheckBox
+var condition_menu: PopupMenu  ## a creature's conditions to tick (TASK-56)
+var _menu_ref := ""
 
 
 func _ready() -> void:
@@ -94,6 +96,7 @@ func _ready() -> void:
 	table.table_changed.connect(_refresh)
 	table.accounts_changed.connect(_refresh)
 	table.rolls_changed.connect(_show_rolls)
+	table.condition_menu_requested.connect(func(ref: String) -> void: open_condition_menu(ref))
 	RollTables.resolver = func(id: String) -> Dictionary: return table.tables.get(id, {})
 	RollTables.roller = func(id: String, hidden: bool) -> void: table.roll_table(id, hidden and table.is_dm())
 	RollTables.formula_roller = func(formula: String) -> void: table.roll(formula, roll_ref(), _roll_hidden.button_pressed)
@@ -302,6 +305,67 @@ func _fill_picker() -> void:
 			l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			box.add_child(l)
 		_picker_cards.add_child(card)
+
+
+# --- Conditions (TASK-56) -------------------------------------------------------------------
+
+const _EXHAUSTION_UP := 1000
+const _EXHAUSTION_DOWN := 1001
+
+## The conditions of `ref` to tick and untick (the DM, or the player whose sheet it is), at
+## the mouse. The rules text of the world's edition is each one's tooltip. null if not allowed.
+func open_condition_menu(ref: String, at := Vector2(-1, -1)) -> PopupMenu:
+	if ref == "" or not table.may_change(ref):
+		return null
+	if condition_menu == null:
+		condition_menu = PopupMenu.new()
+		condition_menu.name = "ConditionMenu"
+		condition_menu.hide_on_checkable_item_selection = false
+		condition_menu.id_pressed.connect(_on_condition_picked)
+		_root.add_child(condition_menu)
+	_menu_ref = ref
+	var now := table.conditions_of(ref)
+	var edition := str(table.rules_settings().get("edition", "2014"))
+	var m := condition_menu
+	m.clear()
+	m.add_separator(table.timeline.name_of(ref) if table.is_dm() and table.timeline != null else "Conditions")
+	var ids: Array = Rules.conditions().keys().filter(func(id: String) -> bool:
+		return id != "exhaustion" and not bool(Rules.conditions()[id].get("marker", false)))
+	ids.sort()
+	for i in ids.size():
+		var c := Rules.condition(ids[i], edition)
+		m.add_check_item(str(c.name), i)
+		m.set_item_metadata(m.item_count - 1, ids[i])
+		m.set_item_checked(m.item_count - 1, ids[i] in now.conditions)
+		m.set_item_tooltip(m.item_count - 1, str(c.text))
+	m.add_separator()
+	var level: int = now.exhaustion if "exhaustion" in now.conditions else 0
+	m.add_item("Exhaustion +1  (now %d)" % level, _EXHAUSTION_UP)
+	m.set_item_tooltip(m.item_count - 1, str(Rules.condition("exhaustion", edition, maxi(level + 1, 1)).text))
+	m.add_item("Exhaustion -1", _EXHAUSTION_DOWN)
+	m.set_item_disabled(m.item_count - 1, level == 0)
+	var pos := at if at.x >= 0 else _root.get_viewport().get_mouse_position()
+	m.popup(Rect2i(Vector2i(pos), Vector2i.ZERO))
+	return m
+
+
+func _on_condition_picked(id: int) -> void:
+	var ref := _menu_ref
+	var now := table.conditions_of(ref)
+	var level: int = now.exhaustion if "exhaustion" in now.conditions else 0
+	if id == _EXHAUSTION_UP:
+		table.set_condition(ref, "exhaustion", true, mini(level + 1, 6))
+		condition_menu.hide()
+		return
+	if id == _EXHAUSTION_DOWN:
+		table.set_condition(ref, "exhaustion", level > 1, level - 1)
+		condition_menu.hide()
+		return
+	var index := condition_menu.get_item_index(id)
+	var cond := str(condition_menu.get_item_metadata(index))
+	var on := not condition_menu.is_item_checked(index)
+	condition_menu.set_item_checked(index, on)
+	table.set_condition(ref, cond, on)
 
 
 # --- Top bar ---------------------------------------------------------------------------------

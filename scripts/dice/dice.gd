@@ -120,23 +120,50 @@ static func modifier(sheet: Dictionary, ability: String) -> int:
 
 ## What a name means for this sheet: [{label, formula}] (an attack gives to-hit and damage);
 ## [] if the name means nothing here. `features` = id -> feature (for attacks).
-static func resolve(sheet: Dictionary, query: String, features := {}) -> Array:
+## Without an explicit "with advantage" / "with disadvantage" / "normal", the creature's
+## conditions preselect it (TASK-56: poisoned -> disadvantage); the label says why. 2024
+## exhaustion takes 2 per level off d20 tests. `settings` = the world's rules settings.
+static func resolve(sheet: Dictionary, query: String, features := {}, settings := {}) -> Array:
 	var q := query.to_lower().strip_edges()
 	for prefix in ["roll ", "make a ", "make "]:
 		q = q.trim_prefix(prefix)
 	var advantage := 0
+	var explicit := false
 	for pair in [[" with advantage", 1], [" with disadvantage", -1], [" advantage", 1], [" disadvantage", -1],
-			[" adv", 1], [" dis", -1]]:
+			[" adv", 1], [" dis", -1], [" normal", 0], [" straight", 0]]:
 		if q.ends_with(pair[0]):
 			advantage = pair[1]
+			explicit = true
 			q = q.trim_suffix(pair[0]).strip_edges()
 			break
 	if q == "":
 		return []
+	var out := _resolve(sheet, q, features, advantage)
+	if out.is_empty() or not str(out[0].formula).contains("d20"):
+		return out
+	var edition := Rules.edition_of(sheet, settings)
+	var kind := str(out[0].get("kind", "check"))
+	var penalty := Rules.d20_penalty(sheet, edition)
+	if not explicit:
+		var suggested := Rules.suggested_advantage(sheet, kind, edition)
+		if suggested != 0:
+			out[0].formula = d20(int(out[0].bonus), suggested)
+			out[0].label = "%s (%s: %s)" % [out[0].label, "advantage" if suggested > 0 else "disadvantage",
+				", ".join(Rules.advantage_reasons(sheet, kind, edition)).to_lower()]
+	if penalty != 0:
+		out[0].formula = str(out[0].formula) + "%+d" % penalty
+		out[0].label = "%s (exhaustion %d)" % [out[0].label, penalty]
+	for r: Dictionary in out:
+		r.erase("kind")
+		r.erase("bonus")
+	return out
+
+
+static func _resolve(sheet: Dictionary, q: String, features: Dictionary, advantage: int) -> Array:
 	var words := q.replace("(", " ").replace(")", " ").replace("_", " ").split(" ", false)
 
 	if q == "initiative" or q == "init":
-		return [{"label": "Initiative", "formula": d20(Rules.initiative(sheet), advantage)}]
+		return [_d20_roll("Initiative", Rules.initiative(sheet), advantage, "check")]
 
 	var ability := ""
 	for w in words:
@@ -144,13 +171,13 @@ static func resolve(sheet: Dictionary, query: String, features := {}) -> Array:
 			ability = ABILITY_NAMES[w]
 			break
 	if ("save" in words or "saving" in words or "st" in words) and ability != "":
-		return [{"label": "%s save" % ability.to_upper(), "formula": d20(_bonus(sheet, "saves", ability, ability), advantage)}]
+		return [_d20_roll("%s save" % ability.to_upper(), _bonus(sheet, "saves", ability, ability), advantage, "save:" + ability)]
 
 	var skill := " ".join(words).trim_suffix(" check").replace(" ", "_")
 	if SKILLS.has(skill):
-		return [{"label": skill.replace("_", " ").capitalize(), "formula": d20(_bonus(sheet, "skills", skill, SKILLS[skill]), advantage)}]
+		return [_d20_roll(skill.replace("_", " ").capitalize(), _bonus(sheet, "skills", skill, SKILLS[skill]), advantage, "check")]
 	if ability != "" and words.size() <= 2:
-		return [{"label": "%s check" % ability.to_upper(), "formula": d20(Rules.check(sheet, ability), advantage)}]
+		return [_d20_roll("%s check" % ability.to_upper(), Rules.check(sheet, ability), advantage, "check")]
 
 	var weapon := q
 	for prefix in ["attack with ", "attack ", "hit with "]:
@@ -158,13 +185,17 @@ static func resolve(sheet: Dictionary, query: String, features := {}) -> Array:
 	var feature := _attack_feature(sheet, weapon, features)
 	if not feature.is_empty():
 		var attack: Dictionary = feature.attack
-		var out := [{"label": "%s to hit" % feature.get("name", weapon), "formula": d20(int(attack.get("to_hit", 0)), advantage)}]
+		var out := [_d20_roll("%s to hit" % feature.get("name", weapon), int(attack.get("to_hit", 0)), advantage, "attack")]
 		for d: Variant in attack.get("damage", []):
 			if d is Dictionary and is_formula(str(d.get("dice", ""))):
 				out.append({"label": "%s damage%s" % [feature.get("name", weapon), " (%s)" % d.type if str(d.get("type", "")) != "" else ""],
 					"formula": str(d.dice).replace(" ", "")})
 		return out
 	return []
+
+
+static func _d20_roll(label: String, bonus: int, advantage: int, kind: String) -> Dictionary:
+	return {"label": label, "formula": d20(bonus, advantage), "kind": kind, "bonus": bonus}
 
 
 ## A save's or skill's bonus (TASK-53: the Rules module; a stored number wins).

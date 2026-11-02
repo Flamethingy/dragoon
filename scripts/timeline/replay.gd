@@ -172,6 +172,19 @@ static func apply(s: Dictionary, e: Dictionary) -> void:
 					break
 			if not found and cls != "":
 				classes.append({"class": cls if "/" in cls else "classes/" + cls, "level": int(d.get("level", 1))})
+			if str(d.get("subclass", "")) != "":  # TASK-71
+				for c: Variant in classes:
+					if c is Dictionary and _same_class(str(c.get("class", "")), cls):
+						c["subclass"] = str(d.subclass)
+			if d.has("hp_gain"):  # the maximum grows, and so do the current HP
+				s["hp_max_gain"] = int(s.get("hp_max_gain", 0)) + int(d.hp_gain)
+				s["hp"] = int(s.get("hp", 0)) + int(d.hp_gain)
+			if int(s.get("level_ready", 0)) > 0:  # a milestone used up
+				s["level_ready"] = int(s.level_ready) - 1
+		"xp.awarded":  # TASK-71
+			s["xp"] = int(s.get("xp", 0)) + int(d.get("xp", 0))
+		"level.granted":  # a milestone: one level up is ready
+			s["level_ready"] = int(s.get("level_ready", 0)) + 1
 		"token.placed":
 			s["token"] = {"map": d.get("map", ""), "at": _cell(d.get("at"))}
 		"token.moved":

@@ -1167,12 +1167,168 @@ static func _surprised(c: Dictionary, o: Dictionary) -> bool:
 func end_combat(reason := "") -> Dictionary:
 	if not is_dm() or not in_combat():
 		return {}
+	var fought := _combatants()
 	event_log.append("combat.ended", "", {"reason": reason} if reason != "" else {})
 	_combat_changed()
+	_encounter_xp(fought)
 	var made := Encounters.open(timeline.folder).sync(event_log, timeline)
 	_set_status("Combat over%s" % ("" if made.is_empty() else ": saved as \"%s\"" % made[0].name))
 	table_changed.emit()
 	return made[0] if not made.is_empty() else {}
+
+
+## XP for the defeated creatures of a combat (TASK-71, levelling "xp"): their XP by CR,
+## shared by the characters who fought; applied at once (the DM undoes).
+func _encounter_xp(fought: Array) -> void:
+	if Rules.levelling(rules_settings()) != "xp":
+		return
+	var pcs := Array(timeline.pcs())
+	var party := fought.filter(func(r: Variant) -> bool: return str(r) in pcs)
+	var total := 0
+	var names := PackedStringArray()
+	for r: Variant in fought:
+		if str(r) in pcs:
+			continue
+		var s := sheet_for(Reveal.DM, str(r))
+		var down := int(s.get("hp", 1)) <= 0 or "dead" in (s.get("conditions", []) as Array) or "defeated" in (s.get("conditions", []) as Array)
+		if down:
+			var xp := Rules.xp_of(s)
+			total += xp
+			if xp > 0:
+				names.append(timeline.name_of(str(r)))
+	if total <= 0 or party.is_empty():
+		return
+	award_xp(party, total / party.size(), "defeated " + ", ".join(names))
+
+
+## DM: gives each of `refs` `xp` (xp.awarded); a character with enough for its next level is
+## told so.
+func award_xp(refs: Array, xp: int, reason := "") -> void:
+	if not is_dm() or xp == 0:
+		return
+	for r: Variant in refs:
+		var ref := str(r)
+		var e := event_log.append("xp.awarded", ref, {"xp": xp, "reason": reason.left(200)} if reason != "" else {"xp": xp}, Reveal.DM)
+		_after_change(ref, e)
+		var s := sheet_for(Reveal.DM, ref)
+		_post_roll({"id": int(e.id), "by": Reveal.DM, "who": timeline.name_of(ref), "ref": ref, "results": [], "hidden": false, "action": "log",
+			"text": "+%d XP%s" % [xp, " · can level up" if can_level(s) else ""]})
+
+
+## DM, milestone levelling: `refs` may level up once more (level.granted).
+func grant_level(refs: Array) -> void:
+	if not is_dm():
+		return
+	for r: Variant in refs:
+		_after_change(str(r), event_log.append("level.granted", str(r), {}, Reveal.DM))
+
+
+## Has the character the XP (or a milestone) for its next level?
+func can_level(sheet: Dictionary) -> bool:
+	if Rules.levelling(rules_settings()) == "milestone":
+		return int(sheet.get("level_ready", 0)) > 0
+	return Rules.level(sheet) < 20 and Rules.level_for_xp(int(sheet.get("xp", 0))) > Rules.level(sheet)
+
+
+## All entries of a kind: the timeline's, the world's and the packages'.
+func catalog_list(kind: String) -> Array:
+	catalog_entry(kind + "/-")  # reads the packages once
+	var all: Dictionary = (_catalog.get(kind, {}) as Dictionary).duplicate()
+	if timeline != null:
+		all.merge(timeline.entries(kind), true)
+	return all.values()
+
+
+## What levelling `ref` up in `cls` would bring (TASK-71): Rules.level_up_plan with the class
+## features of the new level (names) and the subclasses to choose from.
+func level_up_plan(ref: String, cls: String) -> Dictionary:
+	var sheet: Dictionary = sheet_for(Reveal.DM, ref) if is_dm() else sheets.get(ref, {})
+	if sheet.is_empty():
+		return {}
+	var plan := Rules.level_up_plan(sheet, cls, Rules.edition_of(sheet, rules_settings()))
+	var before := class_features_of(sheet)
+	var names := []
+	var all := _features()
+	for id: String in class_features_of(plan.after):
+		if not id in before:
+			names.append(str((all.get(id, {}) as Dictionary).get("name", id)))
+	plan["features"] = names
+	var subs := []
+	if bool(plan.subclass):
+		var cname := ClassFeatures.slug(str(catalog_entry(str(plan.class)).get("name", str(plan.class).get_file())))
+		for e: Variant in catalog_list("subclasses"):
+			if e is Dictionary and (ClassFeatures.slug(str(e.get("class", "")).get_file()) == cname or Rules._class_id(ClassFeatures.slug(str(e.get("class", "")).get_file())) == Rules._class_id(str(plan.class))):
+				subs.append({"id": str(e.id), "name": str(e.get("name", e.id))})
+		subs.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return str(a.name) < str(b.name))
+	plan["subclasses"] = subs
+	plan["ready"] = can_level(sheet)
+	plan.erase("after")
+	return plan
+
+
+## Levels `ref` up (TASK-71). `choices`: {class, hp: "average" | "roll" | a number, subclass,
+## asi: {ability: +n}, feat: "feats/x", spells: [refs]}. Writes level.gained (with the HP and
+## the subclass) and sheet.changed for abilities, feats and spells. Without the XP or a
+## milestone it still happens; the DM is told (warn, never block).
+func level_up(ref: String, choices: Dictionary) -> void:
+	if is_dm():
+		_handle_level_up(1, ref, choices)
+	elif is_online():
+		request_level_up.rpc_id(1, ref, choices)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_level_up(ref: String, choices: Dictionary) -> void:
+	if is_dm():
+		_handle_level_up(multiplayer.get_remote_sender_id(), ref.left(200), choices)
+
+
+func _handle_level_up(sender: int, ref: String, choices: Dictionary) -> Dictionary:
+	var sheet := _editable_sheet(sender, ref)
+	var cls := str(choices.get("class", ""))
+	if sheet.is_empty() or cls == "":
+		return {}
+	var plan := Rules.level_up_plan(sheet, cls, Rules.edition_of(sheet, rules_settings()))
+	if int(plan.to) > 20 or int(plan.total) > 20:
+		_deny_sheet(sender, "level 20 is the highest")
+		return {}
+	var player := _sender_player(sender)
+	if not can_level(sheet):
+		_dm_line(ref, "levels up without %s" % ("a milestone" if Rules.levelling(rules_settings()) == "milestone" else "the XP"))
+	var hp: Variant = choices.get("hp", "average")
+	var gain := int(plan.hp_average)
+	var how := "average"
+	if str(hp) == "roll":
+		var r := Dice.roll("1d%d" % int(plan.hit_die), rng)
+		gain = Rules.hp_gain(int(plan.hit_die), int(plan.con), int(r.total))
+		how = "rolled %d" % int(r.total)
+	elif hp is int or hp is float:
+		gain = maxi(1, int(hp))
+		how = "set"
+	var data := {"class": str(plan.class), "level": int(plan.to), "hp_gain": gain, "hp_how": how}
+	if str(choices.get("subclass", "")) != "":
+		data["subclass"] = str(choices.subclass).left(100)
+	var e := event_log.append("level.gained", ref, data, player)
+	_after_change(ref, e)
+	var asi: Dictionary = choices.get("asi", {}) if choices.get("asi") is Dictionary else {}
+	for ab: Variant in asi:
+		if str(ab) in Rules.ABILITIES and int(asi[ab]) != 0:
+			var from := int((sheet.get("stats", {}) as Dictionary).get(str(ab), 10)) if sheet.get("stats") is Dictionary else 10
+			_after_change(ref, event_log.change_sheet(ref, "stats." + str(ab), from, mini(20, from + int(asi[ab])), "", player))
+	for pair: Array in [["feats", [str(choices.get("feat", ""))]], ["spells", choices.get("spells", []) if choices.get("spells") is Array else []]]:
+		var adds: Array = (pair[1] as Array).filter(func(v: Variant) -> bool: return str(v) != "")
+		if adds.is_empty():
+			continue
+		var list: Array = (sheet.get(pair[0], []) as Array).duplicate() if sheet.get(pair[0]) is Array else []
+		var before := list.duplicate()
+		for v: Variant in adds:
+			if not str(v) in list:
+				list.append(str(v))
+		if list != before:
+			_after_change(ref, event_log.change_sheet(ref, str(pair[0]), before, list, "", player))
+	_post_roll({"id": int(e.id), "by": player, "who": timeline.name_of(ref), "ref": ref, "results": [], "hidden": false, "action": "log",
+		"text": "reaches %s %d (+%d HP, %s)" % [HudWidgets._name_of(plan.class), int(plan.to), gain, how]})
+	return e
 
 
 ## DM: the world's maps changed (added, grid aligned): reads them again and shows `id`.
@@ -1869,7 +2025,7 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 	var sheet := {}
 	if full:
 		sheet = Replay.entity_state(view, events)
-		sheet["_hp_max"] = int(timeline.entry(ref).get("hp", 0))
+		sheet["_hp_max"] = int(timeline.entry(ref).get("hp", 0)) + int(sheet.get("hp_max_gain", 0))  # TASK-71: levels add to it
 		if sheet.has("classes"):
 			sheet["_class"] = timeline.class_text(sheet)
 		var auto := class_features_of(sheet) if sheet.get("classes") is Array else []  # TASK-69
@@ -1896,6 +2052,9 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 			sheet["_weapon_profs"] = profs
 		sheet["_weapon_attacks"] = Rules.weapon_attacks(sheet)
 		sheet["_attunement"] = Rules.attunement(sheet)
+		if str(sheet.get("_kind", ref.get_slice("/", 0))) == "characters" and sheet.get("classes") is Array:  # TASK-71
+			sheet["_level"] = {"level": Rules.level(sheet), "xp": int(sheet.get("xp", 0)), "next": Rules.xp_for_level(Rules.level(sheet) + 1),
+				"mode": Rules.levelling(rules_settings()), "ready": can_level(sheet)}
 		var attacks := []
 		var features := _features()
 		for key in ["features", "actions", "bonus_actions", "reactions"]:
@@ -2231,7 +2390,11 @@ static func log_text(e: Dictionary) -> String:
 		"resource.used", "resource.restored":
 			return "%s %d %s" % ["used" if e.type == "resource.used" else "got back", int(d.get("amount", 1)), _resource_name(str(d.get("resource", "")))]
 		"level.gained":
-			return "reached level %d %s" % [int(d.get("level", 1)), HudWidgets._name_of(d.get("class", ""))]
+			return "reached level %d %s%s" % [int(d.get("level", 1)), HudWidgets._name_of(d.get("class", "")), " (+%d HP)" % int(d.hp_gain) if d.has("hp_gain") else ""]
+		"xp.awarded":
+			return "got %d XP%s" % [int(d.get("xp", 0)), " (%s)" % d.reason if str(d.get("reason", "")) != "" else ""]
+		"level.granted":
+			return "may level up (milestone)"
 		"condition.applied":
 			if str(d.get("condition", "")) == "exhaustion":
 				return "exhaustion level %d" % int(d.get("level", 1))

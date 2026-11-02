@@ -83,7 +83,7 @@ func _init() -> void:
 	_check(_has(dm, ARIA, "frightened"), "Aria: one of the chief's turns, still frightened")
 	_next_to(dm, CHIEF)
 	_check(not _has(dm, ARIA, "frightened") and _line(dm, "frightened ended (start of Goblin Chief"), "the second of the chief's turns: Aria's fear ends")
-	for i in 10:  # until the breath is back (so the next check is clean)
+	for i in 40:  # until the breath is back (so the next check is clean; 10 tries failed 1.7% of runs)
 		if (dm.turn_usage(CHIEF).get("spent", []) as Array).is_empty():
 			break
 		_next_to(dm, CHIEF)
@@ -102,7 +102,7 @@ func _init() -> void:
 	dm.set_rules_settings(settings)
 
 	# save ends: the chief (the DM's) rolls at the end of its turn, Borin's player is asked
-	dm.set_condition(CHIEF, "frightened", true, 0, {"rounds": 10, "save_ends": {"ability": "wis", "dc": 1}})
+	dm.set_condition(CHIEF, "frightened", true, 0, {"rounds": 10, "save_ends": {"ability": "wis", "dc": -20}})  # always saves (a 1 with WIS -1 fails DC 1)
 	dm.set_condition(BORIN, "frightened", true, 0, {"rounds": 10, "save_ends": {"ability": "wis", "dc": 1}})
 	_next_to(dm, BORIN)
 	var ended := dm.rolls.filter(func(r: Dictionary) -> bool: return r.get("save") is Dictionary and str(r.save.get("ends", "")) == "frightened" and NetTable.roll_bbcode(r).contains("frightened ends"))

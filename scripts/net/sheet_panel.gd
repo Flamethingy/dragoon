@@ -125,6 +125,8 @@ func _on_meta(meta: Variant) -> void:
 			table.flag_item(ref, p[3], p[1], p[2] == "on")
 	elif m.begins_with("res:") and table != null:  # TASK-64: a use spent / back
 		table.use_resource(ref, m.substr(8), 1 if m.begins_with("res:use:") else -1)
+	elif m == "levelup" and table != null:  # TASK-71
+		level_up_dialog()
 	elif m == "rest:short" and table != null:
 		short_rest_dialog()
 	elif m == "rest:long" and table != null and table.is_dm():
@@ -159,6 +161,7 @@ func add_entry(e: Dictionary) -> bool:
 
 
 var rest_dialog: ConfirmationDialog
+var level_dialog: ConfirmationDialog
 
 ## The short rest (TASK-64): how many of each hit die to spend.
 func short_rest_dialog() -> ConfirmationDialog:
@@ -196,6 +199,114 @@ func short_rest_dialog() -> ConfirmationDialog:
 	add_child(rest_dialog)
 	rest_dialog.popup_centered(Vector2i(320, 120))
 	return rest_dialog
+
+
+## The level-up dialog (TASK-71): the class (or a new one), HP (average or roll), and what the
+## level brings: features, slots, an ability score increase or feat, the subclass, spells.
+func level_up_dialog(cls := "") -> ConfirmationDialog:
+	if level_dialog != null:
+		level_dialog.queue_free()
+	level_dialog = ConfirmationDialog.new()
+	level_dialog.name = "LevelUp"
+	level_dialog.title = "Level up: %s" % str(sheet.get("name", ""))
+	var box := VBoxContainer.new()
+	box.custom_minimum_size = Vector2(380, 0)
+	level_dialog.add_child(box)
+	var classes := OptionButton.new()
+	classes.name = "Class"
+	var ids := []
+	for c: Variant in sheet.get("classes", []):
+		if c is Dictionary:
+			ids.append(str(c.get("class", "")))
+			classes.add_item("%s %d → %d" % [HudWidgets._name_of(c.get("class", "")), int(c.get("level", 0)), int(c.get("level", 0)) + 1])
+	for e: Variant in table.catalog_list("classes"):
+		var r := "classes/" + str((e as Dictionary).get("id", ""))
+		if e is Dictionary and not ids.any(func(i: String) -> bool: return Rules._class_id(i) == Rules._class_id(r)) and not EntryStore.is_draft(e):
+			ids.append(r)
+			classes.add_item("New: %s (multiclass)" % str(e.get("name", r)))
+	box.add_child(classes)
+	var hp := OptionButton.new()
+	hp.name = "Hp"
+	box.add_child(hp)
+	var info := RichTextLabel.new()
+	info.name = "Plan"
+	info.bbcode_enabled = true
+	info.fit_content = true
+	box.add_child(info)
+	var sub := OptionButton.new()
+	sub.name = "Subclass"
+	box.add_child(sub)
+	var asi_row := HBoxContainer.new()
+	asi_row.name = "Asi"
+	box.add_child(asi_row)
+	var asi_a := OptionButton.new()
+	asi_a.name = "AsiA"
+	var asi_b := OptionButton.new()
+	asi_b.name = "AsiB"
+	for o: OptionButton in [asi_a, asi_b]:
+		o.add_item("—")
+		for ab: String in Rules.ABILITIES:
+			o.add_item("+1 " + ab.to_upper())
+		asi_row.add_child(o)
+	var feat := LineEdit.new()
+	feat.name = "Feat"
+	feat.placeholder_text = "or a feat instead (feats/...)"
+	feat.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	asi_row.add_child(feat)
+	var state := {"plan": {}}  # lambdas capture by value: the plan lives in here
+	var refresh := func() -> void:
+		var i := classes.selected
+		var plan: Dictionary = table.level_up_plan(ref, str(ids[i]) if i >= 0 and i < ids.size() else "")
+		state.plan = plan
+		hp.clear()
+		if plan.is_empty():
+			return
+		hp.add_item("HP: average %d" % int(plan.hp_average))
+		hp.add_item("HP: roll 1d%d %+d" % [int(plan.hit_die), int(plan.con)])
+		var lines := PackedStringArray()
+		if not (plan.features as Array).is_empty():
+			lines.append("[b]New:[/b] " + Markdown.escape(", ".join(PackedStringArray(plan.features))))
+		if plan.slots_after != plan.slots_before:
+			lines.append("[b]Spell slots:[/b] %s" % ", ".join(PackedStringArray((plan.slots_after as Array).map(func(n: Variant) -> String: return str(n)))))
+		if bool(plan.caster):
+			lines.append("New spells: drop them on the sheet, or prepare them after a long rest.")
+		if not bool(plan.ready):
+			lines.append("[color=#%s]Not enough XP / no milestone yet (the DM is told).[/color]" % UISkin.ORANGE.to_html(false))
+		info.text = "\n".join(lines) if not lines.is_empty() else "Nothing new besides the hit points."
+		sub.clear()
+		sub.visible = bool(plan.subclass) and not (plan.subclasses as Array).is_empty()
+		sub.add_item("Subclass: choose later")  # never picked for the player
+		sub.set_item_metadata(0, "")
+		for s: Dictionary in plan.subclasses:
+			sub.add_item(str(s.name))
+			sub.set_item_metadata(sub.item_count - 1, "subclasses/" + str(s.id))
+		asi_row.visible = bool(plan.asi)
+	classes.item_selected.connect(func(_i: int) -> void: refresh.call())
+	var start := ids.find(cls)
+	classes.select(start if start >= 0 else 0)
+	refresh.call()
+	level_dialog.confirmed.connect(func() -> void:
+		var plan: Dictionary = state.plan
+		if plan.is_empty():
+			return
+		var choices := {"class": str(plan.class), "hp": "roll" if hp.selected == 1 else "average"}
+		if sub.visible and sub.selected > 0:
+			choices["subclass"] = str(sub.get_item_metadata(sub.selected))
+		if asi_row.visible:
+			if feat.text.strip_edges() != "":
+				choices["feat"] = feat.text.strip_edges()
+			else:
+				var asi := {}
+				for o: OptionButton in [asi_a, asi_b]:
+					if o.selected > 0:
+						var ab: String = Rules.ABILITIES[o.selected - 1]
+						asi[ab] = int(asi.get(ab, 0)) + 1
+				if not asi.is_empty():
+					choices["asi"] = asi
+		table.level_up(ref, choices))
+	add_child(level_dialog)
+	level_dialog.popup_centered(Vector2i(420, 260))
+	return level_dialog
 
 
 func close_sheet() -> void:
@@ -303,6 +414,11 @@ static func _resources(s: Dictionary) -> String:
 		bb += StatBlock._field("Uses", " · ".join(parts))
 	if str(s.get("_kind", "")) == "characters":
 		bb += StatBlock._field("Rest", "[url=rest:short]Short rest[/url] · [url=rest:long]Long rest (party, DM)[/url]")
+	var lv: Dictionary = s.get("_level", {})
+	if not lv.is_empty():  # TASK-71
+		var xp := "XP %d / %d · " % [int(lv.xp), int(lv.next)] if str(lv.mode) == "xp" else ""
+		var link := "[url=levelup]Level up[/url]" + (" [color=#%s](ready)[/color]" % UISkin.ORANGE.to_html(false) if bool(lv.ready) else "")
+		bb += StatBlock._field("Level %d" % int(lv.level), xp + link)
 	return bb
 
 

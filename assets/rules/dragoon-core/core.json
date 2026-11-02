@@ -114,5 +114,9 @@
   {"id": "shield", "name": "Shield", "category": "shield", "ac_bonus": 2}],
  "house_rules": {
   "crit": {"label": "Critical hits", "options": {"double": "Double the damage dice (rules as written)", "max_plus_roll": "Maximum damage dice + a normal roll"}, "default": "max_plus_roll"},
-  "flanking": {"label": "Flanking", "options": {"off": "Off", "advantage": "Advantage when flanking"}, "default": "off"}}
+  "flanking": {"label": "Flanking", "options": {"off": "Off", "advantage": "Advantage when flanking"}, "default": "off"},
+  "levelling": {"label": "Levelling", "options": {"xp": "Experience points (XP for defeated creatures)", "milestone": "Milestones (the DM says when)"}, "default": "xp"}},
+ "subclass_levels": {"cleric": 1, "sorcerer": 1, "warlock": 1, "druid": 2, "wizard": 2, "default": 3},
+ "asi_levels": {"fighter": [4, 6, 8, 12, 14, 16, 19], "rogue": [4, 8, 10, 12, 16, 19], "default": [4, 8, 12, 16, 19]},
+ "attunement_max": 3
 }

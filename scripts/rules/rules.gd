@@ -10,7 +10,7 @@ extends RefCounted
 
 const CORE_DIR := "res://assets/rules/dragoon-core"
 const ABILITIES := ["str", "dex", "con", "int", "wis", "cha"]
-const DEFAULT_SETTINGS := {"edition": "2014", "house_rules": {"crit": "max_plus_roll", "flanking": "off"},
+const DEFAULT_SETTINGS := {"edition": "2014", "house_rules": {"crit": "max_plus_roll", "flanking": "off", "levelling": "xp"},
 	"automation": {}}
 ## How much the table does by itself, per category (TASK-60): "off" (by hand), "assist" (posted
 ## for the DM to apply) or "auto" (applied at once; undo corrects it). Defaults: Nico's
@@ -267,6 +267,98 @@ static func armor_ac(s: Dictionary) -> int:
 							unarmored = maxi(unarmored, mod(s, "wis"))
 		base += unarmored
 	return base + shield + extra
+
+
+# --- Levelling (TASK-71) ---------------------------------------------------------------------
+
+## XP a character level needs (1: 0, 2: 300 ...).
+static func xp_for_level(lvl: int) -> int:
+	var t: Array = core().get("xp_by_level", [])
+	return int(t[clampi(lvl, 1, t.size()) - 1]) if not t.is_empty() else 0
+
+
+## The character level that much XP reaches.
+static func level_for_xp(xp: int) -> int:
+	var t: Array = core().get("xp_by_level", [])
+	var n := 1
+	for i in t.size():
+		if xp >= int(t[i]):
+			n = i + 1
+	return n
+
+
+## A creature's XP by its CR (0.5, "1/2", 3 ...); its own `xp` wins.
+static func xp_of(creature: Dictionary) -> int:
+	if creature.get("xp") is int or creature.get("xp") is float:
+		return int(creature.xp)
+	var cr: Variant = creature.get("cr", creature.get("challenge", null))
+	if cr == null:
+		return 0
+	var f := 0.0
+	var t := str(cr).strip_edges()
+	if "/" in t:
+		f = float(t.get_slice("/", 0)) / maxf(float(t.get_slice("/", 1)), 1.0)
+	else:
+		f = float(t)
+	var key := str(int(f)) if is_equal_approx(f, floorf(f)) else str(snappedf(f, 0.001))
+	return int((core().get("xp_by_cr", {}) as Dictionary).get(key, 0))
+
+
+## "xp" or "milestone" (the world's house rule).
+static func levelling(settings: Dictionary) -> String:
+	return str((settings_of(settings).house_rules as Dictionary).get("levelling", "xp"))
+
+
+static func hit_die(cls: String) -> int:
+	return int((core().get("hit_dice", {}) as Dictionary).get(_class_id(cls), 8))
+
+
+## HP for a new level: the average (half the die + 1) or a roll, + CON; at least 1.
+static func hp_gain(sides: int, con_mod: int, rolled := 0) -> int:
+	return maxi(1, (rolled if rolled > 0 else sides / 2 + 1) + con_mod)
+
+
+## The class level its subclass is chosen at (2024: always 3).
+static func subclass_level(cls: String, edition := "2014") -> int:
+	if edition == "2024":
+		return 3
+	var t: Dictionary = core().get("subclass_levels", {})
+	return int(t.get(_class_id(cls), t.get("default", 3)))
+
+
+static func asi_levels(cls: String) -> Array:
+	var t: Dictionary = core().get("asi_levels", {})
+	return t.get(_class_id(cls), t.get("default", [4, 8, 12, 16, 19]))
+
+
+## What levelling up in `cls` brings (TASK-71): {class, from, to, total, hit_die, con,
+## hp_average, slots_before, slots_after, asi, subclass (to choose now), caster, after (the
+## sheet with the new level, for the features)}. A class it doesn't have yet: multiclassing.
+static func level_up_plan(s: Dictionary, cls: String, edition := "2014") -> Dictionary:
+	var ref := cls if "/" in cls else "classes/" + cls
+	var now := class_level(s, ref)
+	var after := s.duplicate(true)
+	var classes: Array = after.get("classes", []) if after.get("classes") is Array else []
+	var found := false
+	var has_sub := false
+	for c: Variant in classes:
+		if c is Dictionary and _class_id(str(c.get("class", ""))) == _class_id(ref):
+			c["level"] = now + 1
+			found = true
+			has_sub = str(c.get("subclass", "")) != ""
+	if not found:
+		classes.append({"class": ref, "level": 1})
+	after["classes"] = classes
+	var to := now + 1
+	var casters: Dictionary = core().get("casters", {})
+	var caster := false
+	for kind: String in casters:
+		if _class_id(ref) in (casters[kind] as Array):
+			caster = true
+	var sides := hit_die(ref)
+	return {"class": ref, "from": now, "to": to, "total": level(s) + 1, "hit_die": sides, "con": mod(s, "con"),
+		"hp_average": hp_gain(sides, mod(s, "con")), "slots_before": slots(s), "slots_after": slots(after),
+		"asi": asi_levels(ref).any(func(l: Variant) -> bool: return int(l) == to), "subclass": to >= subclass_level(ref, edition) and not has_sub, "caster": caster, "after": after}
 
 
 # --- Gear (TASK-70) ----------------------------------------------------------------------------

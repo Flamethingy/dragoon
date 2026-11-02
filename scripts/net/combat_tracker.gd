@@ -62,6 +62,10 @@ func refresh() -> void:
 	var dm := table.is_dm()
 	_buttons.visible = dm
 	_head.text = "Round %d" % int(c.get("round", 1))
+	if dm:  # TASK-72: the fight's difficulty (the living foes)
+		var diff := table.encounter_difficulty()
+		if str(diff.get("rating", "none")) != "none":
+			_head.text += " · %s" % str(diff.rating).capitalize()
 	for child in _rows.get_children():
 		_rows.remove_child(child)
 		child.queue_free()

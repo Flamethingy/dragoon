@@ -1223,6 +1223,134 @@ func grant_level(refs: Array) -> void:
 		_after_change(str(r), event_log.append("level.granted", str(r), {}, Reveal.DM))
 
 
+## The fight on this map (TASK-72): the characters' levels against the hostile creatures'
+## XP (alive, not friendly). Rules.encounter_difficulty with the creatures' names.
+func encounter_difficulty() -> Dictionary:
+	if timeline == null or grid == null:
+		return {}
+	var pcs := Array(timeline.pcs())
+	var party := []
+	var foes := []
+	for id: String in grid.tokens:
+		if not "/" in id or id == PARTY:
+			continue
+		var s := sheet_for(Reveal.DM, id)
+		if s.is_empty():
+			continue
+		if id in pcs:
+			party.append(maxi(1, Rules.level(s)))
+		elif str(s.get("attitude", "hostile")) != "friendly" and int(s.get("hp", 1)) > 0 and not "dead" in (s.get("conditions", []) as Array):
+			foes.append(Rules.xp_of(s))
+	return Rules.encounter_difficulty(party, foes, str(Rules.settings_of(rules_settings()).edition))
+
+
+## A hint only `ref`'s players see (and the DM; TASK-72): the reaction it might take. A
+## creature without players: a DM line.
+func _hint(ref: String, text: String) -> void:
+	var players: Array = owners.get(ref, [])
+	if players.is_empty():
+		_dm_line(ref, text)
+		return
+	var entry := {"id": 0, "by": Reveal.DM, "who": timeline.name_of(ref), "ref": ref, "results": [], "hidden": false, "action": "log",
+		"text": text, "private": players}
+	_add_roll(entry)
+	for peer_id: int in peers:
+		if str(peers[peer_id]) in players:
+			roll_added.rpc_id(peer_id, entry)
+
+
+func _reactions_on() -> bool:
+	return automation("reactions") != "off"
+
+
+## The reaction is still free (always, outside a combat).
+func _has_reaction(ref: String) -> bool:
+	return not in_combat() or not bool(turn_usage(ref).get("reaction", false))
+
+
+## A spell on the sheet by name, with a slot of `at_least` left: its ref, else "".
+func _ready_spell(sheet: Dictionary, name: String, at_least: int) -> String:
+	for v: Variant in sheet.get("spells", []):
+		if str(catalog_entry(str(v)).get("name", HudWidgets._name_of(v))).to_lower() == name:
+			var slots := Rules.slots(sheet)
+			for lvl in range(at_least, slots.size() + 1):
+				if int(slots[lvl - 1]) - Replay.slots_used(sheet, lvl) > 0:
+					return str(v)
+	return ""
+
+
+## After an attack row against `tref`: Shield would turn the hit into a miss, Uncanny Dodge
+## halves it (hints, never applied).
+func _attack_hints(tref: String, ts: Dictionary, row: Dictionary) -> void:
+	if not _reactions_on() or not bool(row.hit) or not _has_reaction(tref):
+		return
+	if not bool(row.crit) and int(row.total) < int(row.ac) + 5 and _ready_spell(ts, "shield", 1) != "":
+		_hint(tref, "Shield (reaction, a level 1 slot): +5 AC would make %d miss" % int(row.total))
+	if not _effect_entry(ts, "Uncanny Dodge").is_empty():
+		_hint(tref, "Uncanny Dodge (reaction): halve this attack's damage")
+
+
+## A spell cast: whoever on the other side could Counterspell it (18 m, a level 3 slot, the
+## reaction free) is told.
+func _counterspell_hints(ref: String, spell_name: String) -> void:
+	if not _reactions_on() or not in_combat():
+		return
+	var mine := _side(ref)
+	for other: Variant in _combatants():
+		var o := str(other)
+		if o == ref or _side(o) == mine or not _has_reaction(o):
+			continue
+		var d := distance_m(ref, o)
+		if d < 0 or d > 18.0:
+			continue
+		if _ready_spell(sheet_for(Reveal.DM, o), "counterspell", 3) != "":
+			_hint(o, "Counterspell (reaction, level 3+): %s casts %s" % [timeline.name_of(ref), spell_name])
+
+
+## "party" (characters and friendly creatures) or "foes".
+func _side(ref: String) -> String:
+	if ref in timeline.pcs():
+		return "party"
+	return "party" if str(sheet_for(Reveal.DM, ref).get("attitude", "")) == "friendly" else "foes"
+
+
+## A creature's melee reach in metres (its longest melee attack; 1.5 m without one).
+func _reach_m(sheet: Dictionary) -> float:
+	var reach := 1.5
+	for f: Dictionary in _feature_list(sheet) + (sheet.get("_weapon_attacks", []) as Array):
+		var a: Variant = f.get("attack")
+		var kind := str((a as Dictionary).get("kind", "")).to_lower() if a is Dictionary else ""
+		if "melee" in kind and not "ranged" in kind:  # "Melee or Ranged": its range is the throw, the reach 1.5 m
+			reach = maxf(reach, float(Rules.range_of(a.get("range", "")).get("normal", 1.5)))
+	return reach
+
+
+## A token moving out of a foe's reach in a combat: that foe's opportunity attack (a hint).
+func _opportunity_hints(entity: String, from: Vector2i, to: Vector2i) -> void:
+	if not _reactions_on() or not in_combat() or not entity in _combatants():
+		return
+	var n := maxi(1, ceili(float(grid.tokens[entity].get_meta("cells", 1.0))))
+	var side := _side(entity)
+	for other: Variant in _combatants():
+		var o := str(other)
+		if o == entity or not grid.tokens.has(o) or _side(o) == side or not _has_reaction(o):
+			continue
+		var os := sheet_for(Reveal.DM, o)
+		if int(os.get("hp", 1)) <= 0:
+			continue
+		var reach := _reach_m(os)
+		var before := _gap_m(Rect2i(from, Vector2i(n, n)), _footprint(o))
+		var after := _gap_m(Rect2i(to, Vector2i(n, n)), _footprint(o))
+		if before <= reach + 0.01 and after > reach + 0.01:
+			_hint(o, "%s leaves your reach: opportunity attack? (not if it took the Disengage action)" % timeline.name_of(entity))
+
+
+static func _gap_m(ra: Rect2i, rb: Rect2i) -> float:
+	var gx := maxi(0, maxi(rb.position.x - ra.end.x + 1, ra.position.x - rb.end.x + 1))
+	var gy := maxi(0, maxi(rb.position.y - ra.end.y + 1, ra.position.y - rb.end.y + 1))
+	return maxi(gx, gy) * TokenGrid.METRES_PER_CELL
+
+
 ## Has the character the XP (or a milestone) for its next level?
 func can_level(sheet: Dictionary) -> bool:
 	if Rules.levelling(rules_settings()) == "milestone":
@@ -1714,6 +1842,7 @@ func _handle_move(sender: int, entity: String, cell: Vector2i) -> void:
 		return
 	var from := grid.token_cell(entity)
 	var by := "dm" if sender == 1 else str(peers[sender])
+	_opportunity_hints(entity, from, cell)  # TASK-72
 	var facing := TokenGrid.facing_of(cell - from)  # moving turns the token that way (TASK-42)
 	var e := event_log.move_token(entity, grid.map_id, from, cell, by, "", facing)
 	grid.set_token_cell(entity, cell)
@@ -2821,6 +2950,7 @@ func _attack_card(player: String, ref: String, sheet: Dictionary, atk: Dictionar
 		var far := _range_note(ref, tref, atk.get("range", {}) if atk.get("range") is Dictionary else {})  # TASK-67
 		if not far.is_empty():
 			row["range"] = far
+		_attack_hints(tref, ts, row)  # TASK-72
 		rows.append(row)
 	var data := {"roll": "%s attack" % atk.name, "formula": results[0].formula if not results.is_empty() else "", "result": results[0].total if not results.is_empty() else 0,
 		"dice": results[0].dice if not results.is_empty() else [], "results": results, "who": str(sheet.get("name", "")),
@@ -3361,6 +3491,7 @@ func cast(ref: String, spell: String, level := -1, ritual := false) -> void:
 ## left: cast anyway, the DM is told. Cantrips and rituals spend nothing. Concentration
 ## spells hand over to TASK-59.
 func _cast_costs(ref: String, sheet: Dictionary, spell: String, entry: Dictionary, opts: Dictionary, player: String, concentrate := true) -> void:
+	_counterspell_hints(ref, str(entry.get("name", HudWidgets._name_of(spell))))  # TASK-72
 	var base := int(entry.get("level", 0))
 	var level := maxi(int(opts.get("level", base)), base)
 	if base > 0 and not bool(opts.get("ritual", false)) and automation("resources") == "auto":

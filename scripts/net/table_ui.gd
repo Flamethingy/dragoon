@@ -147,6 +147,11 @@ func _refresh() -> void:
 	var fighting := dm and table.in_combat()
 	_combat_button.visible = dm
 	_combat_button.text = "End combat" if fighting else "Start combat"
+	if not fighting and table.is_dm():  # TASK-72: how hard the fight on this map would be
+		var diff := table.encounter_difficulty()
+		if str(diff.get("rating", "none")) != "none":
+			_combat_button.text = "Start combat (%s)" % str(diff.rating).capitalize()
+			_combat_button.tooltip_text = "XP %d (adjusted %d) · %s" % [int(diff.xp), int(diff.adjusted), " · ".join(PackedStringArray((diff.thresholds as Dictionary).keys().map(func(k: String) -> String: return "%s %d" % [k, int(diff.thresholds[k])])))]
 	_turn_button.visible = fighting
 	var picking := online and not dm and table.my_pc == "" and not table.pc_choices.is_empty()
 	_picker.visible = picking

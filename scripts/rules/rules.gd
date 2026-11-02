@@ -304,6 +304,50 @@ static func xp_of(creature: Dictionary) -> int:
 	return int((core().get("xp_by_cr", {}) as Dictionary).get(key, 0))
 
 
+## How hard a fight is (TASK-72): `party` character levels, `foes` their XP each.
+## 2014: the XP times the count multiplier (fewer than 3 characters: one step up, 6 or more:
+## one down) against the party's easy / medium / hard / deadly thresholds. 2024: the plain XP
+## against the low / moderate / high budget. {rating, xp, adjusted, thresholds: {name: xp}}.
+static func encounter_difficulty(party: Array, foes: Array, edition := "2014") -> Dictionary:
+	var xp := 0
+	for x: Variant in foes:
+		xp += int(x)
+	var out := {"xp": xp, "adjusted": xp, "rating": "none", "thresholds": {}}
+	if party.is_empty() or foes.is_empty():
+		return out
+	var names: Array = ["low", "moderate", "high"] if edition == "2024" else ["easy", "medium", "hard", "deadly"]
+	var table: Array = core().get("encounter_budget_2024" if edition == "2024" else "encounter_thresholds", [])
+	var sums := []
+	sums.resize(names.size())
+	sums.fill(0)
+	for lvl: Variant in party:
+		var row: Array = table[clampi(int(lvl), 1, table.size()) - 1] if not table.is_empty() else []
+		for i in mini(row.size(), names.size()):
+			sums[i] = int(sums[i]) + int(row[i])
+	var adjusted := float(xp)
+	if edition != "2024":
+		var steps: Array = core().get("encounter_multipliers", [[1, 1]])
+		var at := 0
+		for i in steps.size():
+			if foes.size() >= int(steps[i][0]):
+				at = i
+		if party.size() < 3:
+			at = mini(at + 1, steps.size() - 1)
+		elif party.size() >= 6:
+			at = maxi(at - 1, 0)
+		adjusted = xp * float(steps[at][1])
+		if party.size() < 3 and at == steps.size() - 1 and foes.size() >= int(steps[at][0]):
+			adjusted = xp * 5.0  # one step beyond the table's last
+	out.adjusted = int(adjusted)
+	var rating := "trivial" if edition != "2024" else "below low"
+	for i in names.size():
+		out.thresholds[names[i]] = int(sums[i])
+		if adjusted >= int(sums[i]):
+			rating = names[i]
+	out.rating = rating
+	return out
+
+
 ## "xp" or "milestone" (the world's house rule).
 static func levelling(settings: Dictionary) -> String:
 	return str((settings_of(settings).house_rules as Dictionary).get("levelling", "xp"))

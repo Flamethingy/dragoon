@@ -118,5 +118,9 @@
   "levelling": {"label": "Levelling", "options": {"xp": "Experience points (XP for defeated creatures)", "milestone": "Milestones (the DM says when)"}, "default": "xp"}},
  "subclass_levels": {"cleric": 1, "sorcerer": 1, "warlock": 1, "druid": 2, "wizard": 2, "default": 3},
  "asi_levels": {"fighter": [4, 6, 8, 12, 14, 16, 19], "rogue": [4, 8, 10, 12, 16, 19], "default": [4, 8, 12, 16, 19]},
- "attunement_max": 3
+ "attunement_max": 3,
+ "encounter_budget_2024": [[50, 75, 100], [100, 150, 200], [150, 225, 400], [250, 375, 500], [500, 750, 1100], [600, 1000, 1400],
+  [750, 1300, 1700], [1000, 1700, 2100], [1300, 2000, 2600], [1600, 2300, 3100], [1900, 2900, 4100], [2200, 3700, 4700],
+  [2600, 4200, 5400], [2900, 4900, 6200], [3300, 5400, 7800], [3800, 6100, 9800], [4500, 7200, 11700], [5000, 8700, 14200],
+  [5500, 10700, 17200], [6400, 13200, 22000]]
 }

@@ -98,10 +98,15 @@ func _init() -> void:
 	var seen := []
 	bar.cursor_changed.connect(func(at: int) -> void: seen.append(at))
 	line.scrub_to(line.x_of(a.at) + 2)
-	_check(not seen.is_empty() and int(seen.back()) == int(a.at) and bar.now_button.visible, "scrubbing snaps to a box and shows Now (%s)" % [seen])
+	_check(not seen.is_empty() and int(seen.back()) == int(a.at), "scrubbing snaps to a box (%s)" % [seen])
 	_check(bar.when_label.text.begins_with("looking back"), "the head says we look back (%s)" % bar.when_label.text)
-	bar.now_button.pressed.emit()
-	_check(int(seen.back()) == -1 and not bar.now_button.visible, "Now goes back to the present")
+	var dbl := InputEventMouseButton.new()
+	dbl.button_index = MOUSE_BUTTON_LEFT
+	dbl.pressed = true
+	dbl.double_click = true
+	dbl.position = line._p(line.x_of(a.at) + 40, line._line_y())
+	line._gui_input(dbl)
+	_check(int(seen.back()) == -1 and line.cursor_at == -1, "a double click goes back to now")
 	var asked := []
 	bar.list_requested.connect(func(ids: Array) -> void: asked.append(ids))
 	line.list_requested.emit(b)
@@ -125,7 +130,7 @@ func _init() -> void:
 	_check(line.cursor_at == int(b2.at), "let go on a box: that box")
 	line.set_cursor(-1)
 
-	# the DM drags into the future: time passes
+	# a click moves the black cursor at once; press and hold moves the orange current time (DM)
 	bar.dm = true
 	line.can_extend = true
 	bar.time_requested.connect(func(minutes: int, reason: String) -> void: dm.advance_clock(minutes, reason))
@@ -133,9 +138,21 @@ func _init() -> void:
 	var clock := log.day * 1440 + maxi(log.time, 0)
 	line.span = 4 * 3600.0
 	line.view_from = float(line.now_at()) - 3600.0
-	line.drag_to(line.x_of(float(line.now_at()) + 3600.0))
-	_check(line.future_at > 0 and line.cursor_at == -1 and line.future_minutes() == 60, "past now the DM drags into the future (+%d min)" % line.future_minutes())
-	line.let_go(line.x_of(float(line.now_at()) + 3600.0))
+	var nu := line.x_of(float(line.now_at()))
+	_mouse(line, true, nu - 30)
+	_mouse(line, false, nu - 30)
+	_check(line.cursor_at >= 0 and not line.now_drag, "a click in the past: the black cursor goes there")
+	_mouse(line, true, nu - 30)
+	_motion(line, nu + 200)
+	_check(line.cursor_at == -1 and not line.now_drag and line.future_minutes() == 0, "dragging stops at now (no future without holding)")
+	_mouse(line, false, nu + 200)
+	_check(log.day * 1440 + log.time == clock, "and no time passes")
+	_mouse(line, true, nu)
+	line.hold(line._press_id)
+	_check(line.now_drag, "held a second: the current time is picked up")
+	_motion(line, line.x_of(float(line.now_at()) + 3600.0))
+	_check(line.future_minutes() == 60, "moved on an hour (+%d min)" % line.future_minutes())
+	_mouse(line, false, line.x_of(float(line.now_at()) + 3600.0))
 	await _frames(5)
 	_check(log.day * 1440 + log.time == clock + 60, "let go: an hour passes")
 	_check((dm.timeline_sync.data.moments as Array).size() == boxes, "no box yet: nothing happened (%d -> %d)" % [boxes, (dm.timeline_sync.data.moments as Array).size()])
@@ -143,10 +160,30 @@ func _init() -> void:
 	log.move_token(BORIN, dm.grid.map_id, Vector2i(3, 1), Vector2i(4, 1))
 	await _frames(5)
 	_check((dm.timeline_sync.data.moments as Array).size() == boxes + 1, "something happens: a new box")
+	_mouse(line, true, nu)
+	var late := line._press_id
+	_motion(line, nu + 20)
+	line.hold(late)
+	_check(not line.now_drag, "moved before the second is up: no hold")
+	_mouse(line, false, nu + 20)
+	# held and moved back: split the timeline (asked first)
+	var splits := []
+	bar.rewind_requested.connect(func(upto: int, minutes: int) -> void: splits.append([upto, minutes]))
+	line.view_from = float(line.now_at()) - 3 * 3600.0
+	var back_to: Dictionary = line.moments()[line.moments().size() - 2]
+	_mouse(line, true, line.x_of(float(line.now_at())))
+	line.hold(line._press_id)
+	_motion(line, line.x_of(float(back_to.at) + 600.0))
+	_mouse(line, false, line.x_of(float(back_to.at) + 600.0))
+	_check(bar.confirm.visible and bar.confirm.dialog_text.begins_with("Split the timeline"), "back in time: the DM is asked first (%s)" % bar.confirm.dialog_text)
+	bar.confirm.confirmed.emit()
+	_check(splits.size() == 1 and int(splits[0][0]) == int(back_to.last_id) and int(splits[0][1]) == 10, "yes: cut after that moment, the current time 10 min later (%s)" % [splits])
+	bar.confirm.hide()
 	line.can_extend = false
-	line.drag_to(line.x_of(float(line.now_at()) + 3600.0))
-	_check(line.future_at == -1 and line.cursor_at == -1, "players stop at now")
-	line.let_go(0)
+	_mouse(line, true, nu)
+	line.hold(line._press_id)
+	_check(not line.now_drag, "players can't hold the current time")
+	_mouse(line, false, nu)
 
 	# docked at a side: bottom to top
 	line.size = Vector2(300, 900)
@@ -191,6 +228,20 @@ func _until(done: Callable, frames := 400) -> bool:
 func _frames(n: int) -> void:
 	for i in n:
 		await process_frame
+
+
+func _mouse(line: TimelineLine, down: bool, u: float) -> void:
+	var e := InputEventMouseButton.new()
+	e.button_index = MOUSE_BUTTON_LEFT
+	e.pressed = down
+	e.position = line._p(u, line._line_y())
+	line._gui_input(e)
+
+
+func _motion(line: TimelineLine, u: float) -> void:
+	var e := InputEventMouseMotion.new()
+	e.position = line._p(u, line._line_y())
+	line._gui_input(e)
 
 
 func _check(ok: bool, what: String) -> void:

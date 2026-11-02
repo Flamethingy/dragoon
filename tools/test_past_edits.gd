@@ -121,7 +121,7 @@ func _init() -> void:
 	_check(int(hit.get("rewind", 0)) == int(rw.id), "the faded box belongs to the set-back")
 	var ms := bar.line.moments()
 	bar.line.set_cursor(int(ms[0].at))
-	_check(bar.back_button.visible, "looking back, the DM gets Set back to here")
+	_check(bar.split_at(int(ms[0].at) + 1) == ms[0] and bar.split_at(int(ms[0].at) - 1).is_empty(), "a split keeps the moment before it (none before everything)")
 	dm.look_back(-1)
 
 	# restore

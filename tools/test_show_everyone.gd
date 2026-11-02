@@ -49,7 +49,7 @@ func _init() -> void:
 	_check(bob.grid.is_past() and bob.grid.past[BORIN].get_meta("cell") == start + Vector2i(2, 0), "Bob's table shows the DM's moment")
 	_check(bbar.line.cursor_at == int(m.at), "his cursor sits where the DM's is (%d / %d)" % [bbar.line.cursor_at, int(m.at)])
 	_check(bbar.when_label.text.begins_with("The DM is showing"), "with a hint (%s)" % bbar.when_label.text)
-	_check(not bbar.now_button.visible and bob.grid.locked, "no Now for him, and he can't act")
+	_check(bob.grid.locked, "he can't act")
 
 	# he can't scrub away
 	bob.look_back(0)

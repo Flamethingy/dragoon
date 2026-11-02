@@ -6,15 +6,18 @@ extends Control
 ## of its map (two fights on two maps at once stay apart).
 ## Laid out along "u" (time) and across "v": left to right when the bar is wide, bottom to
 ## top when it is tall (docked at a side; Nico 2026-11-02). Text stays upright.
-## Wheel: zoom around the mouse; right or middle drag (or Shift+wheel): pan. Left drag moves
-## the cursor freely (the table follows in real time) and it snaps to the nearest box when let
-## go; past now it is now, or for the DM (can_extend) the future: letting go there passes that
-## much time. Hovering a box shows what changed; right click on a box asks for its events.
+## Wheel: zoom around the mouse; right or middle drag (or Shift+wheel): pan. Left click or
+## drag moves the black cursor at once (the table follows in real time; it stays where let go,
+## and stops at now). Nico 2026-11-02: press and hold a second (the DM, can_extend) and the
+## orange triangle, the current time, moves instead: let go later on, that much time passes;
+## earlier, the DM is asked to split the timeline there. A double click goes back to now.
+## Hovering a box shows what changed; right click on a box asks for its events.
 
 signal cursor_moved(at: int)  ## -1 = now (live)
 signal list_requested(moment: Dictionary)
 signal restore_requested(rewind_id: int, moments: int)  ## right click on a cut-off branch (DM, TASK-86)
-signal future_requested(minutes: int)  ## DM let go of the cursor in the future: pass this much time
+signal future_requested(minutes: int)  ## DM let go of the current time later on: pass this much time
+signal split_requested(at: int)  ## DM let go of the current time in the past: split the timeline there (asks first)
 
 const MARGIN := 18.0
 const BOX := Vector2(12, 18)  ## along, across
@@ -27,6 +30,8 @@ const NOW_COLOR := Color(0.9, 0.5, 0.1)
 ## Steps the future snaps to (minutes), the finest one at least FUTURE_PX pixels long.
 const FUTURE_STEPS := [1, 5, 10, 15, 30, 60, 120, 240, 480, 1440, 10080]
 const FUTURE_PX := 10.0
+const HOLD := 1.0  ## seconds pressed without moving: the current time is picked up
+const MOVE_PX := 4.0  ## a press that moves this far is a drag of the cursor
 
 var ink := Color(0.3, 0.2, 0.16)  ## the theme's text colour (set in _ready)
 
@@ -37,7 +42,11 @@ var span := 3600.0  ## seconds along the line
 var cursor_at := -1  ## seconds, -1 = now
 var cursor_locked := false  ## the DM is showing everyone a moment (TASK-84): no scrubbing
 var can_extend := false  ## the DM: dragging past now goes into the future (passes time)
-var future_at := -1  ## while dragging into the future: that time in seconds
+var future_at := -1  ## while the current time is held: where it would go, in seconds
+var now_drag := false  ## the DM holds the current time (the orange triangle)
+var _press_pos := Vector2.ZERO
+var _moved := false
+var _press_id := 0
 var _pan_from := Vector2.ZERO
 var _pan_view := 0.0
 var _panning := false
@@ -215,9 +224,10 @@ func _draw() -> void:
 	_draw_branches(y)
 	# the current time: an orange triangle (Nico 2026-11-02); dragged into the future it goes
 	# along, with how much time that is. Looking back: a black one at the cursor.
-	var nu := x_of(float(future_at)) if future_at >= 0 else _now_u()
-	if future_at >= 0:
-		var text := "+" + duration_text(future_minutes())
+	var nu := x_of(float(now_at() + future_minutes() * 60)) if now_drag else _now_u()
+	if now_drag:
+		var fm := future_minutes()
+		var text := ("+" + duration_text(fm)) if fm >= 0 else ("−%s · split here?" % duration_text(-fm))
 		var at := Vector2(nu + 8, y - 8) if not vertical() else _p(nu, y + 16) + Vector2(0, 4)
 		draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs + 1, NOW_COLOR)
 	draw_colored_polygon(_triangle(nu, y), NOW_COLOR)
@@ -378,11 +388,25 @@ func _gui_input(event: InputEvent) -> void:
 				_panning = false
 			accept_event()
 		elif b.button_index == MOUSE_BUTTON_LEFT:
-			if b.pressed and not cursor_locked:
+			if b.pressed and b.double_click and not cursor_locked:
+				_press_id += 1  # no hold
+				_scrubbing = false
+				now_drag = false
+				future_at = -1
+				set_cursor(-1)
+			elif b.pressed and not cursor_locked:
 				_scrubbing = true
-				drag_to(at.x)
+				_moved = false
+				_press_pos = b.position
+				_press_id += 1
+				if can_extend and is_inside_tree():
+					var id := _press_id
+					get_tree().create_timer(HOLD).timeout.connect(func() -> void: hold(id))
 			elif not b.pressed and _scrubbing:
 				_scrubbing = false
+				_press_id += 1
+				if not now_drag and not _moved:
+					drag_to(at.x)  # a click: the cursor goes there
 				let_go(at.x)
 			accept_event()
 	elif event is InputEventMouseMotion:
@@ -392,8 +416,32 @@ func _gui_input(event: InputEvent) -> void:
 			queue_redraw()
 			accept_event()
 		elif _scrubbing:
-			drag_to(_uv(mm.position).x)
+			if now_drag:
+				drag_now(_uv(mm.position).x)
+			elif _moved or mm.position.distance_to(_press_pos) >= MOVE_PX:
+				_moved = true
+				_press_id += 1  # moving: no hold
+				drag_to(_uv(mm.position).x)
 			accept_event()
+
+
+## Held a second without moving (press `id`): the DM picks up the current time there.
+func hold(id: int) -> void:
+	if id != _press_id or not _scrubbing or _moved or not can_extend:
+		return
+	now_drag = true
+	set_cursor(-1)  # the table is live while the current time moves
+	drag_now(_uv(_press_pos).x)
+
+
+## The DM moves the current time (held): to `u`, not before the first moment.
+func drag_now(u: float) -> void:
+	var ms := moments()
+	var at := int(at_of(u))
+	if not ms.is_empty():
+		at = maxi(at, int(ms[0].at))
+	future_at = at
+	queue_redraw()
 
 
 ## Zooms by `factor` (< 1: in) keeping the time at `u` where it is.
@@ -405,15 +453,11 @@ func zoom(factor: float, u: float) -> void:
 
 
 ## While dragging: the cursor follows the mouse freely (the table shows the time between two
-## moments). Past now: now, or for the DM the future.
+## moments). Past now: now.
 func drag_to(u: float) -> void:
 	var ms := moments()
 	var at := int(at_of(u))
-	future_at = -1
 	if ms.is_empty() or at >= now_at():
-		if can_extend and not ms.is_empty() and at > now_at() and future_minutes_at(at) > 0:
-			future_at = at
-			queue_redraw()
 		set_cursor(-1)
 		return
 	set_cursor(maxi(at, int(ms[0].at) - 1))
@@ -422,13 +466,16 @@ func drag_to(u: float) -> void:
 ## Let go: in the future, that is the new current time (DM); in the past the cursor stays where
 ## it is let go (Nico 2026-11-02: no snapping back), on a box: that box.
 func let_go(u: float) -> void:
-	if future_at >= 0:
+	if now_drag:
 		var minutes := future_minutes()
+		now_drag = false
 		future_at = -1
 		queue_redraw()
 		set_cursor(-1)
 		if minutes > 0:
 			future_requested.emit(minutes)
+		elif minutes < 0:
+			split_requested.emit(now_at() + minutes * 60)
 		return
 	if cursor_at >= 0 and box_at(u) >= 0:
 		scrub_to(u)
@@ -436,7 +483,7 @@ func let_go(u: float) -> void:
 
 ## The minutes the future cursor stands for, snapped to a step the zoom can show.
 func future_minutes() -> int:
-	return future_minutes_at(future_at) if future_at >= 0 else 0
+	return future_minutes_at(future_at) if now_drag else 0
 
 
 func future_minutes_at(at: int) -> int:
@@ -447,7 +494,12 @@ func future_minutes_at(at: int) -> int:
 		if float(s) / per_px >= FUTURE_PX:
 			step = s
 			break
-	return maxi(int(roundf(raw / step)), 1 if raw > 0 else 0) * step  # just past now: one step
+	var n := int(roundf(raw / step))
+	if raw > 0:
+		n = maxi(n, 1)  # just past now: one step
+	elif raw < 0:
+		n = mini(n, -1)
+	return n * step
 
 
 ## Moves the cursor to the box at `u` (or, `nearest`, the box closest to that time); past the

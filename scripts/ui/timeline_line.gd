@@ -213,18 +213,20 @@ func _draw() -> void:
 			var w := BOX.x / maps.size()
 			draw_rect(_rect(u - BOX.x * 0.5 + w * i, y + BOX.y * 0.5 - 4, w, 4), map_color(str(maps[i])))
 	_draw_branches(y)
-	# now, the future being dragged, and the cursor (a triangle beside the line)
-	var nu := _now_u()
-	draw_line(_p(nu, y - 13), _p(nu, y + 13), NOW_COLOR, 2.0)
-	var cu := x_of(float(cursor_at)) if cursor_at >= 0 else nu
+	# the current time: an orange triangle (Nico 2026-11-02); dragged into the future it goes
+	# along, with how much time that is. Looking back: a black one at the cursor.
+	var nu := x_of(float(future_at)) if future_at >= 0 else _now_u()
 	if future_at >= 0:
-		cu = x_of(float(future_at))
-		draw_dashed_line(_p(nu, y), _p(cu, y), NOW_COLOR, 3.0, 5.0)
 		var text := "+" + duration_text(future_minutes())
-		var at := Vector2(cu + 8, y - 8) if not vertical() else _p(cu, y + 16) + Vector2(0, 4)
+		var at := Vector2(nu + 8, y - 8) if not vertical() else _p(nu, y + 16) + Vector2(0, 4)
 		draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs + 1, NOW_COLOR)
-	var tri := PackedVector2Array([_p(cu, y + 11), _p(cu - 6, y + 20), _p(cu + 6, y + 20)])
-	draw_colored_polygon(tri, NOW_COLOR if future_at >= 0 else ink)
+	draw_colored_polygon(_triangle(nu, y), NOW_COLOR)
+	if cursor_at >= 0:
+		draw_colored_polygon(_triangle(x_of(float(cursor_at)), y), ink)
+
+
+func _triangle(u: float, y: float) -> PackedVector2Array:
+	return PackedVector2Array([_p(u, y + 11), _p(u - 6, y + 20), _p(u + 6, y + 20)])
 
 
 ## Cut-off branches (TASK-86): faded small boxes beside the line, from where it was set back.
@@ -417,7 +419,8 @@ func drag_to(u: float) -> void:
 	set_cursor(maxi(at, int(ms[0].at) - 1))
 
 
-## Let go: in the future, that much time passes (DM); else the cursor snaps to the nearest box.
+## Let go: in the future, that is the new current time (DM); in the past the cursor stays where
+## it is let go (Nico 2026-11-02: no snapping back), on a box: that box.
 func let_go(u: float) -> void:
 	if future_at >= 0:
 		var minutes := future_minutes()
@@ -427,8 +430,8 @@ func let_go(u: float) -> void:
 		if minutes > 0:
 			future_requested.emit(minutes)
 		return
-	if cursor_at >= 0:
-		scrub_to(x_of(float(cursor_at)) if box_at(u) < 0 else u, true)
+	if cursor_at >= 0 and box_at(u) >= 0:
+		scrub_to(u)
 
 
 ## The minutes the future cursor stands for, snapped to a step the zoom can show.
@@ -444,7 +447,7 @@ func future_minutes_at(at: int) -> int:
 		if float(s) / per_px >= FUTURE_PX:
 			step = s
 			break
-	return int(roundf(raw / step)) * step
+	return maxi(int(roundf(raw / step)), 1 if raw > 0 else 0) * step  # just past now: one step
 
 
 ## Moves the cursor to the box at `u` (or, `nearest`, the box closest to that time); past the

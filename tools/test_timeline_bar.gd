@@ -119,7 +119,10 @@ func _init() -> void:
 	var seg := bar.segment()
 	_check(int(seg.upto) == int(a2.last_id) and int(seg.toward) == int(b2.last_id) and absf(float(seg.f) - 0.5) < 0.05, "it stands halfway between two moments (%s)" % [seg])
 	line.let_go(line.x_of(mid + (float(b2.at) - float(a2.at)) * 0.3))
-	_check(line.cursor_at == int(b2.at) or line.cursor_at == int(a2.at), "let go: it snaps to the nearest box (%d)" % line.cursor_at)
+	var dropped := int(mid)  # where the last drag left it
+	_check(line.cursor_at != int(b2.at) and line.cursor_at != int(a2.at) and absi(line.cursor_at - dropped) <= 1, "let go: it stays there (%d / %d)" % [line.cursor_at, dropped])
+	line.let_go(line.x_of(float(b2.at)))
+	_check(line.cursor_at == int(b2.at), "let go on a box: that box")
 	line.set_cursor(-1)
 
 	# the DM drags into the future: time passes

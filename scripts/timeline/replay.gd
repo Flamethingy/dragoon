@@ -70,11 +70,15 @@ static func apply(s: Dictionary, e: Dictionary) -> void:
 				s["exhaustion"] = clampi(int(d.get("level", 1)), 1, 6)
 			if d.get("duration") is Dictionary:  # optional (Phase 2 ends it)
 				_dict(s, "condition_durations")[cond] = d.duration
+			if cond == "concentrating":  # TASK-59: on which spell
+				s["concentration"] = {"spell": str(d.get("spell", "")), "name": str(d.get("name", ""))}
 		"condition.removed":
 			var cond := str(d.get("condition", ""))
 			_list(s, "conditions").erase(cond)
 			if cond == "exhaustion":
 				s.erase("exhaustion")
+			if cond == "concentrating":
+				s.erase("concentration")
 			if s.get("condition_durations") is Dictionary:
 				(s.condition_durations as Dictionary).erase(cond)
 		"resource.used":

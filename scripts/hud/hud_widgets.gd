@@ -201,6 +201,17 @@ static func build(kind: String, s: Dictionary, hud: CharacterHud, size: Vector2,
 		_:
 			body = Label.new()
 	panel.add_child(body)
+	if kind == "portrait" and s.get("concentration") is Dictionary:  # TASK-59
+		var conc := Label.new()
+		conc.name = "Concentration"
+		conc.text = "◆ %s" % str(s.concentration.get("name", "concentrating"))
+		conc.tooltip_text = "Concentrating on %s" % str(s.concentration.get("name", ""))
+		conc.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+		conc.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		conc.add_theme_font_size_override("font_size", 12)
+		conc.add_theme_color_override("font_color", UISkin.WINE)
+		conc.mouse_filter = Control.MOUSE_FILTER_PASS
+		panel.add_child(conc)
 	return _hide_parts(panel, it)
 
 

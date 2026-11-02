@@ -79,6 +79,10 @@ func _init() -> void:
 			table.condition_menu_requested.emit(str(meta).substr(5))
 		elif str(meta).begins_with("init:") and table != null:  # an initiative prompt (TASK-58)
 			table.answer_initiative(str(meta).substr(5))
+		elif str(meta).begins_with("conc:") and table != null:  # a concentration save (TASK-59)
+			table.answer_concentration(str(meta).substr(5))
+		elif str(meta).begins_with("endconc:") and table != null:
+			table.end_concentration(str(meta).substr(8), "failed the save")
 		elif str(meta).begins_with("death:") and table != null:  # a death save prompt (TASK-57)
 			table.roll_death_save(str(meta).substr(6))
 		elif str(meta).begins_with("save:") and table != null:  # a save prompt (TASK-55)

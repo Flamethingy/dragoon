@@ -254,6 +254,8 @@ static func _conditions(s: Dictionary) -> String:
 		var lvl := int(s.get("exhaustion", 1))
 		var cond := Rules.condition(id, edition, lvl)
 		var name := str(cond.get("name", id.capitalize())) + (" %d" % lvl if id == "exhaustion" else "")
+		if id == "concentrating" and s.get("concentration") is Dictionary:  # TASK-59: on what
+			name += " (%s)" % str(s.concentration.get("name", ""))
 		var hint := str(cond.get("text", "")).replace("[", "(").replace("]", ")").replace("\"", "'")
 		var color := str(cond.get("color", "#666666")).trim_prefix("#")
 		var bit := "[color=#%s]●[/color] [hint=\"%s\"]%s[/hint]" % [color, hint, Markdown.escape(name)]

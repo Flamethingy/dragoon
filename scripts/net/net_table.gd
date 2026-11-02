@@ -26,6 +26,7 @@ signal sheet_received(ref: String)  ## a sheet I opened arrived or changed (TASK
 signal rolls_changed  ## the roll log got a roll (TASK-12)
 signal entry_imported(entry: Dictionary)
 signal condition_menu_requested(ref: String)
+signal concentration_confirm(ref: String, old_name: String, new_name: String, go: Callable)  ## a second concentration spell (TASK-59)
 signal attack_requested(ref: String, query: String, multi: bool, kind: String)  ## a sheet's attack or save link: pick targets (TASK-54/55)  ## a token's right click, a sheet's or roll card's link (TASK-56)  ## DM: a core entry was copied into the world
 
 const DEFAULT_PORT := 7777
@@ -87,6 +88,7 @@ var _rules := {}  ## the world's rules settings as the host sent them (players)
 var _combat := {}  ## the initiative order as the host sent it (players, TASK-58)
 var _applied := {}  ## host: "<card id>:<target>" -> hp.changed id applied from a card (Assist, TASK-54)
 var _pending_saves := {}  ## host: card id -> the save card waiting for players' saves (TASK-55)
+var _pending_conc := {}  ## host: ref -> DC of the concentration save it still has to make (TASK-59)
 var _catalog := {}  ## kind -> id -> entry of the packages (spells, items), read once (TASK-48)
 
 var _ui: TableUI
@@ -1448,7 +1450,7 @@ func conditions_of(ref: String) -> Dictionary:
 		"exhaustion": int(src.get("exhaustion", 0))}
 
 
-func _handle_condition(sender: int, ref: String, condition: String, on: bool, level: int, duration: Dictionary) -> Dictionary:
+func _handle_condition(sender: int, ref: String, condition: String, on: bool, level: int, duration: Dictionary, extra := {}) -> Dictionary:
 	var sheet := _editable_sheet(sender, ref)
 	var id := condition.to_lower().strip_edges()
 	if sheet.is_empty() or Rules.conditions().get(id) == null:
@@ -1467,11 +1469,15 @@ func _handle_condition(sender: int, ref: String, condition: String, on: bool, le
 		data["level"] = clampi(level, 1, 6)
 	if on and not duration.is_empty():
 		data["duration"] = duration
+	if on:
+		data.merge(extra)
 	var immune := on and Rules.immune_to(sheet, id)
 	if immune:
 		data["immune"] = true
 	var e := event_log.append("condition.applied" if on else "condition.removed", ref, data, _sender_player(sender))
 	_after_change(ref, e)
+	if on and id != "concentrating" and sheet.get("concentration") is Dictionary and _breaks_concentration(id):
+		end_concentration(ref, "%s" % str(Rules.condition(id).name).to_lower())  # TASK-59
 	if immune:  # warn, never block: the DM sees it
 		var warn := _log_entry(e)
 		warn["text"] = "is immune to %s (applied anyway, undo if that was a mistake)" % str(Rules.condition(id).name).to_lower()
@@ -1656,6 +1662,10 @@ func _handle_hp(sender: int, ref: String, delta: int, reason: String, crit := fa
 ## start over). A creature at 0 is defeated: marked dead (the DM can make it Unconscious
 ## instead), skipped in the turn order.
 func _after_hp(ref: String, sheet: Dictionary, before: int, after: int, delta: int, crit: bool) -> void:
+	if delta < 0 and after > 0 and sheet.get("concentration") is Dictionary and automation("concentration") != "off":
+		_concentration_check(ref, -delta)  # TASK-59
+	elif delta < 0 and after == 0 and sheet.get("concentration") is Dictionary:
+		end_concentration(ref, "0 HP")
 	if automation("death_saves") == "off":
 		return
 	var conds: Array = sheet.get("conditions", [])
@@ -1972,6 +1982,143 @@ func _attack_card(player: String, ref: String, sheet: Dictionary, atk: Dictionar
 	return _post_roll(_roll_entry(ev))
 
 
+# --- Concentration (TASK-59) ---------------------------------------------------------------------
+
+## The spell `ref` concentrates on ({spell, name}, {} if none).
+func concentration_of(ref: String) -> Dictionary:
+	var s: Dictionary = sheet_for(Reveal.DM, ref) if is_dm() else sheets.get(ref, {})
+	return s.get("concentration", {}) if s.get("concentration") is Dictionary else {}
+
+
+## `ref` starts concentrating on `spell` (a ref or a name). Already on another one: that one
+## ends first. `confirm`: on my screen, ask before ending the old one (concentration_confirm).
+func concentrate(ref: String, spell: String, name := "", confirm := false) -> void:
+	var old := concentration_of(ref)
+	var label := name if name != "" else HudWidgets._name_of(spell)
+	if confirm and not old.is_empty() and str(old.spell) != spell:
+		concentration_confirm.emit(ref, str(old.get("name", old.spell)), label, func() -> void: concentrate(ref, spell, name, false))
+		return
+	if is_dm():
+		_handle_concentrate(1, ref, spell, label)
+	elif is_online():
+		request_concentrate.rpc_id(1, ref, spell, label)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_concentrate(ref: String, spell: String, name: String) -> void:
+	if is_dm():
+		_handle_concentrate(multiplayer.get_remote_sender_id(), ref, spell.left(100), name.left(100))
+
+
+func _handle_concentrate(sender: int, ref: String, spell: String, name: String) -> Dictionary:
+	if automation("concentration") == "off" or _editable_sheet(sender, ref).is_empty():
+		return {}
+	var old := concentration_of(ref)
+	if not old.is_empty():
+		if str(old.spell) == spell:
+			return {}
+		end_concentration(ref, "concentrating on %s now" % name)
+	return _handle_condition(1, ref, "concentrating", true, 0, {}, {"spell": spell, "name": name})
+
+
+## Ends `ref`'s concentration: the marker comes off and so do the conditions its spell put
+## on others (their condition.applied carries source {caster, spell}).
+func end_concentration(ref: String, reason := "") -> void:
+	if not is_dm():
+		if is_online():
+			request_end_concentration.rpc_id(1, ref)
+		return
+	var c := concentration_of(ref)
+	if c.is_empty():
+		return
+	_handle_condition(1, ref, "concentrating", false, 0, {})
+	var ended := PackedStringArray()
+	for e: Dictionary in event_log.effective():
+		var src: Variant = e.get("data", {}).get("source")
+		if e.type != "condition.applied" or not src is Dictionary or str(src.get("caster", "")) != ref or str(src.get("spell", "")) != str(c.spell):
+			continue
+		var target := str(e.entity)
+		var cond := str(e.data.get("condition", ""))
+		if cond in (sheet_for(Reveal.DM, target).get("conditions", []) as Array):
+			_handle_condition(1, target, cond, false, 0, {})
+			ended.append("%s no longer %s" % [timeline.name_of(target), cond])
+	_dm_line(ref, "concentration on %s ends%s%s" % [c.get("name", c.spell), " (%s)" % reason if reason != "" else "",
+		" · " + ", ".join(ended) if not ended.is_empty() else ""])
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_end_concentration(ref: String) -> void:
+	if is_dm() and not _editable_sheet(multiplayer.get_remote_sender_id(), ref).is_empty():
+		end_concentration(ref, "ended by its player")
+
+
+## Conditions that end concentration: incapacitated (and what includes it), 0 HP's unconscious.
+func _breaks_concentration(id: String) -> bool:
+	var flags: Array = Rules.condition(id, str(rules_settings().edition)).get("flags", [])
+	return "incapacitated" in flags or "breaks_concentration" in flags or id in ["incapacitated", "paralyzed", "petrified", "stunned", "unconscious", "dead"]
+
+
+## Damage on a concentrating creature: a CON save, DC max(10, half the damage). The DM's
+## creatures roll at once; a player's gets a prompt (the DM can roll for them).
+func _concentration_check(ref: String, damage: int) -> void:
+	var dc := maxi(10, damage / 2)
+	if str(rules_settings().edition) == "2024":
+		dc = mini(dc, 30)
+	if (owners.get(ref, []) as Array).is_empty():
+		_concentration_save(ref, dc, Reveal.DM)
+		return
+	_pending_conc[ref] = maxi(dc, int(_pending_conc.get(ref, 0)))
+	var prompt := {"id": 0, "by": Reveal.DM, "who": timeline.name_of(ref), "ref": ref, "results": [], "hidden": false,
+		"action": "conc_prompt", "text": "CON save DC %d to keep concentrating" % int(_pending_conc[ref])}
+	for peer_id: int in peers:
+		if str(peers[peer_id]) in (owners.get(ref, []) as Array):
+			roll_added.rpc_id(peer_id, prompt)
+	var mine := prompt.duplicate()
+	mine["hidden"] = true
+	_add_roll(mine)
+
+
+## The concentration save prompt's link: the player (or the DM for them) rolls it.
+func answer_concentration(ref: String) -> void:
+	if is_dm():
+		if _pending_conc.has(ref):
+			_concentration_save(ref, int(_pending_conc[ref]), Reveal.DM)
+	elif is_online():
+		request_concentration_save.rpc_id(1, ref)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_concentration_save(ref: String) -> void:
+	var player := _sender_player(multiplayer.get_remote_sender_id())
+	if is_dm() and _pending_conc.has(ref) and owns(player, ref):
+		_concentration_save(ref, int(_pending_conc[ref]), player)
+
+
+func _concentration_save(ref: String, dc: int, by: String) -> Dictionary:
+	_pending_conc.erase(ref)
+	var s := sheet_for(Reveal.DM, ref)
+	var c := concentration_of(ref)
+	if c.is_empty():
+		return {}
+	var asked := Dice.resolve(s, "con save", {}, rules_settings())
+	var r := Dice.roll(str(asked[0].formula) if not asked.is_empty() else "1d20", rng)
+	r["label"] = "Concentration (DC %d)" % dc
+	var kept := int(r.total) >= dc
+	var data := {"roll": "Concentration save", "formula": r.formula, "result": r.total, "dice": r.dice, "results": [r], "who": str(s.get("name", "")),
+		"hidden": false, "concentration": {"dc": dc, "kept": kept, "spell": c.get("name", "")}}
+	var ev := event_log.append("dice.rolled", ref, data, by)
+	var entry := _roll_entry(ev)
+	entry["action"] = "concentration"
+	if kept:
+		entry["text"] = "keeps concentrating on %s" % c.get("name", "")
+	elif automation("concentration") == "auto":
+		end_concentration(ref, "failed the save")
+		entry["text"] = "loses concentration on %s" % c.get("name", "")
+	else:
+		entry["text"] = "failed: [url=endconc:%s]end concentration on %s[/url]" % [ref, Markdown.escape(str(c.get("name", "")))]
+	return _post_roll(entry)
+
+
 # --- Save-based actions (TASK-55) -------------------------------------------------------------
 
 ## A save-based feature ("Acid Breath") or spell ("spells/burning-hands") of `ref` at
@@ -2038,6 +2185,9 @@ func _handle_save_action(sender: int, ref: String, what: String, targets: Array,
 	var cover := Rules.cover_bonus(str(opts.get("cover", ""))) if fx.ability == "dex" else 0
 	var card := {"name": fx.name, "ability": fx.ability, "dc": fx.dc, "half": fx.half, "damage": rolls, "conditions": fx.conditions,
 		"duration": fx.duration, "cover": cover, "targets": []}
+	if bool(entry.get("concentration", false)):  # TASK-59: the caster concentrates, its conditions are linked
+		_handle_concentrate(1, ref, what, str(fx.name))
+		card["source"] = {"caster": ref, "spell": what}
 	var waiting := []
 	for t: Variant in targets:
 		var tref := str(t)
@@ -2086,7 +2236,7 @@ func _save_row(tref: String, card: Dictionary, by := Reveal.DM) -> Dictionary:
 		var done := []
 		for c: Variant in card.conditions:
 			if automation("conditions") == "auto":
-				var e := _handle_condition(1, tref, str(c), true, 1, card.get("duration", {}))
+				var e := _handle_condition(1, tref, str(c), true, 1, card.get("duration", {}), {"source": card.source} if card.has("source") else {})
 				if not e.is_empty():
 					done.append(int(e.id))
 		row["conditions"] = card.conditions
@@ -2558,6 +2708,10 @@ static func roll_bbcode(entry: Dictionary, names := {}) -> String:
 		lines = _attack_lines(entry)
 	elif entry.get("save") is Dictionary:  # TASK-55
 		lines = _save_lines(entry)
+	if str(entry.get("action", "")) == "conc_prompt":  # TASK-59
+		lines.insert(0, "[b][url=conc:%s]%s · Roll[/url][/b]" % [entry.get("ref", ""), Markdown.escape(str(entry.get("text", "")))])
+	elif str(entry.get("action", "")) == "concentration":
+		lines.append("[i]%s[/i]" % str(entry.get("text", "")))
 	if str(entry.get("action", "")) == "death_prompt":  # TASK-57
 		lines.insert(0, "[b][url=death:%s]Death save · Roll[/url][/b]" % entry.get("ref", ""))
 	elif str(entry.get("action", "")) == "death_save":

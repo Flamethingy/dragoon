@@ -108,6 +108,7 @@ func _ready() -> void:
 	table.rolls_changed.connect(_show_rolls)
 	table.condition_menu_requested.connect(func(ref: String) -> void: open_condition_menu(ref))
 	table.attack_requested.connect(begin_attack)
+	table.concentration_confirm.connect(confirm_concentration)
 	table.grid.token_clicked.connect(_on_target_clicked)
 	RollTables.resolver = func(id: String) -> Dictionary: return table.tables.get(id, {})
 	RollTables.roller = func(id: String, hidden: bool) -> void: table.roll_table(id, hidden and table.is_dm())
@@ -317,6 +318,24 @@ func _fill_picker() -> void:
 			l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			box.add_child(l)
 		_picker_cards.add_child(card)
+
+
+# --- Concentration (TASK-59) ---------------------------------------------------------------------
+
+var concentration_dialog: ConfirmationDialog
+
+## A second concentration spell: ends the first one, after a yes.
+func confirm_concentration(ref: String, old_name: String, new_name: String, go: Callable) -> void:
+	if concentration_dialog != null:
+		concentration_dialog.queue_free()
+	concentration_dialog = ConfirmationDialog.new()
+	concentration_dialog.name = "ConcentrationConfirm"
+	concentration_dialog.title = "Concentration"
+	concentration_dialog.dialog_text = "%s is concentrating on %s.\nCasting %s ends it. Go on?" % [table.timeline.name_of(ref) if table.timeline != null else ref, old_name, new_name]
+	concentration_dialog.ok_button_text = "End %s" % old_name
+	concentration_dialog.confirmed.connect(func() -> void: go.call())
+	_root.add_child(concentration_dialog)
+	concentration_dialog.popup_centered()
 
 
 # --- Attacks (TASK-54) -----------------------------------------------------------------------

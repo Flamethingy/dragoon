@@ -6,3 +6,6 @@ __pycache__/
 
 # Content packages (copyrighted book data, never commit)
 /data/
+
+# Kind-migration markers (written when a folder is opened; not content)
+.kinds2

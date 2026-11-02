@@ -1,10 +1,11 @@
 ---
 id: TASK-55
 title: 'Rules P1: save-based actions (DC, half on save, bulk saves, save prompts)'
-status: To Do
+status: Done
 assignee:
   - Mochi
 created_date: '2026-11-02 00:44'
+updated_date: '2026-11-02 01:44'
 labels:
   - rules
   - phase-1
@@ -28,7 +29,27 @@ Use the parsed `feature.save` ({ability, dc}), which is unused so far.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Save-based features roll saves per target (bulk for creatures, prompt for players)
-- [ ] #2 Fail/success damage incl. half on save applied as events
-- [ ] #3 DC comes from feature data or the caster's spell DC
+- [x] #1 Save-based features roll saves per target (bulk for creatures, prompt for players)
+- [x] #2 Fail/success damage incl. half on save applied as events
+- [x] #3 DC comes from feature data or the caster's spell DC
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Design decisions (Mochi):
+- Damage is rolled once for all targets (5e rule), each target saves on its own.
+- "The DM can roll for them after a timeout": no automatic timer. The DM sees "waiting for the DEX save DC 13 · roll for them" and decides when (never decide for the table automatically).
+- A player can only answer their own creature's prompt, and only once; later answers are ignored.
+- Natural 20/1 mean nothing special on saves (RAW).
+- Conditions named in the text are put on after a failed save when conditions automation is Auto (Assist just lists them on the card), with the parsed duration ("for 1 minute" = 10 rounds, "until the end of its next turn" = 1 round, ends turn_end).
+- Cover on the bar adds +2/+5 to Dex saves only.
+- Undo on the card undoes the damage and the conditions it applied.
+- A player's late answer becomes its own small card ("Fire Breath: DEX save") instead of rewriting the first card (events are immutable).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Commit a0030ef. Rules.save_effect (ability, DC from feature or caster spell DC, damage, half, conditions, duration). NetTable.save_action/request_save_action, _save_row (bulk saves for the DM's creatures), save prompts for players and DM "roll for them" (answer_save), undo/apply generalised to save cards incl. conditions. Sheet save-action links, attack bar in "save" mode. New suite tools/test_saves.gd; 38 suites green.
+<!-- SECTION:FINAL_SUMMARY:END -->

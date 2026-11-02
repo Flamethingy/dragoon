@@ -1,11 +1,11 @@
 ---
 id: TASK-50
 title: Chat as a dockable window; HUD editor inspector with multi-select
-status: To Do
+status: Done
 assignee:
   - Mochi
 created_date: '2026-11-02 00:35'
-updated_date: '2026-11-02 00:36'
+updated_date: '2026-11-02 00:51'
 labels:
   - ui
 dependencies: []
@@ -22,11 +22,11 @@ Nico, 2026-11-02 00:34:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The chat docks to the left, right or bottom edge, or floats snapped to the grid
-- [ ] #2 The chat pops out into its own OS window; closing that window docks it back
-- [ ] #3 The chat's place is saved per player and stays when the active character changes
-- [ ] #4 An inspector on the right of the editor shows the selected pieces' variant, round, size, name and badge options
-- [ ] #5 Shift + click and box select pick several pieces; the inspector changes their shared attributes, and dragging moves them together
+- [x] #1 The chat docks to the left, right or bottom edge, or floats snapped to the grid
+- [x] #2 The chat pops out into its own OS window; closing that window docks it back
+- [x] #3 The chat's place is saved per player and stays when the active character changes
+- [x] #4 An inspector on the right of the editor shows the selected pieces' variant, round, size, name and badge options
+- [x] #5 Shift + click and box select pick several pieces; the inspector changes their shared attributes, and dragging moves them together
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -52,3 +52,21 @@ Mochi's plan:
 
 Nico, 2026-11-02 00:35: the chat's place is per player. It stays where I put it, whichever character is active, so it is not part of the character's HUD layout. It is saved locally per user, in the user settings, not as an event.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Commit 1ed2730.
+
+**ChatBox**
+- Drag it by the title to dock it left, right or at the bottom. Elsewhere it floats, snapped to the 48×27 grid.
+- Resize from the inner edge or the corner.
+- Pop out puts it in a native window; closing that window docks it back.
+- Its place is saved per player in chat.cfg.
+
+**LayoutEditor**
+- Selection: click, Shift + click, box select; group move; Delete removes.
+- The inspector on the right shows the variant, round, badge, name, size, position and the quick button's ref; values that differ show as "mixed".
+
+Tests: test_character_hud extended; 33 suites pass.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -162,6 +162,14 @@ func add_token_view(info: Dictionary, texture: Texture2D, at: Vector2i) -> void:
 	set_token_facing(id, facing)
 
 
+## Marks a token as an attack's target (TASK-54: a red ring).
+func set_targeted(id: String, on: bool) -> void:
+	if tokens.has(id):
+		var marks := tokens[id].get_node_or_null("Marks") as TokenMarks
+		if marks != null:
+			marks.targeted = on
+
+
 ## The condition marks on a token (TASK-56): a small coloured disc with its short name each.
 func set_token_conditions(id: String, conditions: Array, exhaustion := 0) -> void:
 	if not tokens.has(id):

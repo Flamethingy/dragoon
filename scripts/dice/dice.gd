@@ -194,6 +194,65 @@ static func _resolve(sheet: Dictionary, q: String, features: Dictionary, advanta
 	return []
 
 
+## An attack of the sheet by name (TASK-54): {name, to_hit, damage: [{dice, type}]}, {} if
+## it has none by that name.
+static func attack_of(sheet: Dictionary, name: String, features := {}) -> Dictionary:
+	var q := name.to_lower().strip_edges()
+	for prefix in ["attack with ", "attack ", "hit with "]:
+		q = q.trim_prefix(prefix)
+	var f := _attack_feature(sheet, q, features)
+	if f.is_empty():
+		return {}
+	var a: Dictionary = f.attack
+	var dmg := []
+	for d: Variant in a.get("damage", []):
+		if d is Dictionary and is_formula(str(d.get("dice", ""))):
+			dmg.append({"dice": str(d.dice).replace(" ", ""), "type": str(d.get("type", ""))})
+	return {"name": str(f.get("name", name)), "to_hit": int(a.get("to_hit", 0)), "damage": dmg,
+		"ranged": "ranged" in str(a.get("kind", "")).to_lower()}
+
+
+const _COUNTS := {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "twice": 2, "thrice": 3}
+
+
+## The attacks a Multiattack makes ("two attacks: one with its Bite and one with its
+## Claws" -> ["Bite", "Claws"]; "makes three Scimitar attacks" -> 3x). [] if none.
+static func multiattack(sheet: Dictionary, features := {}) -> Array:
+	var text := ""
+	var attacks := []
+	for key in ["features", "actions", "bonus_actions", "reactions"]:
+		for id: Variant in sheet.get(key, []):
+			var f: Variant = features.get(str(id), {})
+			if not f is Dictionary:
+				continue
+			if str(f.get("name", "")).to_lower().begins_with("multiattack"):
+				text = str(f.get("text", f.get("description", ""))).to_lower()
+			elif f.get("attack") is Dictionary:
+				attacks.append(str(f.get("name", "")))
+	if text == "" or attacks.is_empty():
+		return []
+	var out := []
+	var total_re := RegEx.create_from_string("makes (\\w+) (?:\\w+ )?attacks")
+	for a: String in attacks:
+		var word := a.to_lower().get_slice(" (", 0)
+		var at := text.find(word.trim_suffix("s"))
+		if at < 0:
+			continue
+		var before := text.substr(maxi(0, at - 24), mini(at, 24)).split(" ", false)
+		var count := 1
+		for w in before:
+			if _COUNTS.has(w):
+				count = _COUNTS[w]
+		for i in count:
+			out.append(a)
+	if out.size() == 1:  # "makes two attacks with its Scimitar"
+		var m := total_re.search(text)
+		if m != null and _COUNTS.has(m.get_string(1)):
+			for i in int(_COUNTS[m.get_string(1)]) - 1:
+				out.append(out[0])
+	return out
+
+
 static func _d20_roll(label: String, bonus: int, advantage: int, kind: String) -> Dictionary:
 	return {"label": label, "formula": d20(bonus, advantage), "kind": kind, "bonus": bonus}
 

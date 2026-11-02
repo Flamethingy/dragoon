@@ -17,6 +17,11 @@ var active := false:
 	set(value):
 		active = value
 		queue_redraw()
+## An attack's target (TASK-54): a red ring.
+var targeted := false:
+	set(value):
+		targeted = value
+		queue_redraw()
 ## The conditions on it (TASK-56): [{abbr, color, name}], drawn as small discs along its rim.
 var conditions: Array = []:
 	set(value):
@@ -32,6 +37,8 @@ func set_facing(f: String) -> void:
 func _draw() -> void:
 	if active or selected:  # one ring: orange when active, white when only selected
 		draw_arc(Vector2.ZERO, radius + 4.0, 0, TAU, 48, ACTIVE if active else SELECTED, 4.0, true)
+	if targeted:
+		draw_arc(Vector2.ZERO, radius + 9.0, 0, TAU, 48, Color(0.85, 0.12, 0.1), 3.0, true)
 	_draw_conditions()
 	if facing == "" or not TokenGrid.FACINGS.has(facing):
 		return

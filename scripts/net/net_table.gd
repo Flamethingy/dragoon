@@ -25,7 +25,8 @@ signal accounts_changed  ## names or colors of the accounts changed
 signal sheet_received(ref: String)  ## a sheet I opened arrived or changed (TASK-10)
 signal rolls_changed  ## the roll log got a roll (TASK-12)
 signal entry_imported(entry: Dictionary)
-signal condition_menu_requested(ref: String)  ## a token's right click, a sheet's or roll card's link (TASK-56)  ## DM: a core entry was copied into the world
+signal condition_menu_requested(ref: String)
+signal attack_requested(ref: String, query: String, multi: bool)  ## a sheet's attack link: pick targets (TASK-54)  ## a token's right click, a sheet's or roll card's link (TASK-56)  ## DM: a core entry was copied into the world
 
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
@@ -84,6 +85,7 @@ var _status: ServerStatus.Responder  ## host: answers the start screens' heartbe
 var _requested := {}  ## sha -> true while downloading
 var _rules := {}  ## the world's rules settings as the host sent them (players)
 var _combat := {}  ## the initiative order as the host sent it (players, TASK-58)
+var _applied := {}  ## host: "<card id>:<target>" -> hp.changed id applied from a card (Assist, TASK-54)
 var _catalog := {}  ## kind -> id -> entry of the packages (spells, items), read once (TASK-48)
 
 var _ui: TableUI
@@ -1279,6 +1281,7 @@ func sheet_for(player: String, ref: String) -> Dictionary:
 				if f is Dictionary and f.get("attack") is Dictionary:
 					attacks.append(str(f.get("name", fid)))
 		sheet["_attacks"] = attacks
+		sheet["_multiattack"] = not Dice.multiattack(sheet, features).is_empty()  # TASK-54
 		var refs := {}  # spells and items: name (and level) for the HUD's quick buttons (TASK-48)
 		for v: Variant in sheet.get("spells", []):
 			var e := catalog_entry(str(v))
@@ -1746,6 +1749,135 @@ func _handle_roll(sender: int, query: String, ref: String, hidden: bool) -> Dict
 	return entry
 
 
+# --- Attacks (TASK-54) -------------------------------------------------------------------------
+
+## An attack of `ref` ("Longsword") at `targets` (refs on the map): per target a to-hit roll
+## against its AC (+ cover), natural 20 = crit (the world's crit rule), natural 1 = miss, then
+## damage after resistance / immunity / vulnerability. With damage on Auto (decision 1) it
+## is taken off at once (hp.changed per target, undo on the card); Assist leaves an Apply on
+## the card. `opts`: {advantage: -1/0/1 (else the conditions suggest it), cover: "half" /
+## "three_quarters", multi: true (the creature's Multiattack: its listed attacks in a row)}.
+func attack(ref: String, query: String, targets: Array, opts := {}) -> void:
+	if is_dm():
+		_handle_attack(1, ref, query, targets, opts)
+	elif is_online():
+		request_attack.rpc_id(1, ref, query, targets, opts)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_attack(ref: String, query: String, targets: Array, opts: Dictionary) -> void:
+	if is_dm():
+		_handle_attack(multiplayer.get_remote_sender_id(), ref, query.left(100), targets.slice(0, 12), opts)
+
+
+## Asks the table's UI to pick targets for an attack (a sheet's or the HUD's attack link).
+func begin_attack(ref: String, query: String, multi := false) -> void:
+	attack_requested.emit(ref, query, multi)
+
+
+func _handle_attack(sender: int, ref: String, query: String, targets: Array, opts: Dictionary) -> Array:
+	var player := _sender_player(sender)
+	if player == "" or not may_see_sheet(player, ref):
+		_deny_roll(sender, "that's not your sheet")
+		return []
+	var sheet := sheet_for(Reveal.DM, ref)
+	var features: Dictionary = timeline.entries("features")
+	var names: Array = Dice.multiattack(sheet, features) if bool(opts.get("multi", false)) else [query]
+	var cards := []
+	for n: Variant in names:
+		var atk := Dice.attack_of(sheet, str(n), features)
+		if atk.is_empty():
+			_deny_roll(sender, "%s has no attack \"%s\"" % [sheet.get("name", ref), n])
+			continue
+		cards.append(_attack_card(player, ref, sheet, atk, targets, opts))
+	return cards
+
+
+func _attack_card(player: String, ref: String, sheet: Dictionary, atk: Dictionary, targets: Array, opts: Dictionary) -> Dictionary:
+	var settings := rules_settings()
+	var edition := Rules.edition_of(sheet, settings)
+	var cover := Rules.cover_bonus(str(opts.get("cover", "")))
+	var mode := automation("damage")
+	var rows := []
+	var results := []
+	for t: Variant in targets:
+		var tref := str(t)
+		var ts := sheet_for(Reveal.DM, tref)
+		if ts.is_empty() or tref == ref:
+			continue
+		var adv := int(opts.advantage) if opts.has("advantage") else signi(Rules.suggested_advantage(sheet, "attack", edition) + Rules.suggested_advantage(ts, "attacked", edition))
+		var hit_roll := Dice.roll(Dice.d20(int(atk.to_hit) + Rules.d20_penalty(sheet, edition), adv), rng)
+		var ac := Rules.ac(ts) + cover
+		var crit := str(hit_roll.get("crit", "")) == "20"
+		var hit := crit or (str(hit_roll.get("crit", "")) != "1" and int(hit_roll.total) >= ac)
+		hit_roll["label"] = "%s to hit %s" % [atk.name, timeline.name_of(tref)]
+		results.append(hit_roll)
+		var row := {"ref": tref, "name": timeline.name_of(tref), "ac": ac, "total": int(hit_roll.total), "formula": str(hit_roll.formula),
+			"hit": hit, "crit": crit, "fumble": str(hit_roll.get("crit", "")) == "1", "advantage": adv, "damage": [], "amount": 0}
+		if hit:
+			for d: Dictionary in atk.damage:
+				var f := Rules.crit_formula(str(d.dice), settings) if crit else str(d.dice)
+				var dr := Dice.roll(f, rng)
+				var after := Rules.damage_after(ts, int(dr.total), str(d.type))
+				row.damage.append({"formula": f, "rolled": int(dr.total), "type": str(d.type), "amount": int(after.amount), "note": str(after.note)})
+				row.amount = int(row.amount) + int(after.amount)
+			if mode == "auto" and int(row.amount) > 0:
+				var e := _handle_hp(1, tref, -int(row.amount), atk.name)
+				row["applied"] = int(e.get("id", 0))
+			elif mode == "assist" and int(row.amount) > 0:
+				row["pending"] = true
+		rows.append(row)
+	var data := {"roll": "%s attack" % atk.name, "formula": results[0].formula if not results.is_empty() else "", "result": results[0].total if not results.is_empty() else 0,
+		"dice": results[0].dice if not results.is_empty() else [], "results": results, "who": str(sheet.get("name", "")),
+		"hidden": false, "attack": {"name": atk.name, "targets": rows, "cover": cover}}
+	var ev := event_log.append("dice.rolled", ref, data, player)
+	return _post_roll(_roll_entry(ev))
+
+
+## A new roll card into the feed, to everyone who may see it.
+func _post_roll(entry: Dictionary) -> Dictionary:
+	_add_roll(entry)
+	if not entry.hidden:
+		for peer_id: int in peers:
+			roll_added.rpc_id(peer_id, entry)
+	return entry
+
+
+## DM: takes back the damage an attack card applied (its hp.changed events are undone).
+func undo_card(card_id: int) -> int:
+	if not is_dm():
+		return 0
+	var card := event_log.get_event(card_id)
+	var count := 0
+	for row: Variant in (card.get("data", {}).get("attack", {}) as Dictionary).get("targets", []):
+		var id := int((row as Dictionary).get("applied", 0))
+		if _applied.has("%d:%s" % [card_id, row.ref]):
+			id = int(_applied["%d:%s" % [card_id, row.ref]])
+		if id > 0 and not event_log.is_undone(id):
+			event_log.undo(id)
+			_applied.erase("%d:%s" % [card_id, row.ref])
+			_sheet_changed(str(row.ref))
+			count += 1
+	if count > 0:
+		_set_status("Undone: %s" % card.get("data", {}).get("roll", "the attack"))
+		_post_roll({"id": 0, "by": Reveal.DM, "who": str(card.get("data", {}).get("who", "")), "results": [], "hidden": true,
+			"action": "log", "text": "damage of %s undone" % card.get("data", {}).get("roll", "the attack")})
+	return count
+
+
+## DM: applies the damage an attack card (Assist) left for one target.
+func apply_card(card_id: int, target: String) -> Dictionary:
+	if not is_dm() or _applied.has("%d:%s" % [card_id, target]):
+		return {}
+	var card := event_log.get_event(card_id)
+	for row: Variant in (card.get("data", {}).get("attack", {}) as Dictionary).get("targets", []):
+		if str(row.ref) == target and int(row.get("amount", 0)) > 0 and int(row.get("applied", 0)) == 0:
+			var e := _handle_hp(1, target, -int(row.amount), str(card.data.attack.name))
+			_applied["%d:%s" % [card_id, target]] = int(e.get("id", 0))
+			return e
+	return {}
+
+
 # --- Rules settings (TASK-53) -----------------------------------------------------------------
 
 ## The world's rules settings: edition, house rules (crits), automation (TASK-60).
@@ -1854,6 +1986,8 @@ static func _roll_entry(e: Dictionary) -> Dictionary:
 		entry["text"] = str(d.get("text", ""))
 	if d.has("action"):  # a quick button: a spell cast, an item used (TASK-48)
 		entry["action"] = str(d.action)
+	if d.has("attack"):  # targets, hits, damage (TASK-54)
+		entry["attack"] = d.attack
 	if d.has("table"):
 		entry["table"] = str(d.table).trim_prefix("tables/")
 		entry["value"] = int(d.get("value", 0))
@@ -2095,6 +2229,8 @@ static func roll_bbcode(entry: Dictionary, names := {}) -> String:
 		if r.has("row_text"):
 			line += " → " + (Markdown.inline(str(r.row_text)) if str(r.row_text) != "" else "no row")
 		lines.append(line)
+	if entry.get("attack") is Dictionary:  # TASK-54: one line per target
+		lines = _attack_lines(entry)
 	if str(entry.get("action", "")) == "prompt":  # TASK-58: the player's initiative prompt
 		lines.insert(0, "[b][url=init:%s]Roll initiative[/url][/b]" % entry.get("ref", ""))
 	elif str(entry.get("action", "")) == "prompt_dm":
@@ -2111,6 +2247,42 @@ static func roll_bbcode(entry: Dictionary, names := {}) -> String:
 	if entry.get("hidden", false):
 		head += " [color=#%s][i]hidden[/i][/color]" % Markdown.MUTED.to_html(false)
 	return "[font_size=12]%s[/font_size]\n%s" % [head, "\n".join(lines)]
+
+
+## An attack card's lines: "→ Goblin: 17 hits · 9 slashing → 4 (resistant)", undo / apply.
+static func _attack_lines(entry: Dictionary) -> PackedStringArray:
+	var a: Dictionary = entry.attack
+	var out := PackedStringArray()
+	var muted := Markdown.MUTED.to_html(false)
+	var applied := false
+	for row: Dictionary in a.get("targets", []):
+		var verdict := "[color=#%s][b]miss[/b][/color]" % UISkin.RED.to_html(false)
+		if bool(row.get("crit", false)):
+			verdict = "[color=#%s][b]critical hit![/b][/color]" % UISkin.GREEN.to_html(false)
+		elif bool(row.get("hit", false)):
+			verdict = "[b]hit[/b]"
+		elif bool(row.get("fumble", false)):
+			verdict += " (nat 1)"
+		var adv := " [color=#%s](%s)[/color]" % [muted, "adv" if int(row.advantage) > 0 else "dis"] if int(row.get("advantage", 0)) != 0 else ""
+		var line := "→ %s: %d%s [color=#%s]%s[/color] %s" % [Markdown.escape(str(row.name)), int(row.total), adv, muted, Markdown.escape(str(row.formula)), verdict]
+		var bits := PackedStringArray()
+		for d: Dictionary in row.get("damage", []):
+			var t := "%d %s" % [int(d.rolled), str(d.type)] if str(d.type) != "" else str(int(d.rolled))
+			if str(d.note) != "":
+				t += " → %d (%s)" % [int(d.amount), d.note]
+			bits.append(t.strip_edges())
+		if not bits.is_empty():
+			line += " · " + ", ".join(bits)
+		if row.get("pending", false):
+			line += " · [url=apply:%d:%s]apply %d[/url]" % [int(entry.get("id", 0)), row.ref, int(row.amount)]
+		if int(row.get("applied", 0)) > 0:
+			applied = true
+		out.append(line)
+	if applied:
+		out.append("[color=#%s]applied[/color] · [url=undo:%d]undo[/url]" % [muted, int(entry.get("id", 0))])
+	if out.is_empty():
+		out.append("[i]no target[/i]")
+	return out
 
 
 func _set_status(text: String) -> void:

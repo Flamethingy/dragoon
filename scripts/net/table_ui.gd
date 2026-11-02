@@ -55,6 +55,11 @@ var roll_edit: LineEdit
 var _roll_hidden: CheckBox
 var condition_menu: PopupMenu  ## a creature's conditions to tick (TASK-56)
 var tracker: CombatTracker  ## the initiative order while a combat runs (TASK-58)
+var attack_bar: PanelContainer  ## picking targets for an attack (TASK-54)
+var attack := {}  ## {ref, query, multi, targets: []} while picking
+var _attack_label: Label
+var _cover: OptionButton
+var _adv: OptionButton
 var _menu_ref := ""
 
 
@@ -89,6 +94,7 @@ func _ready() -> void:
 	hud.pages = SheetPages.new()  # above the chat (TASK-47)
 	hud.pages.hud = hud
 	root.add_child(hud.pages)
+	_build_attack_bar(root)
 	tracker = CombatTracker.new()
 	tracker.table = table
 	root.add_child(tracker)
@@ -101,6 +107,8 @@ func _ready() -> void:
 	table.accounts_changed.connect(_refresh)
 	table.rolls_changed.connect(_show_rolls)
 	table.condition_menu_requested.connect(func(ref: String) -> void: open_condition_menu(ref))
+	table.attack_requested.connect(begin_attack)
+	table.grid.token_clicked.connect(_on_target_clicked)
 	RollTables.resolver = func(id: String) -> Dictionary: return table.tables.get(id, {})
 	RollTables.roller = func(id: String, hidden: bool) -> void: table.roll_table(id, hidden and table.is_dm())
 	RollTables.formula_roller = func(formula: String) -> void: table.roll(formula, roll_ref(), _roll_hidden.button_pressed)
@@ -309,6 +317,104 @@ func _fill_picker() -> void:
 			l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			box.add_child(l)
 		_picker_cards.add_child(card)
+
+
+# --- Attacks (TASK-54) -----------------------------------------------------------------------
+
+func _build_attack_bar(root: Control) -> void:
+	attack_bar = PanelContainer.new()
+	attack_bar.name = "AttackBar"
+	attack_bar.theme_type_variation = UISkin.V_PAGE
+	attack_bar.anchor_left = 0.5
+	attack_bar.anchor_right = 0.5
+	attack_bar.anchor_top = 1.0
+	attack_bar.anchor_bottom = 1.0
+	attack_bar.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	attack_bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	attack_bar.offset_bottom = -12
+	attack_bar.visible = false
+	root.add_child(attack_bar)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	attack_bar.add_child(row)
+	_attack_label = Label.new()
+	_attack_label.name = "What"
+	row.add_child(_attack_label)
+	_cover = OptionButton.new()
+	_cover.name = "Cover"
+	for c: Array in [["No cover", ""], ["Half cover +2", "half"], ["Three-quarters +5", "three_quarters"]]:
+		_cover.add_item(c[0])
+		_cover.set_item_metadata(_cover.item_count - 1, c[1])
+	_cover.tooltip_text = "The targets' cover (a toggle; nothing is measured)"
+	row.add_child(_cover)
+	_adv = OptionButton.new()
+	_adv.name = "Advantage"
+	for c: Array in [["Conditions decide", 2], ["Normal", 0], ["Advantage", 1], ["Disadvantage", -1]]:
+		_adv.add_item(c[0])
+		_adv.set_item_metadata(_adv.item_count - 1, c[1])
+	_adv.tooltip_text = "Conditions preselect advantage or disadvantage; pick one to decide yourself"
+	row.add_child(_adv)
+	var go := Button.new()
+	go.name = "Roll"
+	go.text = "Roll"
+	go.pressed.connect(roll_attack)
+	row.add_child(go)
+	var cancel := Button.new()
+	cancel.name = "Cancel"
+	cancel.text = "Cancel"
+	cancel.pressed.connect(cancel_attack)
+	row.add_child(cancel)
+
+
+## Starts an attack of `ref`: click the targets on the map (a second click drops one), then
+## Roll. A creature's Multiattack (`multi`) rolls its listed attacks in a row.
+func begin_attack(ref: String, query: String, multi := false) -> void:
+	cancel_attack()
+	attack = {"ref": ref, "query": query, "multi": multi, "targets": []}
+	attack_bar.visible = true
+	_update_attack_label()
+
+
+func _on_target_clicked(entity: String) -> void:
+	if attack.is_empty() or entity == str(attack.ref) or not "/" in entity:
+		return
+	_toggle_target(entity)
+	_update_attack_label()
+
+
+func _toggle_target(id: String) -> void:
+	var list: Array = attack.targets
+	if id in list:
+		list.erase(id)
+	else:
+		list.append(id)
+	table.grid.set_targeted(id, id in list)
+
+
+func _update_attack_label() -> void:
+	var what := "Multiattack" if bool(attack.get("multi", false)) else str(attack.get("query", "")).capitalize()
+	var n: int = (attack.get("targets", []) as Array).size()
+	_attack_label.text = "%s: %s" % [what, "click the targets on the map" if n == 0 else "%d target%s" % [n, "" if n == 1 else "s"]]
+
+
+## Rolls the attack at the picked targets (cover and advantage as chosen on the bar).
+func roll_attack() -> void:
+	if attack.is_empty() or (attack.targets as Array).is_empty():
+		return
+	var opts := {"cover": str(_cover.get_item_metadata(_cover.selected)), "multi": bool(attack.multi)}
+	var adv := int(_adv.get_item_metadata(_adv.selected))
+	if adv != 2:
+		opts["advantage"] = adv
+	table.attack(str(attack.ref), str(attack.query), (attack.targets as Array).duplicate(), opts)
+	cancel_attack()
+
+
+func cancel_attack() -> void:
+	for id: Variant in attack.get("targets", []):
+		table.grid.set_targeted(str(id), false)
+	attack = {}
+	if attack_bar != null:
+		attack_bar.visible = false
 
 
 # --- Conditions (TASK-56) -------------------------------------------------------------------

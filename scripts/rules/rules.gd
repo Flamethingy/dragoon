@@ -461,6 +461,36 @@ static func immune_to(s: Dictionary, condition_id: String) -> bool:
 	return false
 
 
+## Damage of `type` on the creature `s` (TASK-54): immunity makes it 0, resistance halves it
+## (rounded down), vulnerability doubles it (both: they cancel). {amount, note}.
+static func damage_after(s: Dictionary, amount: int, type: String) -> Dictionary:
+	var t := type.to_lower().strip_edges()
+	if t == "" or amount <= 0:
+		return {"amount": maxi(amount, 0), "note": ""}
+	if _lists_type(s, "immunities", t):
+		return {"amount": 0, "note": "immune"}
+	var res := _lists_type(s, "resistances", t)
+	var vul := _lists_type(s, "vulnerabilities", t)
+	if res and not vul:
+		return {"amount": amount / 2, "note": "resistant"}
+	if vul and not res:
+		return {"amount": amount * 2, "note": "vulnerable"}
+	return {"amount": amount, "note": ""}
+
+
+static func _lists_type(s: Dictionary, key: String, type: String) -> bool:
+	for v: Variant in _list(s, key):
+		var text := str(v).get_file().to_lower()
+		if text == type or RegEx.create_from_string("\\b%s\\b" % type).search(text) != null:
+			return true
+	return false
+
+
+## The AC bonus of cover (TASK-54): "half" +2, "three_quarters" +5.
+static func cover_bonus(cover: String) -> int:
+	return 2 if cover == "half" else 5 if cover == "three_quarters" else 0
+
+
 ## Exhaustion's d20 penalty (2024: -2 per level), 0 otherwise.
 static func d20_penalty(s: Dictionary, edition := "2014") -> int:
 	if edition != "2024" or "exhaustion" not in (s.get("conditions", []) as Array):

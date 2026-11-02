@@ -240,6 +240,15 @@ func publish(kind: String, entry_id: String, on_duplicate := ASK) -> Dictionary:
 		return {"error": "No such entry"}
 	if is_read_only():
 		return {"error": "%s is read-only" % name}
+	if str(e.get("draft_of", "")) != "" and not find(kind, str(e.draft_of)).is_empty():
+		# TASK-66: a proposal for an entry's effects (the AI pass): they go into the entry itself
+		var target := find(kind, str(e.draft_of)).duplicate(true)
+		target["effects"] = (e.get("effects", []) as Array).duplicate(true)
+		target.erase("effects_parsed")
+		target["effects_source"] = str(e.get("effects_source", "ai"))
+		save(kind, target, str(target.id))
+		delete(kind, entry_id)
+		return {"published": find(kind, str(target.id)), "removed": [[kind, entry_id]], "parts": []}
 	var parts := draft_parts(kind, entry_id)
 	var removed := []
 	var dup := name_clash(kind, e)

@@ -1784,6 +1784,28 @@ func _apply_changes(store: EntryStore, changes: Array) -> void:
 			db.put_entry(e, str(c[0]), store)
 
 
+## Publishes one draft (an effects proposal goes into its entry, TASK-66).
+func publish_draft(e: Dictionary) -> void:
+	var store := store_for(e)
+	if store == null:
+		return
+	if store.is_read_only():
+		store.unlock()  # publishing in a source package is the explicit choice
+	_publish_one(store, e, EntryStore.ASK, func(_r: Dictionary) -> void: _drafts_changed())
+
+
+## Throws one draft away.
+func discard_draft(e: Dictionary) -> void:
+	var store := store_for(e)
+	if store == null:
+		return
+	if store.is_read_only():
+		store.unlock()
+	store.delete(str(e["_kind"]), str(e.id))
+	_apply_changes(store, [[str(e["_kind"]), str(e.id)]])
+	_drafts_changed()
+
+
 ## After drafts changed: bookmarks, the binder and an open Drafts page catch up.
 func _drafts_changed() -> void:
 	_build_bookmarks()

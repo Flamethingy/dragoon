@@ -70,6 +70,8 @@ func setup(e: Dictionary) -> void:
 			drafts_page.open_requested.connect(func(x: Dictionary) -> void: book.open_tab(x))
 			drafts_page.background_requested.connect(func(x: Dictionary) -> void: book.open_tab(x, true))
 			drafts_page.publish_all_requested.connect(book.publish_all)
+			drafts_page.publish_requested.connect(book.publish_draft)  # TASK-66
+			drafts_page.discard_requested.connect(book.discard_draft)
 			box.add_child(drafts_page)
 		return
 	var monster: bool = e.get("_kind") == "creatures"

@@ -480,6 +480,10 @@ func _build_esc_menu(root: Control) -> void:
 		{"text": "Rules", "shown": dm, "action": toggle_view.bind("rules")},
 		{"text": "Compendium", "shown": dm, "action": toggle_view.bind("compendium")},
 		{"text": "Book", "shown": dm, "action": toggle_view.bind("world")},
+		{"text": "Test: fill with random events", "shown": func() -> bool: return table.is_dm() and not table.in_combat(),
+			"action": func() -> void:  # Nico 2026-11-02: chat and timeline for a long test
+				table_ui.timeline_bar.line.set_cursor(-1)
+				TestFill.fill(table)},
 		{"text": func() -> String: return "End the session" if table.is_dm() else "Leave the table", "action": leave},
 	]
 

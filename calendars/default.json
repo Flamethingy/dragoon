@@ -23,6 +23,10 @@
   "eras": [
     { "from_year": 1, "name": "After the Founding", "abbr": "AF" }
   ],
+  "moons": [
+    { "name": "Silvermoon", "cycle_days": 29.5, "offset_days": 0, "color": "#e8e4d8" },
+    { "name": "Ember", "cycle_days": 11.25, "offset_days": 4, "color": "#d0603a" }
+  ],
   "format": "{weekday}, {day}. {month} {year} {era}",
   "festival_format": "{month}, {year} {era}",
   "festival_day_format": "{month} (day {day}), {year} {era}"

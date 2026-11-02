@@ -119,6 +119,7 @@ var _peer_seg := {}  ## host, Show everyone: peer id -> the [upto, toward] they 
 ## the DM shows me their moment (I can't look elsewhere then).
 var showing := false
 signal showing_changed  ## Show everyone went on or off, or the DM's cursor moved (players)
+signal calendar_changed  ## the calendar was replaced: the world's on hosting, the DM's edit, or the DM's for a player (Nico 2026-11-02)
 
 
 func _ready() -> void:
@@ -221,6 +222,7 @@ func host(port := DEFAULT_PORT) -> Error:
 	if _status.start(port) != OK:
 		push_warning("No heartbeat on TCP port %d" % port)
 	player_name = "DM"
+	notes.calendar = WorldCalendar.for_world(timeline.world_dir)  # its own calendar.json wins (Nico 2026-11-02)
 	_open_notes()
 	accounts = timeline.accounts()
 	_apply_accounts()
@@ -229,6 +231,7 @@ func host(port := DEFAULT_PORT) -> Error:
 	_load_rolls()
 	_apply_state(view_for(""))
 	timeline_sync.follow(event_log)
+	calendar_changed.emit()
 	# TASK-85: while the DM looks back, the DM's own actions go into the past; the players'
 	# (their RPCs) stay at now
 	event_log.insert_filter = func() -> bool: return multiplayer.get_remote_sender_id() == 0
@@ -1742,6 +1745,8 @@ func hello(name_given: String) -> void:
 	peers[sender] = player
 	pc_list.rpc_id(sender, timeline.pc_choices(owners), _pc_of(player), player)
 	receive_accounts.rpc_id(sender, accounts)
+	if notes.calendar != null:
+		receive_calendar.rpc_id(sender, notes.calendar.to_dict())
 	sync_rolls.rpc_id(sender, _rolls_for(player))
 	sync_notes.rpc_id(sender, notes.session, _notes_for(player), notes.names)
 	timeline_sync.welcome(sender)
@@ -2607,6 +2612,40 @@ func _open_notes() -> void:
 
 func _show_notes() -> void:
 	notes_changed.emit()
+
+
+# --- The calendar (Nico 2026-11-02) ------------------------------------------------------------
+
+## DM: saves an edited calendar as the world's own (`<world>/calendar.json`), uses it at once
+## and sends it to every player.
+func save_calendar(c: WorldCalendar) -> Error:
+	if c == null or not is_dm():
+		return ERR_UNAVAILABLE
+	var err := c.save_file(WorldCalendar.world_file(timeline.world_dir))
+	if err != OK:
+		return err
+	var hours_before := notes.calendar.hours_per_day if notes.calendar != null else 24
+	set_calendar(c)
+	if c.hours_per_day != hours_before:
+		timeline_sync.rebuild()  # the moments' days depend on the hours per day
+	for peer_id: int in peers:
+		receive_calendar.rpc_id(peer_id, c.to_dict())
+	return OK
+
+
+## Uses another calendar for dates (notes, timeline, lists); calendar_changed tells the views.
+func set_calendar(c: WorldCalendar) -> void:
+	if c == null:
+		return
+	notes.calendar = c
+	calendar_changed.emit()
+	notes_changed.emit()
+
+
+## DM -> player: the world's calendar (on joining, and after the DM edits it).
+@rpc("authority", "call_remote", "reliable")
+func receive_calendar(data: Dictionary) -> void:
+	set_calendar(WorldCalendar.from_dict(data))
 
 
 # --- Account colors (TASK-19) -------------------------------------------------------------

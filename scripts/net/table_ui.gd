@@ -103,6 +103,7 @@ func _ready() -> void:
 	timeline_bar.visible = false
 	root.add_child(timeline_bar)
 	timeline_bar.follow(table.timeline_sync, table.notes.calendar)
+	table.calendar_changed.connect(apply_calendar)
 	timeline_bar.cursor_changed.connect(func(at: int) -> void:  # the table follows in real time
 		var seg := timeline_bar.segment()
 		table.look_back(int(seg.upto), at, int(seg.toward), float(seg.f))
@@ -154,6 +155,12 @@ func _ready() -> void:
 			sheet.show_sheet(sheet.sheet))
 	_refresh()
 	_show_notes()
+
+
+## The table's calendar was replaced (hosting a world, the DM's edit): the timeline bar
+## shows its dates (Nico 2026-11-02).
+func apply_calendar() -> void:
+	timeline_bar.follow(table.timeline_sync, table.notes.calendar)
 
 
 func _refresh() -> void:

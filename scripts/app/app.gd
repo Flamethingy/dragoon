@@ -43,6 +43,7 @@ var minimal := true
 var _layer: CanvasLayer
 var _bar: PanelContainer  ## the views' buttons (not on the calm table: there the Esc menu has them)
 var esc_menu: EscMenu  ## Esc in a session: combat, rules, books, leave (Nico, 2026-11-02)
+var calendar_editor: CalendarEditor  ## the world's calendar and moons, from the Esc menu (Nico 2026-11-02)
 var _view_buttons := {}
 
 
@@ -102,6 +103,7 @@ func _ready() -> void:
 	table.status_changed.connect(func(text: String) -> void: start.status.text = text)
 	table.table_changed.connect(_on_table_changed)
 	table.pcs_changed.connect(_on_table_changed)
+	table.calendar_changed.connect(_on_calendar_changed)
 	EntryDrag.hub.dropped_outside.connect(drop_outside)
 	table.entry_imported.connect(func(_e: Dictionary) -> void:
 		for v: String in ["world", "timeline"]:
@@ -117,10 +119,6 @@ func host(timeline_dir: String, port := NetTable.DEFAULT_PORT) -> Error:
 	if not Timeline.is_timeline(timeline_dir):
 		start.status.text = "Pick a timeline to host."
 		return ERR_FILE_NOT_FOUND
-	var world := Timeline.new(timeline_dir).world_manifest()
-	var cal := "res://calendars/%s.json" % str(world.get("calendar", "default"))
-	table.calendar_path = cal if FileAccess.file_exists(cal) else "res://calendars/default.json"
-	table.notes.calendar = WorldCalendar.load_file(table.calendar_path)
 	table.timeline_dir = timeline_dir
 	table.log_path = ""
 	var err := table.host(port)
@@ -480,6 +478,7 @@ func _build_esc_menu(root: Control) -> void:
 		{"text": "Rules", "shown": dm, "action": toggle_view.bind("rules")},
 		{"text": "Compendium", "shown": dm, "action": toggle_view.bind("compendium")},
 		{"text": "Book", "shown": dm, "action": toggle_view.bind("world")},
+		{"text": "Calendar", "shown": dm, "action": open_calendar},  # Nico 2026-11-02
 		{"text": "Test: fill with random events", "shown": func() -> bool: return table.is_dm() and not table.in_combat(),
 			"action": func() -> void:  # Nico 2026-11-02: chat and timeline for a long test
 				table_ui.timeline_bar.line.set_cursor(-1)
@@ -495,8 +494,39 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if table_ui != null and table_ui.hud != null and table_ui.hud.editor != null:
 		return  # the F2 editor uses Esc
-	esc_menu.toggle()
+	if calendar_editor != null and calendar_editor.visible:
+		calendar_editor.close()  # Esc leaves the calendar without saving
+	else:
+		esc_menu.toggle()
 	get_viewport().set_input_as_handled()
+
+
+# --- The calendar (Nico 2026-11-02) ------------------------------------------------------------
+
+## DM: the calendar editor over the table, with the world's calendar and today's date.
+func open_calendar() -> CalendarEditor:
+	if not table.is_dm():
+		return null
+	if calendar_editor == null:
+		calendar_editor = CalendarEditor.new()
+		esc_menu.get_parent().add_child(calendar_editor)
+	calendar_editor.table = table
+	calendar_editor.open(table.notes.calendar)
+	return calendar_editor
+
+
+## The table has another calendar (hosting, the DM's edit, the DM's for a player): the views
+## that show dates take it.
+func _on_calendar_changed() -> void:
+	var c := table.notes.calendar
+	if timeline_view != null:
+		timeline_view.calendar = c
+		if dock.is_shown("events"):
+			timeline_view.refresh()
+	if encounters_view != null:
+		encounters_view.calendar = c
+		if dock.is_shown("encounters"):
+			encounters_view.refresh()
 
 
 # --- Settings --------------------------------------------------------------------------------

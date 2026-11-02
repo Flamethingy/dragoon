@@ -31,7 +31,7 @@ const NOW_COLOR := Color(0.9, 0.5, 0.1)
 const FUTURE_STEPS := [1, 5, 10, 15, 30, 60, 120, 240, 480, 1440, 10080]
 const FUTURE_PX := 10.0
 const HOLD := 1.0  ## seconds pressed without moving: the current time is picked up
-const MOVE_PX := 4.0  ## a press that moves this far is a drag of the cursor
+const MOVE_PX := 7.0  ## a press that moves this far is a drag of the cursor
 
 var ink := Color(0.3, 0.2, 0.16)  ## the theme's text colour (set in _ready)
 
@@ -230,13 +230,13 @@ func _draw() -> void:
 		var text := ("+" + duration_text(fm)) if fm >= 0 else ("−%s · split here?" % duration_text(-fm))
 		var at := Vector2(nu + 8, y - 8) if not vertical() else _p(nu, y + 16) + Vector2(0, 4)
 		draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs + 1, NOW_COLOR)
-	draw_colored_polygon(_triangle(nu, y), NOW_COLOR)
+	draw_colored_polygon(_triangle(nu, y, 1.5 if now_drag else 1.0), NOW_COLOR)  # held: bigger
 	if cursor_at >= 0:
 		draw_colored_polygon(_triangle(x_of(float(cursor_at)), y), ink)
 
 
-func _triangle(u: float, y: float) -> PackedVector2Array:
-	return PackedVector2Array([_p(u, y + 11), _p(u - 6, y + 20), _p(u + 6, y + 20)])
+func _triangle(u: float, y: float, scale := 1.0) -> PackedVector2Array:
+	return PackedVector2Array([_p(u, y + 11), _p(u - 6 * scale, y + 11 + 9 * scale), _p(u + 6 * scale, y + 11 + 9 * scale)])
 
 
 ## Cut-off branches (TASK-86): faded small boxes beside the line, from where it was set back.
@@ -348,6 +348,8 @@ func moment_text(m: Dictionary) -> String:
 
 
 func _get_tooltip(pos: Vector2) -> String:
+	if _scrubbing or now_drag:
+		return ""  # a tooltip popping up while the mouse is held still takes the press away (the hold)
 	var cut := branch_box_at(pos)
 	if not cut.is_empty():
 		return "Cut off (the timeline was set back) · right click: bring it back\n" + moment_text(cut.moment)
@@ -430,6 +432,7 @@ func hold(id: int) -> void:
 	if id != _press_id or not _scrubbing or _moved or not can_extend:
 		return
 	now_drag = true
+	mouse_default_cursor_shape = Control.CURSOR_VSIZE if vertical() else Control.CURSOR_HSIZE
 	set_cursor(-1)  # the table is live while the current time moves
 	drag_now(_uv(_press_pos).x)
 
@@ -469,6 +472,7 @@ func let_go(u: float) -> void:
 	if now_drag:
 		var minutes := future_minutes()
 		now_drag = false
+		mouse_default_cursor_shape = Control.CURSOR_ARROW
 		future_at = -1
 		queue_redraw()
 		set_cursor(-1)

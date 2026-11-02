@@ -157,6 +157,18 @@ func _init() -> void:
 	_check(log.is_undone(int(hurt.id)) and log.get_event(int(hurt.id)).data.delta == -2, "the original stays in the log, undone")
 	_check(log.effective().map(func(e: Dictionary) -> int: return int(e.id)).find(int(fix.id)) == hurt_at, "the correction takes its place in the timeline")
 	_check(Vector2i(log.day, log.time) == clock and refreshed[0] == 1, "the clock stays, the table is refreshed")
+	# when it happened: the DM moves an event to another time
+	view.show_moment([walk_a, int(moved.id), int(fix.id)])
+	_pick(view, int(fix.id))
+	_check(view.selected_id() == int(fix.id), "the correction can be picked")
+	view.edit_selected()
+	view.day_edit.value = int(fix.day)
+	view.time_edit.text = "%02d:%02d" % [(int(fix.time) + 30) / 60, (int(fix.time) + 30) % 60]
+	view._save_correction()
+	var moved_t: Dictionary = log.events.back()
+	_check(int(moved_t.time) == int(fix.time) + 30 and not moved_t.has("after") and log.is_undone(int(fix.id)) and int(moved_t.data.corrects) == int(fix.id), "the event moves to another time (%s)" % [moved_t])
+	var order2: Array = log.effective().map(func(e: Dictionary) -> int: return int(e.id))
+	_check(order2.find(int(moved_t.id)) > order2.find(walk_a), "sorted there in the timeline")
 	_pick(view, int(moved.id))
 	view.undo_selected()
 	_check(log.is_undone(int(moved.id)), "an event of the past can be undone")

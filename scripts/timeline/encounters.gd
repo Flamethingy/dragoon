@@ -80,7 +80,7 @@ static func participants(events_log: EventLog, enc: Dictionary) -> Array:
 			for c: Variant in e.data.get("order", []):
 				if c is Dictionary and str(c.get("entity", "")) not in out:
 					out.append(str(c.entity))
-		elif e.type in PARTICIPATING and str(e.entity) != "" and str(e.entity) not in out:
+		elif e.type in PARTICIPATING and str(e.entity) != "" and not str(e.entity).begins_with("group:") and str(e.entity) not in out:
 			out.append(str(e.entity))
 	return out
 

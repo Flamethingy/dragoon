@@ -38,6 +38,7 @@ func _init() -> void:
 
 	# --- A combat at the table -------------------------------------------------------------------
 	var started := table.start_combat()
+	var k := int(table.event_log.events.back().id) - int(started.id)  # TASK-58: the initiative rolls come right after
 	_check(started.type == "combat.started" and table.in_combat() and (started.data.order as Array).size() == fighters.size(), "combat starts with the creatures on the map")
 	table._handle_move(1, a, a_from + Vector2i(1, 0))
 	table.change_hp(b, -3, "bite")
@@ -65,9 +66,9 @@ func _init() -> void:
 	var r := EncounterReplay.new(table.timeline, table.event_log, Encounters.open(red).get_encounter(enc.id))
 	var s0 := r.state_at(0)
 	_check(s0.tokens[a] == a_from and int(s0.creatures[b].hp) == b_hp, "before the fight: start cells and HP")
-	var moved := r.step_of(int(started.id) + 1)
+	var moved := r.step_of(int(started.id) + 1 + k)
 	_check(r.state_at(moved).tokens[a] == a_from + Vector2i(1, 0), "the move at its step")
-	var s3 := r.state_at(4)  # started, move, hp, condition
+	var s3 := r.state_at(4 + k)  # started, (rolls,) move, hp, condition
 	_check(int(s3.creatures[b].hp) == b_hp - 3 and "prone" in s3.creatures[b].conditions, "HP and condition after them (%s)" % [s3.creatures[b]])
 	var r2 := r.next_round(1)
 	_check(int(r.state_at(r2).round) == 2 and int(r.state_at(r2 - 1).round) == 1, "step per round (%d)" % r2)
@@ -86,7 +87,7 @@ func _init() -> void:
 	_check(view.events_tree.get_root().get_child_count() == r.count() + 1, "event list beside it")
 	view._items[moved].select(1)
 	_check(view.step == moved and view.grid.token_cell(a) == a_from + Vector2i(1, 0), "clicking an event jumps there")
-	view.go(3)
+	view.go(3 + k)
 	_check(view.creatures_text.text.contains("HP %d" % (b_hp - 3)) or view.creatures_text.text.contains(str(b_hp - 3)), "HP shown (%s)" % view.creatures_text.text)
 	view.go(0)
 	view.speed = 4.0

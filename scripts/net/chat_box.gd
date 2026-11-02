@@ -77,6 +77,8 @@ func _init() -> void:
 	log_text.meta_clicked.connect(func(meta: Variant) -> void:
 		if str(meta).begins_with("cond:") and table != null:  # a roll card's creature: its conditions (TASK-56)
 			table.condition_menu_requested.emit(str(meta).substr(5))
+		elif str(meta).begins_with("init:") and table != null:  # an initiative prompt (TASK-58)
+			table.answer_initiative(str(meta).substr(5))
 		else:
 			RollTables.handle_meta(str(meta)))
 	col.add_child(log_text)

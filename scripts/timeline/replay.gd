@@ -142,27 +142,72 @@ static func apply(s: Dictionary, e: Dictionary) -> void:
 
 
 ## World-wide state from events (TASK-17): {combat: {active, map, round, turn, order:
-## [{entity, initiative}]}, weather: {region: {weather, temperature, wind}}, party_groups:
+## [{entity, initiative, rolled, dex, (group:) name, members}], current, surprised, manual}, weather: {region: {weather, temperature, wind}}, party_groups:
 ## [[pc refs]] ([] = one party)}. Pass all effective events (not one entity's).
 static func world_state(events: Array) -> Dictionary:
-	var w := {"combat": {"active": false, "map": "", "round": 0, "turn": 0, "order": []}, "weather": {}, "party_groups": []}
+	var w := {"combat": {"active": false, "map": "", "round": 0, "turn": 0, "order": [], "current": "", "surprised": [], "manual": false},
+		"weather": {}, "party_groups": []}
 	for e: Dictionary in events:
 		var d: Dictionary = e.get("data", {})
 		var combat: Dictionary = w.combat
 		match str(e.type):
 			"combat.started":
-				combat.merge({"active": true, "map": str(d.get("map", "")), "round": 1, "turn": 0, "order": []}, true)
+				combat.merge({"active": true, "map": str(d.get("map", "")), "round": 1, "turn": 0, "order": [], "current": "",
+					"surprised": (clean(d.get("surprised", [])) as Array) if d.get("surprised") is Array else [], "manual": false}, true)
 				for c: Variant in d.get("order", []):
 					if c is Dictionary:
-						combat.order.append({"entity": str(c.get("entity", "")), "initiative": int(c.get("initiative", 0))})
+						combat.order.append({"entity": str(c.get("entity", "")), "initiative": int(c.get("initiative", 0)),
+							"rolled": bool(c.get("rolled", int(c.get("initiative", 0)) != 0)), "dex": int(c.get("dex", 0))})
 				_sort_order(combat.order)
-			"initiative.rolled":
+			"initiative.rolled":  # TASK-58: a creature's or a group's roll; a late joiner is sorted in
+				var old: Array = combat.order.filter(func(c: Dictionary) -> bool: return c.entity == e.entity)
 				combat.order = combat.order.filter(func(c: Dictionary) -> bool: return c.entity != e.entity)
-				combat.order.append({"entity": str(e.entity), "initiative": int(d.get("total", 0))})
-				_sort_order(combat.order)
+				var entry := {"entity": str(e.entity), "initiative": int(d.get("total", 0)), "rolled": true, "dex": int(d.get("dex", 0))}
+				if not old.is_empty() and (old[0] as Dictionary).has("members"):
+					entry["members"] = old[0].members
+					entry["name"] = old[0].get("name", "")
+				_place(combat, entry)
+			"combat.surprise":
+				var list: Array = combat.surprised
+				list.erase(str(e.entity))
+				if bool(d.get("surprised", true)):
+					list.append(str(e.entity))
+			"combat.joined":  # mid-combat: in the order, waiting for its roll
+				if not (combat.order as Array).any(func(c: Dictionary) -> bool: return c.entity == e.entity):
+					combat.order.append({"entity": str(e.entity), "initiative": 0, "rolled": false, "dex": 0})
+			"combat.order_set":  # the DM's order (dragged); later rolls are sorted in
+				var by_id := {}
+				for c: Dictionary in combat.order:
+					by_id[c.entity] = c
+				var out := []
+				for id: Variant in d.get("order", []):
+					if by_id.has(str(id)):
+						out.append(by_id[str(id)])
+						by_id.erase(str(id))
+				for c: Dictionary in combat.order:
+					if by_id.has(c.entity):
+						out.append(c)
+				combat["order"] = out
+				combat["manual"] = true
+				_fix_turn(combat)
+			"combat.grouped":  # creatures share one roll and one turn
+				var members: Array = (clean(d.get("members", [])) as Array) if d.get("members") is Array else []
+				combat.order = combat.order.filter(func(c: Dictionary) -> bool: return c.entity not in members and c.entity != str(d.get("group", "")))
+				combat.order.append({"entity": str(d.get("group", "")), "name": str(d.get("name", "")), "members": members,
+					"initiative": 0, "rolled": false, "dex": 0})
+				_fix_turn(combat)
+			"combat.ungrouped":
+				var group: Array = combat.order.filter(func(c: Dictionary) -> bool: return c.entity == str(d.get("group", "")))
+				combat.order = combat.order.filter(func(c: Dictionary) -> bool: return c.entity != str(d.get("group", "")))
+				if not group.is_empty():
+					for m: Variant in group[0].get("members", []):
+						combat.order.append({"entity": str(m), "initiative": 0, "rolled": false, "dex": 0})
+				_fix_turn(combat)
 			"combat.turn":
 				combat["round"] = int(d.get("round", combat.round))
 				combat["turn"] = int(d.get("turn", combat.turn))
+				var order: Array = combat.order
+				combat["current"] = str(order[combat.turn].entity) if combat.turn >= 0 and combat.turn < order.size() else ""
 			"combat.ended":
 				combat["active"] = false
 			"weather.changed":
@@ -206,9 +251,48 @@ static func slots_used(s: Dictionary, level: int) -> int:
 	return int((used as Dictionary).get("spell_slots.%d" % level, 0)) if used is Dictionary else 0
 
 
+## Highest initiative first; ties: higher Dex, then by name (the DM drags them if they like);
+## not rolled yet at the end.
 static func _sort_order(order: Array) -> void:
-	order.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return a.initiative > b.initiative if a.initiative != b.initiative else a.entity < b.entity)
+	order.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return _before(a, b))
+
+
+static func _before(a: Dictionary, b: Dictionary) -> bool:
+	if bool(a.get("rolled", true)) != bool(b.get("rolled", true)):
+		return bool(a.get("rolled", true))
+	if int(a.initiative) != int(b.initiative):
+		return int(a.initiative) > int(b.initiative)
+	if int(a.get("dex", 0)) != int(b.get("dex", 0)):
+		return int(a.get("dex", 0)) > int(b.get("dex", 0))
+	return str(a.entity) < str(b.entity)
+
+
+## A rolled entry into the order: sorted, or (after the DM ordered it by hand) put in front of
+## the first one it beats, so the DM's order stays. The current turn stays with its creature.
+static func _place(combat: Dictionary, entry: Dictionary) -> void:
+	var order: Array = combat.order
+	if not bool(combat.get("manual", false)):
+		order.append(entry)
+		_sort_order(order)
+	else:
+		var at := order.size()
+		for i in order.size():
+			if _before(entry, order[i]):
+				at = i
+				break
+		order.insert(at, entry)
+	_fix_turn(combat)
+
+
+static func _fix_turn(combat: Dictionary) -> void:
+	var cur := str(combat.get("current", ""))
+	if cur == "":
+		return
+	for i in (combat.order as Array).size():
+		if str(combat.order[i].entity) == cur:
+			combat["turn"] = i
+			return
+	combat["turn"] = clampi(int(combat.turn), 0, maxi((combat.order as Array).size() - 1, 0))
 
 
 static func _dict(s: Dictionary, key: String) -> Dictionary:

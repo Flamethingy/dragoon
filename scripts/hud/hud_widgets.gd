@@ -24,6 +24,7 @@ const KINDS := {
 	"spells": {"label": "Spells", "size": [5, 5]},
 	"inventory": {"label": "Inventory", "size": [5, 5]},
 	# the app's buttons (Nico, 2026-11-01: "for now" pieces too); only shown to who may use them
+	"combat": {"label": "Combat", "size": [3, 1]},
 	"rules": {"label": "Rules", "size": [3, 1]},
 	"compendium": {"label": "Compendium", "size": [4, 1]},
 	"book": {"label": "Book", "size": [3, 1]},
@@ -49,13 +50,14 @@ const QUICK := ["spell", "item", "check"]
 ## The builder's catalog tabs (LayoutEditor).
 const TABS := ["Character", "Checks", "Spells", "Items", "App"]
 ## Pieces that are buttons of the app (CharacterHud.actions).
-const APP_BUTTONS := ["rules", "compendium", "book", "leave"]
+const APP_BUTTONS := ["combat", "rules", "compendium", "book", "leave"]
 
 ## Without a layout of its own (Nico, 2026-11-01): portrait, health and spell slots, lower left.
 const DEFAULT_HUD := [
 	{"w": "portrait", "r": [0, 19, 4, 5]},
 	{"w": "hp", "r": [0, 24, 4, 1]},
 	{"w": "slots", "r": [0, 25, 4, 2]},
+	{"w": "combat", "r": [31, 0, 3, 1]},
 	{"w": "rules", "r": [34, 0, 3, 1]},
 	{"w": "compendium", "r": [37, 0, 4, 1]},
 	{"w": "book", "r": [41, 0, 3, 1]},

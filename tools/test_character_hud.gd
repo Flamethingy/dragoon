@@ -215,7 +215,7 @@ func _init() -> void:
 	hud._input(f2)
 	_check(hud.editor != null and not hud.visible, "F2 opens the HUD editor")
 	var ed := hud.editor
-	_check(ed.items().size() == 7, "it starts with the default HUD (portrait, health, slots, Rules, Compendium, Book, Leave)")
+	_check(ed.items().size() == 8, "it starts with the default HUD (portrait, health, slots, Combat, Rules, Compendium, Book, Leave)")
 	_check(ed.find_child("Grid", true, false) != null, "with a grid to build on")
 	ed.canvas = Vector2(1600, 950)  # headless: the HUD has no real screen size
 	ed.size = Vector2(1600, 950)
@@ -226,18 +226,18 @@ func _init() -> void:
 	ed.show_tab("Items")
 	_check((ed.find_child("Cards", true, false).get_child(0) is Label), "Borin carries nothing: the Items tab says so")
 	ed.add("skills")
-	ed.place(7, Rect2i(10, 18, 9, 9))
+	ed.place(8, Rect2i(10, 18, 9, 9))
 	ed.remove(2)  # no spell slots
-	_check(ed.items().map(func(i: Dictionary) -> String: return i.w) == ["portrait", "hp", "rules", "compendium", "book", "leave", "skills"], "add, move, remove")
+	_check(ed.items().map(func(i: Dictionary) -> String: return i.w) == ["portrait", "hp", "combat", "rules", "compendium", "book", "leave", "skills"], "add, move, remove")
 	ed.add_item("portrait", "small")
-	ed.cycle_variant(7)
-	_check(ed.items()[7].v == "token", "double-click: the next variant")
-	ed.remove(7)
+	ed.cycle_variant(8)
+	_check(ed.items()[8].v == "token", "double-click: the next variant")
+	ed.remove(8)
 	hud._input(f2)
 	_check(hud.editor == null and hud.visible, "F2 again saves and closes it")
-	await _until(func() -> bool: return dm.timeline.entry("characters/borin").is_empty() == false and (Replay.entity_state(dm.timeline.entry("characters/borin"), dm.event_log.effective("characters/borin")).get("hud", []) as Array).size() == 7)
+	await _until(func() -> bool: return dm.timeline.entry("characters/borin").is_empty() == false and (Replay.entity_state(dm.timeline.entry("characters/borin"), dm.event_log.effective("characters/borin")).get("hud", []) as Array).size() == 8)
 	var saved: Array = Replay.entity_state(dm.timeline.entry("characters/borin"), dm.event_log.effective("characters/borin")).get("hud", [])
-	_check(saved.size() == 7 and saved[6].w == "skills" and saved[6].r == [10, 18, 9, 9], "saved in Borin as an event (%s)" % [saved])
+	_check(saved.size() == 8 and saved[7].w == "skills" and saved[7].r == [10, 18, 9, 9], "saved in Borin as an event (%s)" % [saved])
 	# a player gets Leave, not the DM's Compendium and Book
 	hud.actions = {"leave": func() -> void: pass}
 	hud.refresh()

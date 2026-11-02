@@ -83,6 +83,7 @@ var _state := {}  ## the last table view from the host
 var _status: ServerStatus.Responder  ## host: answers the start screens' heartbeat (TASK-38)
 var _requested := {}  ## sha -> true while downloading
 var _rules := {}  ## the world's rules settings as the host sent them (players)
+var _combat := {}  ## the initiative order as the host sent it (players, TASK-58)
 var _catalog := {}  ## kind -> id -> entry of the packages (spells, items), read once (TASK-48)
 
 var _ui: TableUI
@@ -231,7 +232,7 @@ func view_for(player: String) -> Dictionary:
 			t["cell"] = start + Vector2i(newcomers, 0)
 			newcomers += 1
 		tokens.append(t)
-	return {"map": map, "tokens": tokens, "rules": rules_settings()}
+	return {"map": map, "tokens": tokens, "rules": rules_settings(), "combat": combat_view()}
 
 
 ## HP and AC on a token as they are now (the events), not as in the file.
@@ -304,6 +305,7 @@ func drop_token(e: Dictionary, cell: Vector2i) -> String:
 		event_log.move_token(ref, map_id, grid.token_cell(ref) if grid.tokens.has(ref) else placed[ref], cell)
 	else:
 		event_log.place_token(ref, map_id, cell)
+		join_combat(ref)  # TASK-58: a newcomer mid-combat is sorted in
 	_apply_state(view_for(""))
 	_send_tables()
 	_set_status("%s placed at %s" % [timeline.name_of(ref), cell])
@@ -358,32 +360,210 @@ func in_combat() -> bool:
 
 
 ## DM: starts a combat on the current map with the creatures on it (`combat.started`).
-func start_combat() -> Dictionary:
+## TASK-58: initiative per creature right away (decision 3): the DM's creatures are rolled,
+## the players get a prompt in their chat (the DM can roll for an absent one). `surprised`:
+## creatures caught unaware (2014: they lose their first turn, 2024: disadvantage on the
+## roll). `groups`: [{name, members}] that share one roll and one turn.
+func start_combat(surprised: Array = [], groups: Array = []) -> Dictionary:
 	if not is_dm() or in_combat():
 		return {}
 	var order := []
 	for id: String in grid.tokens:
-		if "/" in id:
-			order.append({"entity": id, "initiative": 0})
-	var e := event_log.append("combat.started", "", {"map": map_id, "order": order})
+		if id == PARTY:
+			for m: Variant in (grid.tokens[id].get_meta("info", {}) as Dictionary).get("members", []):
+				order.append({"entity": str(m), "initiative": 0, "rolled": false})
+		elif "/" in id:
+			order.append({"entity": id, "initiative": 0, "rolled": false})
+	var e := event_log.append("combat.started", "", {"map": map_id, "order": order, "surprised": surprised})
+	for g: Variant in groups:
+		if g is Dictionary:
+			_group(g.get("members", []), str(g.get("name", "")), false)
+	for c: Dictionary in combat_state().order:
+		_ask_initiative(str(c.entity))
 	_set_status("Combat on %s" % timeline.name_of(map_id))
-	table_changed.emit()
+	_combat_changed()
 	return e
 
 
-## DM: the next turn (and round, after the last in the order): `combat.turn`.
+## The combat as Replay.world_state has it (host), else as the host sent it.
+func combat_state() -> Dictionary:
+	if is_dm() and event_log != null:
+		return Replay.world_state(event_log.effective()).combat
+	return _combat if not _combat.is_empty() else {"active": false, "order": [], "round": 0, "turn": 0}
+
+
+## The initiative order for the tracker: [{entity, name, initiative, rolled, surprised,
+## current, members: [{entity, name}]}] plus round and turn.
+func combat_view() -> Dictionary:
+	var c := combat_state()
+	if not is_dm():
+		return c
+	var out := []
+	var surprised: Array = c.get("surprised", [])
+	for i in (c.order as Array).size():
+		var o: Dictionary = c.order[i]
+		var row := {"entity": o.entity, "initiative": o.initiative, "rolled": o.get("rolled", true), "current": i == int(c.turn),
+			"name": str(o.get("name", "")) if o.has("members") else timeline.name_of(str(o.entity)),
+			"surprised": str(o.entity) in surprised or (o.has("members") and (o.members as Array).any(func(m: Variant) -> bool: return m in surprised))}
+		if o.has("members"):
+			row["members"] = (o.members as Array).map(func(m: Variant) -> Dictionary: return {"entity": str(m), "name": timeline.name_of(str(m))})
+			if str(row.name) == "":
+				row["name"] = "%s ×%d" % [timeline.name_of(str(o.members[0])), (o.members as Array).size()] if not (o.members as Array).is_empty() else "Group"
+		out.append(row)
+	return {"active": c.active, "round": c.round, "turn": c.turn, "order": out}
+
+
+## The initiative prompt's link: a player rolls for their creature, the DM for an absent one.
+func answer_initiative(ref: String) -> void:
+	if is_dm():
+		var entry := _waiting_entry(ref)
+		if entry != "":
+			_handle_roll(1, "initiative", ref, false)
+	else:
+		roll("initiative", ref)
+
+
+## DM: rolls initiative for a creature or group (Rules: its bonus; surprised in 2024: with
+## disadvantage). The roll is DM-only for the DM's creatures, public for the players'.
+func roll_initiative(entity: String) -> Dictionary:
+	if not is_dm() or not in_combat():
+		return {}
+	var ref := _initiative_ref(entity)
+	if ref == "":
+		return {}
+	return _handle_roll(1, "initiative", ref, owner_of(ref) == "")
+
+
+## The creature whose sheet rolls for `entity` (a group: its first member).
+func _initiative_ref(entity: String) -> String:
+	for c: Dictionary in combat_state().order:
+		if c.entity == entity and c.has("members"):
+			return str(c.members[0]) if not (c.members as Array).is_empty() else ""
+	return entity
+
+
+## The order entry a roll of `ref` belongs to, if it still waits for its initiative.
+func _waiting_entry(ref: String) -> String:
+	for c: Dictionary in combat_state().order:
+		if bool(c.get("rolled", true)):
+			continue
+		if c.entity == ref or (c.has("members") and ref in (c.members as Array)):
+			return str(c.entity)
+	return ""
+
+
+## A creature that joins the order: the DM's are rolled, the players' get a prompt.
+func _ask_initiative(entity: String) -> void:
+	var ref := _initiative_ref(entity)
+	var players: Array = owners.get(ref, [])
+	if players.is_empty():
+		roll_initiative(entity)
+		return
+	var prompt := {"id": 0, "by": Reveal.DM, "who": timeline.name_of(ref), "ref": ref, "results": [], "hidden": false,
+		"action": "prompt", "text": "Roll initiative"}
+	for peer_id: int in peers:
+		if str(peers[peer_id]) in players:
+			roll_added.rpc_id(peer_id, prompt)
+	var mine := prompt.duplicate()
+	mine["action"] = "prompt_dm"
+	mine["hidden"] = true
+	_add_roll(mine)
+
+
+## DM: creatures share one roll and one turn slot (e.g. all goblins), listed under it.
+func group_creatures(members: Array, name := "") -> String:
+	if not is_dm() or not in_combat() or members.size() < 2:
+		return ""
+	var id := _group(members, name, true)
+	_combat_changed()
+	return id
+
+
+func _group(members: Array, name: String, roll: bool) -> String:
+	var id := "group:%d" % (event_log.events.size() + 1)
+	event_log.append("combat.grouped", "", {"group": id, "name": name, "members": members.map(func(m: Variant) -> String: return str(m))})
+	if roll:
+		_ask_initiative(id)
+	return id
+
+
+## DM: the group's creatures take their own turns again (each rolls).
+func ungroup(group: String) -> void:
+	if not is_dm() or not in_combat():
+		return
+	var members: Array = []
+	for c: Dictionary in combat_state().order:
+		if c.entity == group:
+			members = c.get("members", [])
+	if members.is_empty():
+		return
+	event_log.append("combat.ungrouped", "", {"group": group})
+	for m: Variant in members:
+		_ask_initiative(str(m))
+	_combat_changed()
+
+
+## DM: marks a creature surprised or not (round 1 only matters).
+func set_surprised(ref: String, on: bool) -> void:
+	if not is_dm() or not in_combat():
+		return
+	event_log.append("combat.surprise", ref, {"surprised": on})
+	_combat_changed()
+
+
+## DM: the order as dragged in the tracker (ties, or the DM's call): `combat.order_set`.
+func set_order(entities: Array) -> void:
+	if not is_dm() or not in_combat():
+		return
+	event_log.append("combat.order_set", "", {"order": entities.map(func(x: Variant) -> String: return str(x))})
+	_combat_changed()
+
+
+## DM: a creature put on the map mid-combat joins the order (rolled and sorted in).
+func join_combat(ref: String) -> void:
+	if not is_dm() or not in_combat() or ref == "":
+		return
+	var c := combat_state()
+	if (c.order as Array).any(func(o: Dictionary) -> bool: return o.entity == ref or ref in (o.get("members", []) as Array)):
+		return
+	event_log.append("combat.joined", ref, {})  # waits for its roll, then is sorted in
+	_ask_initiative(ref)
+	_combat_changed()
+
+
+func _combat_changed() -> void:
+	_apply_state(view_for(""))
+	_send_tables()
+	table_changed.emit()
+
+
+## DM: the next turn (and round, after the last in the order): `combat.turn`. 2014: a
+## surprised creature's first turn passes (it can't act in round 1).
 func next_turn() -> Dictionary:
 	if not is_dm() or not in_combat():
 		return {}
-	var c: Dictionary = Replay.world_state(event_log.effective()).combat
-	var turn := int(c.turn) + 1
+	var c: Dictionary = combat_state()
+	var order: Array = c.order
+	var turn := int(c.turn)
 	var round_now := int(c.round)
-	if turn >= maxi((c.order as Array).size(), 1):
-		turn = 0
-		round_now += 1
+	var skipped := PackedStringArray()
+	for guard in order.size() + 1:
+		turn += 1
+		if turn >= maxi(order.size(), 1):
+			turn = 0
+			round_now += 1
+		if round_now != 1 or str(rules_settings().edition) == "2024" or order.is_empty() or not _surprised(c, order[turn]):
+			break
+		skipped.append(timeline.name_of(str(order[turn].entity)))
 	var e := event_log.append("combat.turn", "", {"round": round_now, "turn": turn})
-	_set_status("Round %d, turn %d" % [round_now, turn + 1])
+	_set_status("Round %d, turn %d%s" % [round_now, turn + 1, " (surprised, no turn: %s)" % ", ".join(skipped) if not skipped.is_empty() else ""])
+	_combat_changed()
 	return e
+
+
+static func _surprised(c: Dictionary, o: Dictionary) -> bool:
+	var s: Array = c.get("surprised", [])
+	return str(o.entity) in s or (o.has("members") and not (o.members as Array).is_empty() and (o.members as Array).all(func(m: Variant) -> bool: return m in s))
 
 
 ## DM: ends the combat (`combat.ended`); it is saved as an encounter of the timeline.
@@ -392,6 +572,7 @@ func end_combat(reason := "") -> Dictionary:
 	if not is_dm() or not in_combat():
 		return {}
 	event_log.append("combat.ended", "", {"reason": reason} if reason != "" else {})
+	_combat_changed()
 	var made := Encounters.open(timeline.folder).sync(event_log, timeline)
 	_set_status("Combat over%s" % ("" if made.is_empty() else ": saved as \"%s\"" % made[0].name))
 	table_changed.emit()
@@ -681,6 +862,8 @@ func _apply_state(view: Dictionary) -> void:
 		return
 	if view.has("rules"):
 		_rules = Rules.settings_of(view.rules)
+	if view.has("combat") and not is_dm():
+		_combat = view.combat
 	var map: Dictionary = view.map
 	var map_image: String = map.get("image", "")
 	if grid.map_id != map.id or grid.get_meta("image", "") != map_image:
@@ -1521,6 +1704,12 @@ func request_roll(query: String, ref: String) -> void:
 
 func _handle_roll(sender: int, query: String, ref: String, hidden: bool) -> Dictionary:
 	var player := _sender_player(sender)
+	var waiting := ""  # TASK-58: an initiative roll in a combat that waits for it
+	if in_combat() and ref != "" and query.to_lower().strip_edges().begins_with("init"):
+		waiting = _waiting_entry(ref)
+		if waiting != "" and str(rules_settings().edition) == "2024" and ref in (combat_state().get("surprised", []) as Array) \
+				and not (" advantage" in query or " disadvantage" in query or " normal" in query):
+			query += " with disadvantage"  # 2024: surprised
 	if player == "":
 		return {}
 	if ref == "" and player != Reveal.DM:
@@ -1545,6 +1734,10 @@ func _handle_roll(sender: int, query: String, ref: String, hidden: bool) -> Dict
 		"formula": results[0].formula, "result": results[0].total, "dice": results[0].dice,
 		"results": results, "who": who, "hidden": hidden and player == Reveal.DM}
 	var e := event_log.append("dice.rolled", ref, data, player)
+	if waiting != "" and str(asked[0].label).begins_with("Initiative"):
+		event_log.append("initiative.rolled", waiting, {"total": int(results[0].total), "dex": Rules.score(sheet, "dex"),
+			"formula": str(results[0].formula)}, player)
+		_combat_changed()
 	var entry := _roll_entry(e)
 	_add_roll(entry)
 	if not entry.hidden:
@@ -1902,7 +2095,11 @@ static func roll_bbcode(entry: Dictionary, names := {}) -> String:
 		if r.has("row_text"):
 			line += " → " + (Markdown.inline(str(r.row_text)) if str(r.row_text) != "" else "no row")
 		lines.append(line)
-	if entry.has("action"):  # "casts Fire Bolt (cantrip · 1 action · 36 m)", then its rolls
+	if str(entry.get("action", "")) == "prompt":  # TASK-58: the player's initiative prompt
+		lines.insert(0, "[b][url=init:%s]Roll initiative[/url][/b]" % entry.get("ref", ""))
+	elif str(entry.get("action", "")) == "prompt_dm":
+		lines.insert(0, "[i]waiting for initiative[/i] · [url=init:%s]roll for them[/url]" % entry.get("ref", ""))
+	elif entry.has("action"):  # "casts Fire Bolt (cantrip · 1 action · 36 m)", then its rolls
 		lines.insert(0, "[i]%s[/i]" % Markdown.escape(str(entry.get("text", ""))))
 	var who := str(entry.get("who", ""))
 	var by := str(names.get(entry.get("by", ""), entry.get("by", "")))

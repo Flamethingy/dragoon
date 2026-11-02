@@ -408,6 +408,11 @@ func _hud_actions() -> void:
 		acts["compendium"] = toggle_view.bind("compendium")
 		acts["book"] = toggle_view.bind("world")
 		acts["rules"] = toggle_view.bind("rules")
+		acts["combat"] = func() -> void:  # TASK-58: start (initiative is rolled) or end it
+			if table.in_combat():
+				table.end_combat()
+			else:
+				table.start_combat()
 	if hud.actions.keys() != acts.keys():
 		hud.actions = acts
 		hud.refresh()

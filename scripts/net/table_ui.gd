@@ -54,6 +54,7 @@ var _rolls_text: RichTextLabel
 var roll_edit: LineEdit
 var _roll_hidden: CheckBox
 var condition_menu: PopupMenu  ## a creature's conditions to tick (TASK-56)
+var tracker: CombatTracker  ## the initiative order while a combat runs (TASK-58)
 var _menu_ref := ""
 
 
@@ -88,6 +89,9 @@ func _ready() -> void:
 	hud.pages = SheetPages.new()  # above the chat (TASK-47)
 	hud.pages.hud = hud
 	root.add_child(hud.pages)
+	tracker = CombatTracker.new()
+	tracker.table = table
+	root.add_child(tracker)
 	_build_picker(root)
 	_build_lobby(root)
 	table.status_changed.connect(_on_status)

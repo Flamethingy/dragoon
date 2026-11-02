@@ -144,8 +144,12 @@ func own_events() -> Array[Dictionary]:
 
 # --- Convenience writers for the MVP event types -------------------------------------
 
-func move_token(entity: String, map: String, from: Vector2i, to: Vector2i, by := "dm", group := "", facing := "") -> Dictionary:
+## `cost`: the squares the move cost (difficult ones count twice), -1 = not known (counted
+## from the straight line then).
+func move_token(entity: String, map: String, from: Vector2i, to: Vector2i, by := "dm", group := "", facing := "", cost := -1) -> Dictionary:
 	var data := {"map": map, "from": [from.x, from.y], "to": [to.x, to.y]}
+	if cost >= 0:
+		data["cost"] = cost
 	if group != "":
 		data["group"] = group
 	if facing != "":

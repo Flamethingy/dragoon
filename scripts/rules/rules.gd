@@ -10,7 +10,7 @@ extends RefCounted
 
 const CORE_DIR := "res://assets/rules/dragoon-core"
 const ABILITIES := ["str", "dex", "con", "int", "wis", "cha"]
-const DEFAULT_SETTINGS := {"edition": "2014", "house_rules": {"crit": "max_plus_roll", "flanking": "off", "levelling": "xp"},
+const DEFAULT_SETTINGS := {"edition": "2014", "house_rules": {"crit": "max_plus_roll", "flanking": "off", "levelling": "xp", "crowded_squares": "all"},
 	"automation": {}}
 ## How much the table does by itself, per category (TASK-60): "off" (by hand), "assist" (posted
 ## for the DM to apply) or "auto" (applied at once; undo corrects it). Defaults: Nico's
@@ -400,6 +400,12 @@ static func form_sheet(own: Dictionary, beast: Dictionary, kind: String) -> Dict
 			out[k] = beast.get(k, [] if k in ["features", "spells"] else {})
 		out["_no_class_features"] = true
 	return out
+
+
+## Whose squares cost double to move through (TASK-79): "all" (5e: another creature's space
+## is difficult terrain), "hostile" (only the other side's) or "off".
+static func crowded_squares(settings: Dictionary) -> String:
+	return str((settings_of(settings).house_rules as Dictionary).get("crowded_squares", "all"))
 
 
 ## "xp" or "milestone" (the world's house rule).

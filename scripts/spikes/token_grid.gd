@@ -59,6 +59,8 @@ var areas: AreaLayer  ## area templates and the ruler (TASK-67)
 var map_layer: MapLayer  ## walls, doors, light, terrain and fog (TASK-73)
 ## id -> {moved, speed} (metres) in a combat, else {} (TASK-62: the trail shows the budget)
 var budget: Callable
+## The squares of other tokens that count as difficult for `id` (TASK-79): id -> {cell: true}.
+var crowd: Callable
 var _glide := {}  ## id -> trail (cells) the next confirmed move of it glides along
 var _right_at := Vector2.ZERO  ## where the right button went down (a click opens the token's menu)
 var _box_from := Vector2.ZERO  ## map position where a selection box started
@@ -372,6 +374,33 @@ func go_planned() -> bool:
 		_glide[id] = moves[id].path
 		move_requested.emit(id, moves[id].to)
 	return not moves.is_empty()
+
+
+## The trail the next confirmed move of `id` glides along ([] if none): sent with the move.
+func trail_of(id: String) -> Array:
+	return _glide.get(id, [])
+
+
+## Difficult squares for a move of `id`: the map's terrain and other creatures' squares.
+func difficult_for(id: String) -> Dictionary:
+	var out: Dictionary = (map_layer.terrain as Dictionary).duplicate() if map_layer != null else {}
+	if crowd.is_valid():
+		out.merge(crowd.call(id) as Dictionary)
+	return out
+
+
+## The squares the other tokens cover (`keep`: which ones count; all by default).
+func occupied(except: String, keep := Callable()) -> Dictionary:
+	var out := {}
+	for other: String in tokens:
+		if other == except or float(tokens[other].get_meta("cells")) < 1.0 or (keep.is_valid() and not keep.call(other)):
+			continue
+		var s := int(tokens[other].get_meta("cells"))
+		var at: Vector2i = tokens[other].get_meta("cell")
+		for y in s:
+			for x in s:
+				out[at + Vector2i(x, y)] = true
+	return out
 
 
 func token_cell(id: String) -> Vector2i:

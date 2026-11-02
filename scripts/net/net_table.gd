@@ -121,6 +121,7 @@ func _ready() -> void:
 			if c.get("usage") is Dictionary and (c.entity == id or (c.get("members", []) as Array).any(func(m: Dictionary) -> bool: return m.entity == id)):
 				return c.usage
 		return {}
+	grid.crowd = func(id: String) -> Dictionary: return _crowded(id)  # TASK-79
 	assets = AssetCache.new(cache_dir)
 	notes = SessionNotes.new()
 	notes.calendar = WorldCalendar.load_file(calendar_path)
@@ -694,6 +695,9 @@ func turn_usage(ref: String) -> Dictionary:
 				if str(e.data.get("what", "")) == "dash" or str(e.data.get("kind", "")) == "action":
 					out["dash"] = false
 			"token.moved":
+				if e.data.has("cost"):  # TASK-79: counted when it moved (terrain, other creatures, the trail)
+					cells += int(e.data.cost)
+					continue
 				var f: Array = e.data.get("from", [0, 0])
 				var t: Array = e.data.get("to", [0, 0])
 				var mref := str(e.data.get("map", map_id))
@@ -1957,21 +1961,61 @@ func _on_move_requested(entity: String, cell: Vector2i) -> void:
 	if not is_online():
 		_set_status("Host or join a table first")
 	elif is_dm():
-		_handle_move(1, entity, cell)
+		_handle_move(1, entity, cell, grid.trail_of(entity))
 	else:
-		request_move.rpc_id(1, entity, cell)
+		request_move.rpc_id(1, entity, cell, grid.trail_of(entity))
 
 
-## Player -> DM.
+## Player -> DM (`path`: the planned trail, [] for a straight move).
 @rpc("any_peer", "call_remote", "reliable")
-func request_move(entity: String, cell: Vector2i) -> void:
+func request_move(entity: String, cell: Vector2i, path: Array = []) -> void:
 	if not is_dm():
 		return  # only the DM decides
-	_handle_move(multiplayer.get_remote_sender_id(), entity, cell)
+	_handle_move(multiplayer.get_remote_sender_id(), entity, cell, path.slice(0, 200))
+
+
+## The squares of other creatures that cost double for `id` (TASK-79, the house rule
+## "crowded_squares"): all others, only the other side's, or none. Players reckon the side from
+## the token kind; the DM's count (in the move's cost) is the one that counts.
+func _crowded(id: String) -> Dictionary:
+	var rule := Rules.crowded_squares(rules_settings())
+	if rule == "off" or grid == null:
+		return {}
+	if rule == "hostile":
+		var mine := _crowd_side(id)
+		return grid.occupied(id, func(other: String) -> bool: return other != PARTY and _crowd_side(other) != mine)
+	return grid.occupied(id, func(other: String) -> bool: return other != PARTY)
+
+
+func _crowd_side(ref: String) -> String:
+	if is_dm() and timeline != null:
+		return _side(ref)
+	return "party" if ref.begins_with("characters/") else "foes"
+
+
+## The squares a move costs (TASK-73, TASK-79): along `path` if it is a real trail from `from`
+## to `to` (one square per step), else the straight line; difficult squares count twice.
+func _move_cost(entity: String, from: Vector2i, to: Vector2i, path: Array) -> int:
+	var cells: Array = []
+	var ok: bool = path.size() >= 2 and path[0] is Vector2i and path[0] == from and path[path.size() - 1] == to
+	for i in range(1, path.size()):
+		if not ok:
+			break
+		ok = path[i] is Vector2i and maxi(absi((path[i] as Vector2i).x - (path[i - 1] as Vector2i).x), absi((path[i] as Vector2i).y - (path[i - 1] as Vector2i).y)) == 1
+	cells = path.slice(1) if ok else Vision.path_cells(from, to)
+	var hard := grid.difficult_for(entity)
+	var cost := 0
+	for i in cells.size():
+		var c: Vector2i = cells[i]
+		var crowd_only := not grid.map_layer.terrain.has(c) if grid.map_layer != null else true
+		var last := i == cells.size() - 1
+		# the end square is free (the move is allowed), so only terrain counts there
+		cost += 2 if hard.has(c) and not (last and crowd_only) else 1
+	return cost
 
 
 ## The DM validates, logs and broadcasts (or tells the player no).
-func _handle_move(sender: int, entity: String, cell: Vector2i) -> void:
+func _handle_move(sender: int, entity: String, cell: Vector2i, path: Array = []) -> void:
 	if not grid.tokens.has(entity):
 		_deny(sender, entity, "unknown token")
 		return
@@ -1990,7 +2034,7 @@ func _handle_move(sender: int, entity: String, cell: Vector2i) -> void:
 	var by := "dm" if sender == 1 else str(peers[sender])
 	_opportunity_hints(entity, from, cell)  # TASK-72
 	var facing := TokenGrid.facing_of(cell - from)  # moving turns the token that way (TASK-42)
-	var e := event_log.move_token(entity, grid.map_id, from, cell, by, "", facing)
+	var e := event_log.move_token(entity, grid.map_id, from, cell, by, "", facing, _move_cost(entity, from, cell, path))
 	grid.set_token_cell(entity, cell)
 	if facing != "":
 		grid.set_token_facing(entity, facing)

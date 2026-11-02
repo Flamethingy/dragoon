@@ -86,7 +86,7 @@ func _init() -> void:
 	var e: Dictionary = dm.event_log.events.back()
 	_check(e.type == "token.moved" and e.entity == "characters/aria" and e.by == "ann", "move logged as Ann's (%s)" % e.get("by"))
 	var events_before := dm.event_log.events.size()
-	ann.request_move.rpc_id(1, "creatures/dire-wolf", Vector2i(1, 1))  # bypassing the UI check
+	ann.request_move.rpc_id(1, "creatures/dire-wolf", Vector2i(1, 1), [])  # bypassing the UI check
 	await _until(func() -> bool: return ann.status.contains("not your token"))
 	_check(ann.status.contains("not your token") and dm.event_log.events.size() == events_before, "moving someone else's token is refused")
 	dm.grid.move_requested.emit("creatures/dire-wolf", Vector2i(2, 2))

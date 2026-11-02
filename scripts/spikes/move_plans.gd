@@ -223,7 +223,7 @@ func _draw() -> void:
 		if _dragging.has(id):  # the trail runs on to the ghost under the mouse
 			pts.append((plan.ghost as Sprite2D).position)
 		var b: Dictionary = grid.budget.call(id) if grid.budget.is_valid() else {}
-		var n := squares(path) + extra_cost(path, grid.map_layer.terrain if grid.map_layer != null else {})  # TASK-73
+		var n := squares(path) + extra_cost(path, grid.difficult_for(id))  # TASK-73 terrain, TASK-79 other creatures
 		var over := not b.is_empty() and float(b.moved) + n * TokenGrid.METRES_PER_CELL > float(b.speed) + 0.01
 		_dotted(pts, Color(1.0, 0.45, 0.2, 0.9) if over else Color(1, 1, 1, 0.75), 4.0)
 		if plan.has("going") or path.size() < 2 and not _dragging.has(id):

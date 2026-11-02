@@ -18,6 +18,7 @@ var _players: TimelineMoments
 var _seen := 0  ## events of the log already in the moments
 var _maps_of := {}  ## entity -> the map its token is on (for the players' filter)
 var _dirty := false
+var _fog := {}  ## map -> fog of war on (timeline.entry is slow: asked once per map and send)
 
 
 func _ready() -> void:
@@ -75,7 +76,11 @@ func _players_may_see(e: Dictionary) -> bool:
 	var map := str(e.data.get("map", _maps_of.get(who, "")))
 	if map == "":
 		return true
-	return not bool(table.timeline.entry(map).get("fog", false)) if table.timeline != null else true
+	if table.timeline == null:
+		return true
+	if not _fog.has(map):
+		_fog[map] = bool(table.timeline.entry(map).get("fog", false))
+	return not _fog[map]
 
 
 func _send_soon() -> void:
@@ -86,6 +91,7 @@ func _send_soon() -> void:
 
 func _send() -> void:
 	remove_meta("sending")
+	_fog.clear()  # the DM may have switched fog of war on or off since
 	if _dirty:
 		rebuild()
 		return
@@ -104,6 +110,7 @@ func welcome(peer_id: int) -> void:
 
 
 func _pack(m: TimelineMoments) -> Dictionary:
+	m.finish()
 	var moments: Array = []
 	var map_names := {}
 	for x: Dictionary in m.moments:

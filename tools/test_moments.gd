@@ -56,6 +56,7 @@ func _init() -> void:
 	var before := ms.size()
 	m.add(log.advance_time(11, 480, "long rest"))
 	m.add(log.change_hp("characters/borin", 10, 19, "rest"))
+	m.finish()
 	_check(m.moments.size() == before + 1 and " ".join(m.moments.back().lines).contains("Borin: heals 10"), "live additions (%s)" % [m.moments.back().lines])
 	_check(" ".join(m.moments.back().lines).contains("1 day passes") or " ".join(m.moments.back().lines).contains("hours pass"), "the rest's time")
 

@@ -27,6 +27,8 @@ var name_of := Callable()
 var _in_combat := false
 var _round := 0
 var _events := {}  ## moment index -> its events (for summaries)
+var _stale := {}  ## moment index -> true: its summary is to be made again (finish)
+var _names := {}  ## ref -> shown name (name_of can be slow)
 
 
 ## Moments of `events` (EventLog.effective(): undone ones already left out, timeline order).
@@ -36,6 +38,7 @@ static func build(events: Array[Dictionary], calendar_hours := 24, names := Call
 	m.name_of = names
 	for e in events:
 		m.add(e)
+	m.finish()
 	return m
 
 
@@ -84,7 +87,14 @@ func add(e: Dictionary) -> void:
 		_in_combat = false
 		_round = 0
 		last["closed"] = true  # what comes after the fight is a moment of its own
-	last.lines = summary(_events[last.index])
+	_stale[last.index] = true  # summed up once in finish(): a big moment (a long prep) stays fast
+
+
+## Makes the summaries of the moments that changed since the last time.
+func finish() -> void:
+	for i: int in _stale:
+		moments[i].lines = summary(_events[i])
+	_stale.clear()
 
 
 ## The moment `id` belongs to (-1 if none).
@@ -212,11 +222,15 @@ func summary(events: Array) -> Array:
 
 
 func display_name(ref: String) -> String:
+	if _names.has(ref):
+		return _names[ref]
+	var out := _short(ref)
 	if name_of.is_valid():
 		var n: Variant = name_of.call(ref)
 		if n != null and str(n) != "" and str(n) != ref and str(n) != ref.get_file():  # not just the id again
-			return str(n)
-	return _short(ref)
+			out = str(n)
+	_names[ref] = out
+	return out
 
 
 func _time_text(e: Dictionary) -> String:

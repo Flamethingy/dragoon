@@ -15,6 +15,7 @@ signal restore_requested(rewind_id: int, moments: int)  ## right click on a cut-
 const MARGIN := 18.0
 const BOX := Vector2(12, 18)
 const BRANCH_UP := 17.0  ## cut-off branches float this far above the line
+const MAX_LINES := 14  ## a hover shows at most this many changes
 const SNAP := 8.0  ## pixels: a click this close to a box picks it
 const MIN_SPAN := 30.0  ## seconds across the line, at most zoomed in
 const SHADOW := Color(0, 0, 0, 0.18)
@@ -253,6 +254,8 @@ func moment_text(m: Dictionary) -> String:
 	if not maps.is_empty():
 		head += " · " + ", ".join(maps)
 	var lines: Array = m.get("lines", [])
+	if lines.size() > MAX_LINES:  # a long prep: the first ones and how many more
+		lines = lines.slice(0, MAX_LINES) + ["… and %d more" % (lines.size() - MAX_LINES)]
 	return head + "\n" + ("\n".join(PackedStringArray(lines)) if not lines.is_empty() else "(nothing to see)")
 
 

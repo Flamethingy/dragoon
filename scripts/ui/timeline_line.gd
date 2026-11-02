@@ -222,6 +222,14 @@ func _draw() -> void:
 			var w := BOX.x / maps.size()
 			draw_rect(_rect(u - BOX.x * 0.5 + w * i, y + BOX.y * 0.5 - 4, w, 4), map_color(str(maps[i])))
 	_draw_branches(y)
+	for k: Dictionary in moon_marks():  # the moons (Nico 2026-11-02): full ones filled, new ones a ring
+		var c: Color = calendar.moon_color(int(k.moon))
+		var at := _p(float(k.u), y + 15.0)
+		if k.full:
+			draw_circle(at, 3.2, c)
+			draw_arc(at, 3.2, 0, TAU, 12, Color(ink, 0.6), 1.0)
+		else:
+			draw_arc(at, 3.0, 0, TAU, 12, c, 1.5)
 	# the current time: an orange triangle (Nico 2026-11-02); dragged into the future it goes
 	# along, with how much time that is. Looking back: a black one at the cursor.
 	var nu := x_of(float(now_at() + future_minutes() * 60)) if now_drag else _now_u()
@@ -364,6 +372,44 @@ func duration_text(minutes: int) -> String:
 	return " ".join(parts)
 
 
+## Full and new moons in view: [{u, moon (index), full (bool), day (float)}]; a moon whose
+## cycle is too short for the zoom is left out.
+func moon_marks() -> Array:
+	var out := []
+	if calendar == null or calendar.moons.is_empty():
+		return out
+	var day_s := float(hours_per_day() * 3600)
+	var d0 := view_from / day_s
+	var d1 := (view_from + span) / day_s
+	for i in calendar.moons.size():
+		var m: Dictionary = calendar.moons[i]
+		var cycle := float(m.get("cycle_days", 0.0))
+		if cycle <= 0.0 or cycle * day_s / span * _width() < 14.0:
+			continue
+		var k := floori((d0 - float(m.get("offset_days", 0.0))) / cycle)
+		while out.size() < 400:
+			var new_day := float(m.get("offset_days", 0.0)) + k * cycle
+			if new_day > d1:
+				break
+			for half in 2:
+				var d := new_day + cycle * 0.5 * half
+				if d >= d0 and d <= d1:
+					out.append({"u": x_of(d * day_s), "moon": i, "full": half == 1, "day": d})
+			k += 1
+	return out
+
+
+## The moons at a time (seconds), as one line: "Silvermoon: Full · Ember: Waxing crescent".
+func moons_text(at: int) -> String:
+	if calendar == null or calendar.moons.is_empty():
+		return ""
+	var day_s := hours_per_day() * 3600
+	var parts: PackedStringArray = []
+	for mo: Dictionary in calendar.moons_at(floori(float(at) / day_s), posmod(at, day_s) / 60):
+		parts.append("%s: %s" % [mo.name, mo.phase_name])
+	return " · ".join(parts)
+
+
 ## The hover text of a moment: when, where, and what changed.
 func moment_text(m: Dictionary) -> String:
 	var head := ""
@@ -382,7 +428,8 @@ func moment_text(m: Dictionary) -> String:
 	var lines: Array = m.get("lines", [])
 	if lines.size() > MAX_LINES:  # a long prep: the first ones and how many more
 		lines = lines.slice(0, MAX_LINES) + ["… and %d more" % (lines.size() - MAX_LINES)]
-	return head + "\n" + ("\n".join(PackedStringArray(lines)) if not lines.is_empty() else "(nothing to see)")
+	var moons := moons_text(int(m.get("clock", m.at)))
+	return head + ("\n☾ " + moons if moons != "" else "") + "\n" + ("\n".join(PackedStringArray(lines)) if not lines.is_empty() else "(nothing to see)")
 
 
 func _get_tooltip(pos: Vector2) -> String:
@@ -392,6 +439,10 @@ func _get_tooltip(pos: Vector2) -> String:
 	if not cut.is_empty():
 		return "Cut off (the timeline was set back) · right click: bring it back\n" + moment_text(cut.moment)
 	var at := _uv(pos)
+	if absf(at.y - (_line_y() + 15.0)) <= 6.0:  # a moon mark
+		for k: Dictionary in moon_marks():
+			if absf(float(k.u) - at.x) <= 5.0:
+				return "%s: %s moon\n%s" % [calendar.moons[int(k.moon)].name, "full" if k.full else "new", calendar.format_day(floori(float(k.day)))]
 	var i := box_at(at.x)
 	if i < 0 or absf(at.y - _line_y()) > BOX.y:
 		return ""

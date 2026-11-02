@@ -214,6 +214,22 @@ func _init() -> void:
 			ends = float(k.u) + 3.0 + font.get_string_size(str(k.text), HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
 		_check(not overlap and labels >= 2, "zoomed out x%d: %d labels, none overlap" % [int(zoom_out), labels])
 	line.fit()
+	# the moons: full and new ones on the line when they have room, their phase in the hover
+	var cal := WorldCalendar.for_world("")
+	cal.moons = [{"name": "Silver", "cycle_days": 4.0, "offset_days": 0.0, "color": "#dddddd"}]
+	var old_cal := line.calendar
+	line.calendar = cal
+	line.view_from = 0.0
+	line.span = 20.0 * line.hours_per_day() * 3600.0
+	var marks := line.moon_marks()
+	_check(marks.size() >= 9 and marks.any(func(k: Dictionary) -> bool: return k.full and absf(float(k.day) - 2.0) < 0.01), "full moons every 4 days, half way (%d marks)" % marks.size())
+	var tipm := line._get_tooltip(line._p(float(marks[1].u), line._line_y() + 15.0))
+	_check(tipm.begins_with("Silver:"), "hovering a moon names it (%s)" % tipm.replace("\n", " | "))
+	_check(line.moons_text(2 * line.hours_per_day() * 3600) == "Silver: Full", "the phase at a time (%s)" % line.moons_text(2 * line.hours_per_day() * 3600))
+	line.span *= 1000.0
+	_check(line.moon_marks().is_empty(), "zoomed far out the moons step aside")
+	line.calendar = old_cal
+	line.fit()
 	# docked at a side the bar stays slim, the side panel sits beside it
 	bar.dock("right")
 	await _frames(2)

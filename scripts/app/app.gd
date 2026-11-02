@@ -422,8 +422,8 @@ func _hud_actions() -> void:
 
 
 func _hud_shown() -> void:
-	if _bar != null and minimal:
-		_bar.visible = view != "" and not table_ui.hud.shows_app_buttons()
+	if _bar != null and minimal:  # TASK-77: never over the F2 editor; else only if the HUD lacks the buttons
+		_bar.visible = view != "" and table_ui.hud.editor == null and not table_ui.hud.shows_app_buttons()
 
 
 func _build_bar(root: Control) -> void:

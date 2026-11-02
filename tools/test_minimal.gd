@@ -34,6 +34,13 @@ func _init() -> void:
 	_check(app._bar.anchor_left == 1.0, "at the top right")
 	_check(not app.table_ui._bar.visible and not app.dock.panels.keys().any(app.dock.is_shown), "no table bar, no panels")
 	_check(not app.table.show_map_info, "no help line on the map")
+	var fake := LayoutEditor.new()  # TASK-77: the bar never sits over the F2 editor
+	app.table_ui.hud.editor = fake
+	app._hud_shown()
+	_check(not app._bar.visible, "F2 editor open: no Compendium / Book / Leave bar")
+	app.table_ui.hud.editor = null
+	fake.free()
+	app._hud_shown()
 	var button: Button = app._view_buttons.compendium
 	button.pressed.emit()
 	await process_frame

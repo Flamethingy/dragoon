@@ -14,6 +14,9 @@ players over ENet.
 - `backlog/docs/reveal-visibility.md`: `<reveal>` tags, per-player visibility.
 - `backlog/docs/rules-automation.md`: which rules are automated and how far, Nico's decisions, phases.
 - `backlog/docs/import-agent.md`: AI import of PDFs, images and links as drafts.
+- `backlog/docs/doc-2 - Table-wishlist-player-feedback.md`: what our players want (maps, sheets,
+  library, rules) and house rules it reveals (Soak, 1 turn = 10 s, magical vs. physical damage).
+  **Check new features against it.**
 - `backlog/docs/progress.md`: current status, open questions, next steps. **Update it at the end
   of every work session.**
 

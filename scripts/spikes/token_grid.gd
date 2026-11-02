@@ -56,6 +56,7 @@ var _drag_group := {}  ## the other selected tokens dragged along: id -> true
 var _drag_started := false  ## the mouse moved since the press: the ghosts are out
 var plans: MovePlans  ## planned moves: ghosts, dotted trails, Space to go (TASK-45)
 var areas: AreaLayer  ## area templates and the ruler (TASK-67)
+var map_layer: MapLayer  ## walls, doors, light, terrain and fog (TASK-73)
 ## id -> {moved, speed} (metres) in a combat, else {} (TASK-62: the trail shows the budget)
 var budget: Callable
 var _glide := {}  ## id -> trail (cells) the next confirmed move of it glides along
@@ -86,6 +87,9 @@ func _ready() -> void:
 	areas = AreaLayer.new()
 	areas.grid = self
 	add_child(areas)
+	map_layer = MapLayer.new()
+	map_layer.grid = self
+	add_child(map_layer)
 	_box = Node2D.new()
 	_box.name = "SelectBox"
 	_box.z_index = 20
@@ -537,6 +541,9 @@ func _typing() -> bool:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if areas != null and areas.handle(event):  # placing an area or measuring (TASK-67)
+		get_viewport().set_input_as_handled()
+		return
+	if map_layer != null and map_layer.handle(event):  # walls, terrain, lights; a door (TASK-73)
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey:

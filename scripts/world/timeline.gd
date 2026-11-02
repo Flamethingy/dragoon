@@ -467,7 +467,8 @@ func map_view(ref: String) -> Dictionary:
 	return {"id": ref, "name": str(m.get("name", ref)), "image": image_hash(str(m.get("image", ""))),
 		"grid": {"size": float(grid.get("size", 70)), "offset": _vec(grid.get("offset", [0, 0]))},
 		"kind": str(m.get("kind", "local")), "party_token": image_hash(str(m.get("party_token", ""))),
-		"party_start": _cell(m.get("party_start", [1, 1])), "tokens": tokens}
+		"party_start": _cell(m.get("party_start", [1, 1])), "tokens": tokens,
+		"fog": bool(m.get("fog", false)), "lighting": str(m.get("lighting", "bright"))}  # TASK-73 (walls, doors and terrain: NetTable)
 
 
 ## A token as players see it: {id, image, name, size, kind, owner, (owner only: hp, ac, class)}.

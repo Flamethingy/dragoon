@@ -94,6 +94,7 @@ var _pending_saves := {}  ## host: card id -> the save card waiting for players'
 var _pending_conc := {}  ## host: ref -> DC of the concentration save it still has to make (TASK-59)
 var _catalog := {}  ## kind -> id -> entry of the packages (spells, items), read once (TASK-48)
 var _class_features := {}  ## id -> the packages' class features (TASK-69), read once
+var explored := {}  ## TASK-73: map -> player -> {Vector2i: true}, what each player has seen (saved in table.json)
 var _class_loaded := false
 var _class_index := {}  ## class id -> [feature] (ClassFeatures.index_of)
 var _class_index_size := -1
@@ -110,6 +111,8 @@ func _ready() -> void:
 	grid.step_requested.connect(_on_step_requested)
 	grid.token_clicked.connect(_on_token_clicked)
 	grid.token_menu.connect(func(entity: String) -> void: condition_menu_requested.emit(entity))
+	grid.map_layer.edited.connect(func(changes: Dictionary) -> void: edit_map(changes))  # TASK-73
+	grid.map_layer.door_clicked.connect(func(i: int) -> void: toggle_door(i))
 	grid.areas.placed.connect(func(t: Dictionary) -> void:  # TASK-67: share it, the attack bar may take its targets
 		place_template(t)
 		area_placed.emit(t))
@@ -252,7 +255,131 @@ func view_for(player: String) -> Dictionary:
 			t["cell"] = start + Vector2i(newcomers, 0)
 			newcomers += 1
 		tokens.append(t)
-	return {"map": map, "tokens": tokens, "rules": rules_settings(), "combat": combat_view(), "templates": templates}
+	var view := {"map": map, "tokens": tokens, "rules": rules_settings(), "combat": combat_view(), "templates": templates}
+	_map_sight(view, player)
+	return view
+
+
+# --- Walls, light, fog of war, difficult terrain (TASK-73) ------------------------------------
+
+## The map's sight data in a view: doors and terrain for everyone, walls and lights for the DM;
+## with fog of war on, a player gets what their tokens see (and saw), and only the tokens there.
+func _map_sight(view: Dictionary, player: String) -> void:
+	var m := timeline.entry(map_id)
+	var map: Dictionary = view.map
+	var walls: Array = m.get("walls", []) if m.get("walls") is Array else []
+	var open := doors_open(map_id)
+	var doors := []
+	for i in walls.size():
+		if walls[i] is Dictionary and bool(walls[i].get("door", false)):
+			doors.append({"i": i, "a": walls[i].a, "b": walls[i].b, "open": bool(open.get(i, false))})
+	map["doors"] = doors
+	map["terrain"] = m.get("terrain", []) if m.get("terrain") is Array else []
+	map["lighting"] = str(m.get("lighting", "bright"))
+	map["fog"] = bool(m.get("fog", false))
+	if player == "":
+		map["walls"] = walls
+		map["lights"] = m.get("lights", []) if m.get("lights") is Array else []
+		return
+	if not bool(map.fog):
+		return
+	var seen := sight_of(player, view.tokens)
+	if not explored.has(map_id):
+		explored[map_id] = {}
+	if not (explored[map_id] as Dictionary).has(player):
+		explored[map_id][player] = {}
+	var before: int = (explored[map_id][player] as Dictionary).size()
+	(explored[map_id][player] as Dictionary).merge(seen, true)
+	if (explored[map_id][player] as Dictionary).size() != before:
+		_save_table_file()
+	view["tokens"] = (view.tokens as Array).filter(func(t: Dictionary) -> bool:
+		if owns(player, str(t.id)) or str(t.id) == PARTY:
+			return true
+		var n := maxi(1, ceili(float(TokenGrid.SIZE_CELLS.get(str(t.get("size", "medium")).to_lower(), 1.0))))
+		for y in n:
+			for x in n:
+				if seen.has(Vector2i(t.cell) + Vector2i(x, y)):
+					return true
+		return false)
+	view["vision"] = {"visible": seen.keys().map(func(c: Vector2i) -> Array: return [c.x, c.y]),
+		"explored": (explored[map_id][player] as Dictionary).keys().map(func(c: Vector2i) -> Array: return [c.x, c.y])}
+
+
+## What `player`'s tokens see on this map ({Vector2i: true}): walls, doors, light, darkvision.
+func sight_of(player: String, tokens: Array) -> Dictionary:
+	var viewers := []
+	for t: Dictionary in tokens:
+		if owns(player, str(t.id)) or (str(t.id) == PARTY and player in (t.get("players", []) as Array)):
+			viewers.append({"cell": t.cell, "cells": float(TokenGrid.SIZE_CELLS.get(str(t.get("size", "medium")).to_lower(), 1.0)),
+				"darkvision": Vision.darkvision_m(sheet_for(Reveal.DM, str(t.id))) if "/" in str(t.id) else 0.0})
+	var size := grid.grid_size if grid != null and grid.grid_size != Vector2i.ZERO else Vector2i(60, 60)
+	return Vision.visible(timeline.entry(map_id), viewers, doors_open(map_id), size)
+
+
+func _fog_on() -> bool:
+	return timeline != null and bool(timeline.entry(map_id).get("fog", false))
+
+
+## The doors of a map that are open: wall index -> true (door.toggled events).
+func doors_open(map: String) -> Dictionary:
+	var out := {}
+	for e: Dictionary in event_log.effective():
+		if e.type == "door.toggled" and str(e.data.get("map", "")) == map:
+			out[int(e.data.get("index", -1))] = bool(e.data.get("open", false))
+	return out
+
+
+## Opens or closes door `index` of this map: the DM, or a player with a token next to it
+## (within 1.5 m of the door).
+func toggle_door(index: int) -> void:
+	if is_dm():
+		_handle_door(1, index)
+	elif is_online():
+		request_door.rpc_id(1, index)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_door(index: int) -> void:
+	if is_dm():
+		_handle_door(multiplayer.get_remote_sender_id(), index)
+
+
+func _handle_door(sender: int, index: int) -> Dictionary:
+	var walls: Array = timeline.entry(map_id).get("walls", [])
+	if index < 0 or index >= walls.size() or not bool((walls[index] as Dictionary).get("door", false)):
+		return {}
+	var player := _sender_player(sender)
+	if player != Reveal.DM:
+		var mid := (Vision._v(walls[index].a) + Vision._v(walls[index].b)) / 2.0
+		var near := false
+		for id: String in grid.tokens:
+			if owns(player, id):
+				var r := _footprint(id)  # the door's middle within a square of the token
+				if Rect2(Vector2(r.position) - Vector2.ONE * 1.01, Vector2(r.size) + Vector2.ONE * 2.02).has_point(mid):
+					near = true
+		if not near:
+			_deny_sheet(sender, "that door is too far away")
+			return {}
+	var open := not bool(doors_open(map_id).get(index, false))
+	var e := event_log.append("door.toggled", "", {"map": map_id, "index": index, "open": open}, player)
+	_apply_state(view_for(""))
+	_send_tables()
+	_set_status("door %s (event %d)" % ["opened" if open else "closed", int(e.id)])
+	return e
+
+
+## DM: changes this map's walls, terrain, lights, lighting or fog (saved with the world's map).
+func edit_map(changes: Dictionary) -> void:
+	if not is_dm() or map_id == "":
+		return
+	var m := EntryStore.strip(timeline.entry(map_id)).duplicate(true)
+	for k: String in ["walls", "terrain", "lights", "lighting", "fog"]:
+		if changes.has(k):
+			m[k] = changes[k]
+	if MapSetup.save_map(timeline.world_dir, m) != "":
+		timeline.reload_world()
+		_apply_state(view_for(""))
+		_send_tables()
 
 
 ## HP and AC on a token as they are now (the events), not as in the file.
@@ -530,6 +657,7 @@ const ECONOMY := ["action", "bonus", "reaction", "object"]
 ## reaction, object: bool, dash: bool, moved: metres, speed: metres (doubled by a Dash)}.
 func turn_usage(ref: String) -> Dictionary:
 	var out := {"action": false, "bonus": false, "reaction": false, "object": false, "dash": false, "moved": 0.0, "speed": 0.0}
+	var terrains := {}  ## map -> difficult squares (TASK-73)
 	if event_log == null or timeline == null:
 		return out
 	var events := event_log.effective()
@@ -568,7 +696,10 @@ func turn_usage(ref: String) -> Dictionary:
 			"token.moved":
 				var f: Array = e.data.get("from", [0, 0])
 				var t: Array = e.data.get("to", [0, 0])
-				cells += maxi(absi(int(t[0]) - int(f[0])), absi(int(t[1]) - int(f[1])))
+				var mref := str(e.data.get("map", map_id))
+				if not terrains.has(mref):
+					terrains[mref] = Vision.terrain_of(timeline.entry(mref))
+				cells += Vision.move_cost(Vector2i(int(f[0]), int(f[1])), Vector2i(int(t[0]), int(t[1])), terrains[mref])  # TASK-73: difficult terrain
 	out["moved"] = cells * TokenGrid.METRES_PER_CELL
 	var s := sheet_for(Reveal.DM, ref)
 	var la := Rules.legendary_count(s)  # TASK-63: legendary actions back at the start of its turn
@@ -1504,12 +1635,24 @@ func _load_table_file() -> void:
 	if data is Dictionary:
 		map_id = str(data.get("map", ""))
 		claims = data.get("claims", {}) if data.get("claims") is Dictionary else {}
+		explored = {}
+		var ex: Variant = data.get("explored", {})
+		if ex is Dictionary:
+			for m: String in ex:
+				explored[m] = {}
+				for p: String in ex[m]:
+					explored[m][p] = MapLayer._cells(ex[m][p])
 
 
 func _save_table_file() -> void:
 	var f := FileAccess.open(_table_file(), FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"map": map_id, "claims": claims}, "  "))
+		var ex := {}
+		for m: String in explored:
+			ex[m] = {}
+			for p: String in explored[m]:
+				ex[m][p] = (explored[m][p] as Dictionary).keys().map(func(c: Vector2i) -> Array: return [c.x, c.y])
+		f.store_string(JSON.stringify({"map": map_id, "claims": claims, "explored": ex}, "  "))
 
 
 func _on_peer_connected(id: int) -> void:
@@ -1755,6 +1898,9 @@ func _apply_state(view: Dictionary) -> void:
 			return
 		grid.show_map(map, tex)
 		grid.set_meta("image", map_image)
+	if grid.map_layer != null:  # TASK-73
+		grid.map_layer.dm = is_dm()
+		grid.map_layer.set_data(map, view.get("vision", {}))
 	var keep := {}
 	for t: Dictionary in view.tokens:
 		var id: String = t.id
@@ -1848,10 +1994,15 @@ func _handle_move(sender: int, entity: String, cell: Vector2i) -> void:
 	grid.set_token_cell(entity, cell)
 	if facing != "":
 		grid.set_token_facing(entity, facing)
+	var fogged := _fog_on()  # TASK-73: each player sees only what their tokens see
 	for peer_id: int in peers:
+		if fogged:
+			break
 		token_moved.rpc_id(peer_id, entity, cell, int(e.get("id", 0)))
 		if facing != "":
 			token_turned.rpc_id(peer_id, entity, facing)
+	if fogged:
+		_send_tables()
 	_set_status("%s moved to %s (event %d)" % [_name_of(entity), cell, int(e.get("id", 0))])
 	if in_combat():  # TASK-62: the movement budget on the tracker and the HUD
 		_combat_changed()

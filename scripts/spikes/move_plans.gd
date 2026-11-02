@@ -140,6 +140,15 @@ static func squares(path: Array) -> int:
 	return maxi(0, path.size() - 1)
 
 
+## One more square for each difficult one the trail enters (TASK-73).
+static func extra_cost(path: Array, terrain: Dictionary) -> int:
+	var n := 0
+	for i in range(1, path.size()):
+		if terrain.has(path[i]):
+			n += 1
+	return n
+
+
 ## The trail extended to `cell`: one square at a time (diagonals first); if the cell is
 ## already on it, the trail goes back to there.
 static func extend(path: Array, cell: Vector2i) -> Array:
@@ -214,7 +223,7 @@ func _draw() -> void:
 		if _dragging.has(id):  # the trail runs on to the ghost under the mouse
 			pts.append((plan.ghost as Sprite2D).position)
 		var b: Dictionary = grid.budget.call(id) if grid.budget.is_valid() else {}
-		var n := squares(path)
+		var n := squares(path) + extra_cost(path, grid.map_layer.terrain if grid.map_layer != null else {})  # TASK-73
 		var over := not b.is_empty() and float(b.moved) + n * TokenGrid.METRES_PER_CELL > float(b.speed) + 0.01
 		_dotted(pts, Color(1.0, 0.45, 0.2, 0.9) if over else Color(1, 1, 1, 0.75), 4.0)
 		if plan.has("going") or path.size() < 2 and not _dragging.has(id):

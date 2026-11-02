@@ -146,6 +146,8 @@ func _refresh() -> void:
 	_grid_button.visible = dm
 	var fighting := dm and table.in_combat()
 	_combat_button.visible = dm
+	if _map_tools != null:
+		_map_tools.visible = dm  # TASK-73
 	_combat_button.text = "End combat" if fighting else "Start combat"
 	if not fighting and table.is_dm():  # TASK-72: how hard the fight on this map would be
 		var diff := table.encounter_difficulty()
@@ -543,6 +545,10 @@ func _on_condition_picked(id: int) -> void:
 
 # --- Top bar ---------------------------------------------------------------------------------
 
+## The DM's map tools (TASK-73): [label, id, MapLayer mode].
+const MAP_TOOLS := [["Draw walls (click corners, Esc ends)", 1, "wall"], ["Draw doors (two corners)", 2, "door"],
+	["Erase walls (click one)", 3, "erase"], ["Difficult terrain (click or drag)", 4, "terrain"], ["Lights (click: add / remove)", 5, "light"]]
+var _map_tools: MenuButton
 const AREA_PRESETS := [["Sphere 6 m (radius)", "sphere", 6.0, 0.0], ["Sphere 3 m", "sphere", 3.0, 0.0], ["Cone 4.5 m", "cone", 4.5, 0.0],
 	["Cone 9 m", "cone", 9.0, 0.0], ["Line 9 m × 1.5 m", "line", 9.0, 1.5], ["Line 30 m × 1.5 m", "line", 30.0, 1.5],
 	["Cube 3 m", "cube", 3.0, 0.0], ["Cube 6 m", "cube", 6.0, 0.0], ["Cylinder 6 m", "cylinder", 6.0, 0.0]]
@@ -573,6 +579,33 @@ func _build_bar(root: Control) -> void:
 	_combat_button.name = "Combat"
 	_turn_button = _bar_button(row, "Next turn", "The next creature's turn (a new round after the last)", func() -> void: table.next_turn())
 	_turn_button.name = "NextTurn"
+	var tools := MenuButton.new()  # TASK-73: walls, doors, terrain, light, fog (DM)
+	tools.name = "MapTools"
+	tools.text = "Map"
+	tools.flat = false
+	tools.tooltip_text = "Walls, doors, difficult terrain, lights, lighting and fog of war of this map"
+	for item: Array in MAP_TOOLS:
+		tools.get_popup().add_item(str(item[0]), int(item[1]))
+	tools.get_popup().add_separator()
+	tools.get_popup().add_check_item("Fog of war", 20)
+	tools.get_popup().add_radio_check_item("Lighting: bright", 21)
+	tools.get_popup().add_radio_check_item("Lighting: dim", 22)
+	tools.get_popup().add_radio_check_item("Lighting: dark", 23)
+	tools.get_popup().about_to_popup.connect(func() -> void:
+		var m := table.timeline.entry(table.map_id) if table.timeline != null else {}
+		var p := tools.get_popup()
+		p.set_item_checked(p.get_item_index(20), bool(m.get("fog", false)))
+		for k: int in [21, 22, 23]:
+			p.set_item_checked(p.get_item_index(k), str(m.get("lighting", "bright")) == ["bright", "dim", "dark"][k - 21]))
+	tools.get_popup().id_pressed.connect(func(id: int) -> void:
+		if id < 20:
+			table.grid.map_layer.start(str(MAP_TOOLS.filter(func(t: Array) -> bool: return int(t[1]) == id)[0][2]))
+		elif id == 20:
+			table.edit_map({"fog": not bool(table.timeline.entry(table.map_id).get("fog", false))})
+		else:
+			table.edit_map({"lighting": ["bright", "dim", "dark"][id - 21]}))
+	row.add_child(tools)
+	_map_tools = tools
 	var ruler := _bar_button(row, "Ruler", "Measure on the map: drag (metres, like moving); Esc ends it", func() -> void: table.grid.areas.start_ruler())
 	ruler.name = "Ruler"
 	var areas := MenuButton.new()  # TASK-67: an area template, placed by hand

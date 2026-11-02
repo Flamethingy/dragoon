@@ -375,14 +375,13 @@ static func _slots(s: Dictionary, hud: CharacterHud, v := "pips") -> Control:
 	rows.name = "SpellSlots"
 	rows.add_theme_constant_override("separation", 2)
 	var max_slots := CharacterHud.spell_slots(s)
-	var used: Dictionary = s.get("spell_slots_used", {}) if s.get("spell_slots_used") is Dictionary else {}
 	var editable := bool(s.get("_editable", false))
 	for i in max_slots.size():
 		var count := int(max_slots[i])
 		if count <= 0:
 			continue
 		var level := i + 1
-		var spent := clampi(int(used.get(str(level), 0)), 0, count)
+		var spent := clampi(Replay.slots_used(s, level), 0, count)
 		if v == "count":  # "II  1 / 3"
 			var line := Label.new()
 			line.name = "Level%d" % level
@@ -533,8 +532,7 @@ static func quick_amount(kind: String, ref: String, s: Dictionary) -> String:
 				return ""
 			var slots := CharacterHud.spell_slots(s)
 			var count := int(slots[level - 1]) if level <= slots.size() else 0
-			var used: Dictionary = s.get("spell_slots_used", {}) if s.get("spell_slots_used") is Dictionary else {}
-			return "%d/%d" % [maxi(count - int(used.get(str(level), 0)), 0), count]
+			return "%d/%d" % [maxi(count - Replay.slots_used(s, level), 0), count]
 		"item":
 			for it: Variant in s.get("inventory", []):
 				if it is Dictionary and str(it.get("item", "")) == ref:

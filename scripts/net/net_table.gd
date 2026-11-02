@@ -1173,6 +1173,141 @@ func change_field(ref: String, path: String, value: Variant) -> void:
 		request_field.rpc_id(1, ref, path, value)
 
 
+## Spends (`amount` > 0) or gets back (< 0) a resource: resource.used / resource.restored
+## (spell slots: "spell_slots.<level>", features by id, "ki", ...) (TASK-51).
+func use_resource(ref: String, resource: String, amount: int) -> void:
+	if is_dm():
+		_handle_resource(1, ref, resource, amount)
+	elif is_online():
+		request_resource.rpc_id(1, ref, resource, amount)
+
+
+## Gives (`qty` > 0) or takes (< 0) items: item.gained / item.lost (TASK-51).
+func change_item(ref: String, item: String, qty: int) -> void:
+	if is_dm():
+		_handle_item(1, ref, item, qty)
+	elif is_online():
+		request_item.rpc_id(1, ref, item, qty)
+
+
+## A class reaches `level` (level.gained): the class in `classes` changes (TASK-51).
+func gain_level(ref: String, cls: String, level: int) -> void:
+	if is_dm():
+		_handle_level(1, ref, cls, level)
+	elif is_online():
+		request_level.rpc_id(1, ref, cls, level)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_resource(ref: String, resource: String, amount: int) -> void:
+	if is_dm():
+		_handle_resource(multiplayer.get_remote_sender_id(), ref, resource.left(100), amount)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_item(ref: String, item: String, qty: int) -> void:
+	if is_dm():
+		_handle_item(multiplayer.get_remote_sender_id(), ref, item.left(200), qty)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_level(ref: String, cls: String, level: int) -> void:
+	if is_dm():
+		_handle_level(multiplayer.get_remote_sender_id(), ref, cls.left(100), level)
+
+
+## The sheet `ref` if `sender` may change it ({} and a denial if not).
+func _editable_sheet(sender: int, ref: String) -> Dictionary:
+	if not may_see_sheet(_sender_player(sender), ref):
+		_deny_sheet(sender, "that's not your sheet")
+		return {}
+	return sheet_for(Reveal.DM, ref)
+
+
+func _handle_resource(sender: int, ref: String, resource: String, amount: int) -> Dictionary:
+	var sheet := _editable_sheet(sender, ref)
+	if sheet.is_empty() or resource == "" or amount == 0:
+		return {}
+	var used := int((sheet.get("resources_used", {}) as Dictionary).get(resource, 0)) if sheet.get("resources_used") is Dictionary else 0
+	var e: Dictionary
+	if amount > 0:
+		e = event_log.append("resource.used", ref, {"resource": resource, "amount": amount}, _sender_player(sender))
+	else:
+		var back := mini(-amount, used)
+		if back <= 0:
+			return {}
+		e = event_log.append("resource.restored", ref, {"resource": resource, "amount": back}, _sender_player(sender))
+	_after_change(ref, e)
+	return e
+
+
+func _handle_item(sender: int, ref: String, item: String, qty: int) -> Dictionary:
+	var sheet := _editable_sheet(sender, ref)
+	if sheet.is_empty() or item == "" or qty == 0:
+		return {}
+	var e := event_log.append("item.gained" if qty > 0 else "item.lost", ref, {"item": item, "qty": absi(qty)}, _sender_player(sender))
+	_after_change(ref, e)
+	return e
+
+
+func _handle_level(sender: int, ref: String, cls: String, level: int) -> Dictionary:
+	var sheet := _editable_sheet(sender, ref)
+	if sheet.is_empty() or cls == "" or level < 1 or level > 20:
+		return {}
+	var e := event_log.append("level.gained", ref, {"class": cls, "level": level}, _sender_player(sender))
+	_after_change(ref, e)
+	return e
+
+
+## After a sheet event: everyone who has it open gets it again; a player's change shows
+## as a log line for the DM (TASK-51: trust, but visible).
+func _after_change(ref: String, e: Dictionary) -> void:
+	_sheet_changed(ref)
+	_set_status("%s: %s (event %d)" % [timeline.name_of(ref), log_text(e), int(e.get("id", 0))])
+	if str(e.get("by", Reveal.DM)) != Reveal.DM:
+		_add_roll(_log_entry(e))
+
+
+## Event types a player's own change can be: shown to the DM as log lines.
+const LOGGED := ["sheet.changed", "hp.changed", "item.gained", "item.lost", "resource.used", "resource.restored", "level.gained"]
+
+
+## A player's change as a line in the DM's feed (hidden from the players).
+func _log_entry(e: Dictionary) -> Dictionary:
+	return {"id": e.get("id", 0), "by": e.get("by", ""), "who": timeline.name_of(str(e.get("entity", ""))) if timeline != null else str(e.get("entity", "")),
+		"text": log_text(e), "action": "log", "results": [], "hidden": true, "real": e.get("real", "")}
+
+
+## What a sheet event did, in words ("HP -5 → 19", "gained 2× Torch").
+static func log_text(e: Dictionary) -> String:
+	var d: Dictionary = e.get("data", {})
+	match str(e.get("type", "")):
+		"sheet.changed":
+			return "changed %s: %s → %s" % [d.get("path", "?"), _short(d.get("from")), _short(d.get("to"))]
+		"hp.changed":
+			return "HP %+d → %d" % [int(d.get("delta", 0)), int(d.get("hp", 0))]
+		"item.gained", "item.lost":
+			var qty := int(d.get("qty", 1))
+			return "%s %s%s" % ["gained" if e.type == "item.gained" else "lost", "%d× " % qty if qty != 1 else "", HudWidgets._name_of(d.get("item", "?"))]
+		"resource.used", "resource.restored":
+			return "%s %d %s" % ["used" if e.type == "resource.used" else "got back", int(d.get("amount", 1)), _resource_name(str(d.get("resource", "")))]
+		"level.gained":
+			return "reached level %d %s" % [int(d.get("level", 1)), HudWidgets._name_of(d.get("class", ""))]
+	return str(e.get("type", ""))
+
+
+## "spell_slots.2" -> "level 2 spell slot(s)", "second_wind" -> "Second Wind".
+static func _resource_name(r: String) -> String:
+	if r.begins_with("spell_slots."):
+		return "level %s spell slot" % r.get_slice(".", 1)
+	return r.get_file().replace("_", " ").replace("-", " ").capitalize()
+
+
+static func _short(v: Variant) -> String:
+	var t := JSON.stringify(v) if v is Array or v is Dictionary else str(v)
+	return t if t.length() <= 40 else t.left(37) + "..."
+
+
 ## Player -> DM.
 @rpc("any_peer", "call_remote", "reliable")
 func request_hp(ref: String, delta: int, reason: String) -> void:
@@ -1212,8 +1347,7 @@ func _handle_hp(sender: int, ref: String, delta: int, reason: String) -> Diction
 	data["delta"] = after - hp
 	data["hp"] = after
 	var e := event_log.append("hp.changed", ref, data, player)
-	_sheet_changed(ref)
-	_set_status("%s: HP %d -> %d (event %d)" % [timeline.name_of(ref), hp, after, int(e.get("id", 0))])
+	_after_change(ref, e)
 	return e
 
 
@@ -1232,8 +1366,7 @@ func _handle_field(sender: int, ref: String, path: String, value: Variant) -> Di
 	if from == value or (from is float or from is int) and (value is float or value is int) and float(from) == float(value):
 		return {}
 	var e := event_log.change_sheet(ref, path, from, value, "", player)
-	_sheet_changed(ref)
-	_set_status("%s: %s -> %s (event %d)" % [timeline.name_of(ref), path, value, int(e.get("id", 0))])
+	_after_change(ref, e)
 	return e
 
 
@@ -1491,8 +1624,12 @@ func _add_roll(entry: Dictionary) -> void:
 func _load_rolls() -> void:
 	rolls = []
 	for e in event_log.events:
-		if e.type in ["dice.rolled", "chat.message"] and int(e.session) == event_log.session and not event_log.is_undone(e.id):
+		if int(e.session) != event_log.session or event_log.is_undone(e.id):
+			continue
+		if e.type in ["dice.rolled", "chat.message"]:
 			rolls.append(_roll_entry(e))
+		elif e.type in LOGGED and str(e.get("by", Reveal.DM)) != Reveal.DM:
+			rolls.append(_log_entry(e))
 	rolls = rolls.slice(maxi(0, rolls.size() - ROLL_LOG_SIZE))
 	rolls_changed.emit()
 

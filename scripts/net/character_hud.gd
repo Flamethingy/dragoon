@@ -350,10 +350,14 @@ func use_quick(kind: String, ref: String) -> void:
 		table.use_action(active, ref)
 
 
-## Spent spell slots of a level, as a sheet.changed event (spell_slots_used.<level>).
+## Spent spell slots of a level, `spent` in all: resource.used / resource.restored
+## "spell_slots.<level>" for the difference (TASK-51).
 func use_slots(level: int, spent: int) -> void:
-	if active != "":
-		table.change_field(active, "spell_slots_used.%d" % level, spent)
+	if active == "":
+		return
+	var delta := spent - Replay.slots_used(table.sheets.get(active, {}), level)
+	if delta != 0:
+		table.use_resource(active, "spell_slots.%d" % level, delta)
 
 
 ## Spell slots per level (level 1 first): the sheet's own `spell_slots` list, else from

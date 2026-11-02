@@ -19,8 +19,9 @@ static func later(day_a: int, time_a: int, day_b: int, time_b: int) -> bool:
 
 
 ## The entity's state: a deep copy of `base` with its events applied. Adds
-## `inventory` {item: qty}, `levels` {class: level} and `token` {map, at} when events
-## touch them. `hp` follows hp.changed (the event's `hp` after the change wins).
+## `inventory` {item: qty} (a sheet's own list keeps its shape), `resources_used`
+## {resource: n} (spell slots: "spell_slots.<level>") and `token` {map, at} when events
+## touch them; level.gained changes the class in `classes` (TASK-51). `hp` follows hp.changed (the event's `hp` after the change wins).
 static func entity_state(base: Dictionary, events: Array) -> Dictionary:
 	var s := base.duplicate(true)
 	for e: Dictionary in events:
@@ -42,7 +43,11 @@ static func apply(s: Dictionary, e: Dictionary) -> void:
 			if int(s.get("hp", 0)) > 0:
 				s.erase("death_saves")  # healed or back up: the saves start over
 		"sheet.changed":
-			set_path(s, str(d.get("path", "")), clean(d.get("to")))
+			var path := str(d.get("path", ""))
+			if path == "spell_slots_used" or path.begins_with("spell_slots_used."):
+				_old_slots(s, path, clean(d.get("to")))  # before TASK-51: slots were a sheet field
+			else:
+				set_path(s, path, clean(d.get("to")))
 		"item.gained", "item.lost":
 			var item := str(d.get("item", ""))
 			var qty := int(d.get("qty", 1)) * (1 if e.type == "item.gained" else -1)
@@ -107,9 +112,17 @@ static func apply(s: Dictionary, e: Dictionary) -> void:
 				_list(s, "progress").append({"step": clean(d.step), "text": str(d.get("text", "")), "day": e.get("day", 0)})
 		"party.arrived":
 			s["location"] = str(d.get("place", ""))
-		"level.gained":
-			var levels: Dictionary = s.get_or_add("levels", {})
-			levels[str(d.get("class", ""))] = int(d.get("level", 1))
+		"level.gained":  # the class in classes[] (TASK-51: levels only live there)
+			var cls := str(d.get("class", ""))
+			var classes := _list(s, "classes")
+			var found := false
+			for c: Variant in classes:
+				if c is Dictionary and _same_class(str(c.get("class", "")), cls):
+					c["level"] = int(d.get("level", 1))
+					found = true
+					break
+			if not found and cls != "":
+				classes.append({"class": cls if "/" in cls else "classes/" + cls, "level": int(d.get("level", 1))})
 		"token.placed":
 			s["token"] = {"map": d.get("map", ""), "at": _cell(d.get("at"))}
 		"token.moved":
@@ -150,6 +163,37 @@ static func world_state(events: Array) -> Dictionary:
 			"party.merged":
 				w["party_groups"] = []
 	return w
+
+
+## "classes/wizard", "wizard" and "Wizard" are one class.
+static func _same_class(a: String, b: String) -> bool:
+	return a.get_file().to_lower() == b.get_file().to_lower()
+
+
+## Old sheet.changed spell slots (`spell_slots_used.<level>` = n, or the whole dictionary)
+## as resources used: "spell_slots.<level>".
+static func _old_slots(s: Dictionary, path: String, to: Variant) -> void:
+	var used := _dict(s, "resources_used")
+	var values := {}
+	if path == "spell_slots_used":
+		values = to if to is Dictionary else {}
+		for k: String in used.keys():
+			if k.begins_with("spell_slots."):
+				used.erase(k)
+	else:
+		values[path.get_slice(".", 1)] = to
+	for level: Variant in values:
+		var n := int(values[level]) if values[level] != null else 0
+		if n > 0:
+			used["spell_slots.%s" % level] = n
+		else:
+			used.erase("spell_slots.%s" % level)
+
+
+## Spent spell slots of a level (resources_used "spell_slots.<level>").
+static func slots_used(s: Dictionary, level: int) -> int:
+	var used: Variant = s.get("resources_used")
+	return int((used as Dictionary).get("spell_slots.%d" % level, 0)) if used is Dictionary else 0
 
 
 static func _sort_order(order: Array) -> void:

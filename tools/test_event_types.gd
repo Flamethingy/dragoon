@@ -68,6 +68,21 @@ func _init() -> void:
 	_check(s.inventory == [{"item": "items/moonstone-amulet", "qty": 2, "equipped": true}, {"item": "items/rope", "qty": 1}], "items on a list inventory keep its shape (%s)" % [s.inventory])
 	_check(base.inventory.size() == 2 and base.hp == 24, "the base entity is never changed")
 
+	# TASK-51: one slot scheme, levels in classes[]
+	var old_slots := Replay.entity_state({}, [
+		{"type": "sheet.changed", "data": {"path": "spell_slots_used.1", "to": 2}},
+		{"type": "sheet.changed", "data": {"path": "spell_slots_used.2", "to": 1}},
+		{"type": "resource.used", "data": {"resource": "spell_slots.1", "amount": 1}},
+		{"type": "sheet.changed", "data": {"path": "spell_slots_used.2", "to": 0}}])
+	_check(old_slots.get("resources_used") == {"spell_slots.1": 3} and not old_slots.has("spell_slots_used") and Replay.slots_used(old_slots, 1) == 3,
+		"old sheet.changed slots replay as resources (%s)" % [old_slots])
+	var leveled := Replay.entity_state({"classes": [{"class": "classes/wizard", "level": 3}]}, [
+		{"type": "level.gained", "data": {"class": "wizard", "level": 4}},
+		{"type": "level.gained", "data": {"class": "classes/fighter", "level": 1}}])
+	_check(leveled.classes == [{"class": "classes/wizard", "level": 4}, {"class": "classes/fighter", "level": 1}] and not leveled.has("levels"),
+		"level.gained changes classes[] (%s)" % [leveled])
+	_check(CharacterHud.spell_slots(leveled) == [4, 3], "slot math follows the new level")
+
 	var mira := Replay.entity_state({}, again.effective("characters/mira"))
 	_check(mira.get("relations") == {t: "friendly"}, "relationship (%s)" % [mira.get("relations")])
 	_check(Replay.entity_state({}, again.effective("factions/red-fang-clan")).relations.party == -2, "faction standing")

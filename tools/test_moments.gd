@@ -55,17 +55,8 @@ func _init() -> void:
 	# live: a new event at the end goes into the last moment or starts a new one
 	var before := ms.size()
 	m.add(log.advance_time(11, 480, "long rest"))
-	m.finish()
-	_check(m.moments.size() == before, "time passing alone makes no box (Nico 2026-11-02)")
-	m.add(log.advance_time(11, 600, "on the road"))
-	m.add(log.append("chat.message", "", {"text": "hi"}))
-	m.finish()
-	_check(m.moments.size() == before, "nor more time, or a chat line")
 	m.add(log.change_hp("characters/borin", 10, 19, "rest"))
 	m.finish()
-	var times: Array = m.moments.back().lines.filter(func(l: String) -> bool: return l.contains("pass"))
-	_check(times.size() == 1 and str(times[0]).contains("long rest, on the road"), "something happens: one box, the time as one line (%s)" % [m.moments.back().lines])
-	_check(int(m.moments.back().time) == 600, "at the time it happened (%d)" % int(m.moments.back().time))
 	_check(m.moments.size() == before + 1 and " ".join(m.moments.back().lines).contains("Borin: heals 10"), "live additions (%s)" % [m.moments.back().lines])
 	_check(" ".join(m.moments.back().lines).contains("1 day passes") or " ".join(m.moments.back().lines).contains("hours pass"), "the rest's time")
 

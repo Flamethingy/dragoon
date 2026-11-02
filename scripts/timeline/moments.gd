@@ -2,10 +2,8 @@ class_name TimelineMoments
 extends RefCounted
 ## The timeline bar's boxes (TASK-81): a timeline's effective events grouped into moments.
 ## A moment is everything that happened at one point of the world clock: a new one starts
-## when something happens after the clock moved on (Nico 2026-11-02: passing time alone makes
-## no box; it waits, with any chat or rolls, for the next event that matters, and several
-## steps of time are one line then); in combat every round is a moment of its own
-## (`combat.started`, `combat.turn` with a new round). Each has
+## whenever the clock moves on (`time.advanced`, or events stamped later); in combat every
+## round is a moment of its own (`combat.started`, `combat.turn` with a new round). Each has
 ## its in-world place `at` in seconds (day, minute; rounds that share a minute follow each
 ## other 6 s apart, so the bar can space them out), its maps, its entities and a short
 ## summary of what changed, for the hover. Map-independent: one line for all maps.
@@ -29,7 +27,6 @@ var name_of := Callable()
 var _in_combat := false
 var _round := 0
 var _events := {}  ## moment index -> its events (for summaries)
-var _waiting: Array[Dictionary] = []  ## time passing (and quiet events) waiting for something that matters
 var _stale := {}  ## moment index -> true: its summary is to be made again (finish)
 var _names := {}  ## ref -> shown name (name_of can be slow)
 
@@ -58,10 +55,6 @@ func add(e: Dictionary) -> void:
 		return
 	var clock := seconds_of(int(e.day), int(e.time))
 	var last: Dictionary = moments.back() if not moments.is_empty() else {}
-	var moves_on := type == "time.advanced" or (not last.is_empty() and clock > int(last.clock))
-	if (moves_on or not _waiting.is_empty()) and (type == "time.advanced" or type in QUIET):
-		_waiting.append(e)  # no box for this alone: it waits for something that matters
-		return
 	var new_round := false
 	if type == "combat.started":
 		_in_combat = true
@@ -70,45 +63,15 @@ func add(e: Dictionary) -> void:
 	elif type == "combat.turn" and _in_combat and int(e.data.get("round", _round)) != _round:
 		_round = int(e.data.get("round", _round))
 		new_round = true
-	if not _waiting.is_empty():  # something happens after time passed: now it gets its box
-		var held := _waiting.duplicate()
-		_waiting.clear()
-		_start(held[0], last)
-		for w: Dictionary in held:
-			_put(w, moments.back())
-		last = moments.back()
-		new_round = false  # a fight starting then: the same box
-	var start := last.is_empty() or new_round or clock > int(last.clock) or bool(last.get("closed", false))
+	var start := last.is_empty() or new_round or type == "time.advanced" \
+		or clock > int(last.clock) or bool(last.get("closed", false))
 	if start:
-		_start(e, last)
-		last = moments.back()
-	_put(e, last)
-	if type == "combat.ended":
-		_in_combat = false
-		_round = 0
-		last["closed"] = true  # what comes after the fight is a moment of its own
-
-
-## A new moment, starting with event `e` (its time; rounds sharing a minute go 6 s apart).
-func _start(e: Dictionary, last: Dictionary) -> void:
-	var clock := seconds_of(int(e.day), int(e.time))
-	var at := clock if last.is_empty() or clock > int(last.at) else int(last.at) + ROUND_SECONDS
-	var m := {"index": moments.size(), "at": at, "clock": clock, "day": int(e.day), "time": int(e.time),
-		"round": _round if _in_combat else 0, "combat": _in_combat, "maps": [], "entities": [], "events": [],
-		"first_id": int(e.id), "last_id": int(e.id), "session": int(e.get("session", 0)), "lines": []}
-	moments.append(m)
-	_events[m.index] = []
-
-
-## Puts event `e` into moment `last`.
-func _put(e: Dictionary, last: Dictionary) -> void:
-	var type := str(e.type)
-	var clock := seconds_of(int(e.day), int(e.time))
-	if clock > int(last.clock):  # held time passing: the box is where things happen
-		last.clock = clock
-		last.at = maxi(int(last.at), clock)
-		last.day = int(e.day)
-		last.time = int(e.time)
+		var at := clock if last.is_empty() or clock > int(last.at) else int(last.at) + ROUND_SECONDS
+		last = {"index": moments.size(), "at": at, "clock": clock, "day": int(e.day), "time": int(e.time),
+			"round": _round if _in_combat else 0, "combat": _in_combat, "maps": [], "entities": [], "events": [],
+			"first_id": int(e.id), "last_id": int(e.id), "session": int(e.get("session", 0)), "lines": []}
+		moments.append(last)
+		_events[last.index] = []
 	last.events.append(int(e.id))
 	last.last_id = int(e.id)
 	if e.has("after"):
@@ -120,6 +83,10 @@ func _put(e: Dictionary, last: Dictionary) -> void:
 	if who != "" and who not in last.entities and type not in QUIET:
 		last.entities.append(who)
 	_events[last.index].append(e)
+	if type == "combat.ended":
+		_in_combat = false
+		_round = 0
+		last["closed"] = true  # what comes after the fight is a moment of its own
 	_stale[last.index] = true  # summed up once in finish(): a big moment (a long prep) stays fast
 
 
@@ -169,15 +136,13 @@ func summary(events: Array) -> Array:
 	var world: Array = []
 	var per: Dictionary = {}  ## entity -> {key: value} sums, in first-seen order of keys
 	var order: Array = []
-	var times := events.filter(func(e: Dictionary) -> bool: return str(e.type) == "time.advanced")
-	if not times.is_empty():
-		world.append(_time_text(times[0], times.back(), times))
 	for e: Dictionary in events:
 		var type := str(e.type)
 		var d: Dictionary = e.data
 		var who := str(e.entity)
 		match type:
 			"time.advanced":
+				world.append(_time_text(e))
 				continue
 			"combat.started":
 				world.append("Combat starts")
@@ -268,11 +233,10 @@ func display_name(ref: String) -> String:
 	return out
 
 
-## Time passing from `first`'s start to `last`'s end, with the reasons given.
-func _time_text(first: Dictionary, last: Dictionary, all: Array = []) -> String:
-	var d: Dictionary = first.data
-	var from := seconds_of(int(d.get("from_day", first.day)), int(d.get("from_time", first.time)))
-	var minutes := (seconds_of(int(last.day), int(last.time)) - from) / 60
+func _time_text(e: Dictionary) -> String:
+	var d: Dictionary = e.data
+	var from := seconds_of(int(d.get("from_day", e.day)), int(d.get("from_time", e.time)))
+	var minutes := (seconds_of(int(e.day), int(e.time)) - from) / 60
 	var text := "Time passes"
 	if minutes >= hours_per_day * 60:
 		var days := minutes / (hours_per_day * 60)
@@ -282,12 +246,8 @@ func _time_text(first: Dictionary, last: Dictionary, all: Array = []) -> String:
 		text = "%d hour%s pass%s" % [h, "" if h == 1 else "s", "es" if h == 1 else ""]
 	elif minutes > 0:
 		text = "%d minute%s pass%s" % [minutes, "" if minutes == 1 else "s", "es" if minutes == 1 else ""]
-	var whys: PackedStringArray = []
-	for e: Dictionary in (all if not all.is_empty() else [first]):
-		var why := str(e.data.get("reason", ""))
-		if why != "" and why not in whys:
-			whys.append(why)
-	return text + (" (%s)" % ", ".join(whys) if not whys.is_empty() else "")
+	var why := str(d.get("reason", ""))
+	return text + (" (%s)" % why if why != "" else "")
 
 
 static func _squares(d: Dictionary) -> int:

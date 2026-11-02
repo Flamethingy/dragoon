@@ -276,25 +276,17 @@ func end_session() -> Dictionary:
 ## TASK-85: corrects an event: it is undone and a copy with `data` (and `corrects`: its id)
 ## goes in right where it was (its day and time, just after it in timeline order). The
 ## original stays in the file. Returns the correction ({} if it can't be corrected).
-## `to_day` / `to_time` (Nico 2026-11-02): it happened at another time; the correction goes
-## there instead (by timeline order at that time; the clock follows if that is later).
-func correct(id: int, data: Dictionary, by := "dm", to_day := CLOCK, to_time := CLOCK) -> Dictionary:
+func correct(id: int, data: Dictionary, by := "dm") -> Dictionary:
 	var target := get_event(id)
 	if target.is_empty() or target.has("undoes") or is_undone(id) or target.type == "timeline.rewound":
 		return {}
-	var moved := (to_day != CLOCK and to_day != int(target.day)) or (to_time != CLOCK and to_time != int(target.time))
 	var keep := [insert_after.duplicate(), _insert_day, _insert_time, insert_filter]
 	undo(id, by)
-	if moved:
-		stop_inserting()
-	else:
-		insert_at(id)
+	insert_at(id)
 	insert_filter = Callable()
 	var d := data.duplicate(true)
 	d["corrects"] = id
-	var e := append(str(target.type), str(target.entity), d, by, -1,
-		(to_day if to_day != CLOCK else int(target.day)) if moved else CLOCK,
-		(to_time if to_time != CLOCK else int(target.time)) if moved else CLOCK)
+	var e := append(str(target.type), str(target.entity), d, by)
 	insert_after = keep[0]
 	_insert_day = keep[1]
 	_insert_time = keep[2]

@@ -135,11 +135,7 @@ func _init() -> void:
 	line.let_go(line.x_of(float(line.now_at()) + 3600.0))
 	await _frames(5)
 	_check(log.day * 1440 + log.time == clock + 60, "let go: an hour passes")
-	_check((dm.timeline_sync.data.moments as Array).size() == boxes, "no box yet: nothing happened (%d -> %d)" % [boxes, (dm.timeline_sync.data.moments as Array).size()])
-	_check(int(dm.timeline_sync.data.now_at) >= (log.day * 1440 + log.time) * 60 - 1, "but now moved on")
-	log.move_token(BORIN, dm.grid.map_id, Vector2i(3, 1), Vector2i(4, 1))
-	await _frames(5)
-	_check((dm.timeline_sync.data.moments as Array).size() == boxes + 1, "something happens: a new box")
+	_check((dm.timeline_sync.data.moments as Array).size() == boxes + 1, "a new box (%d -> %d)" % [boxes, (dm.timeline_sync.data.moments as Array).size()])
 	line.can_extend = false
 	line.drag_to(line.x_of(float(line.now_at()) + 3600.0))
 	_check(line.future_at == -1 and line.cursor_at == -1, "players stop at now")

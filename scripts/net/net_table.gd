@@ -26,6 +26,7 @@ signal sheet_received(ref: String)  ## a sheet I opened arrived or changed (TASK
 signal rolls_changed  ## the roll log got a roll (TASK-12)
 signal roll_shown(entry: Dictionary)  ## a new roll card with dice in my feed: the 3D dice throw it (TASK-61)
 signal entry_imported(entry: Dictionary)
+signal past_changed  ## I went back in time, or came back to now (TASK-83)
 signal condition_menu_requested(ref: String)
 signal concentration_confirm(ref: String, old_name: String, new_name: String, go: Callable)  ## a second concentration spell (TASK-59)
 signal templates_changed  ## the area templates on the map (TASK-67)
@@ -101,6 +102,12 @@ var _class_index := {}  ## class id -> [feature] (ClassFeatures.index_of)
 var _class_index_size := -1
 
 var _ui: TableUI
+## TASK-83, looking back on the timeline: the last event id of the moment I look at (-1 = now,
+## 0 = before everything). Purely local: the log is never written for it.
+var looking_back := -1
+var _cut := {}  ## while a past view is built: the event ids up to that moment
+var _cutting := false
+var _backs := {}  ## host: peer id -> the event id that player looks back at (they can't act)
 
 
 func _ready() -> void:
@@ -223,8 +230,8 @@ func view_for(player: String) -> Dictionary:
 		return {}
 	var on_map: Dictionary = map.tokens
 	map.erase("tokens")
-	var placed := Replay.tokens_on(map_id, event_log.effective())
-	var facings := Replay.facings_on(map_id, event_log.effective())
+	var placed := Replay.tokens_on(map_id, _effective())
+	var facings := Replay.facings_on(map_id, _effective())
 	var ids: Array = on_map.keys()
 	for id: String in placed:  # tokens placed in this timeline (token.placed events)
 		if id not in ids:
@@ -290,6 +297,10 @@ func _map_sight(view: Dictionary, player: String) -> void:
 	if not bool(map.fog):
 		return
 	var seen := sight_of(player, view.tokens)
+	if _cutting:  # a past view: what they saw then, nothing new explored
+		view["tokens"] = (view.tokens as Array).filter(func(t: Dictionary) -> bool:
+			return owns(player, str(t.id)) or str(t.id) == PARTY or seen.has(Vector2i(t.cell)))
+		return
 	if not explored.has(map_id):
 		explored[map_id] = {}
 	if not (explored[map_id] as Dictionary).has(player):
@@ -329,7 +340,7 @@ func _fog_on() -> bool:
 ## The doors of a map that are open: wall index -> true (door.toggled events).
 func doors_open(map: String) -> Dictionary:
 	var out := {}
-	for e: Dictionary in event_log.effective():
+	for e: Dictionary in _effective():
 		if e.type == "door.toggled" and str(e.data.get("map", "")) == map:
 			out[int(e.data.get("index", -1))] = bool(e.data.get("open", false))
 	return out
@@ -396,7 +407,7 @@ func _current_values(t: Dictionary) -> void:
 			base[key] = t[key]
 	if base.is_empty():
 		return
-	var now := Replay.entity_state(base, event_log.effective(str(t.id)))
+	var now := Replay.entity_state(base, _effective(str(t.id)))
 	for key: String in base:
 		t[key] = now.get(key)
 
@@ -405,7 +416,7 @@ func _current_values(t: Dictionary) -> void:
 func _conditions_on(t: Dictionary) -> void:
 	var e := timeline.entry(str(t.id))
 	var now := Replay.entity_state({"conditions": (e.get("conditions", []) as Array).duplicate() if e.get("conditions") is Array else [],
-		"exhaustion": e.get("exhaustion", 0)}, event_log.effective(str(t.id)))
+		"exhaustion": e.get("exhaustion", 0)}, _effective(str(t.id)))
 	var list: Array = now.get("conditions", [])
 	if not list.is_empty():
 		t["conditions"] = list
@@ -1908,6 +1919,8 @@ func _apply_state(view: Dictionary) -> void:
 			return
 		grid.show_map(map, tex)
 		grid.set_meta("image", map_image)
+		if looking_back >= 0:  # another map while looking back: that map then
+			_reshow_past.call_deferred()
 	if grid.map_layer != null:  # TASK-73
 		grid.map_layer.dm = is_dm()
 		grid.map_layer.set_data(map, view.get("vision", {}))
@@ -2032,6 +2045,9 @@ func _handle_move(sender: int, entity: String, cell: Vector2i, path: Array = [])
 	if entity == PARTY:
 		_handle_party_move(sender, cell)
 		return
+	if _backs.has(sender) or (sender == 1 and looking_back >= 0):
+		_deny(sender, entity, "you're looking back in time: go back to now to act")
+		return
 	if sender != 1:
 		var player: String = peers.get(sender, "")
 		if player == "" or not owns(player, entity):
@@ -2046,7 +2062,7 @@ func _handle_move(sender: int, entity: String, cell: Vector2i, path: Array = [])
 	var trail := path if _valid_trail(from, cell, path) else []
 	# moving turns the token that way (TASK-42); along a trail: its last step (TASK-76)
 	var facing := TokenGrid.facing_of(cell - from if trail.is_empty() else Vector2i(trail[trail.size() - 1]) - Vector2i(trail[trail.size() - 2]))
-	var e := event_log.move_token(entity, grid.map_id, from, cell, by, "", facing, _move_cost(entity, from, cell, path))
+	var e := event_log.move_token(entity, grid.map_id, from, cell, by, "", facing, _move_cost(entity, from, cell, path), trail)
 	grid.glide_along(entity, trail)
 	grid.set_token_cell(entity, cell)
 	if facing != "":
@@ -2140,6 +2156,167 @@ func token_moved(entity: String, cell: Vector2i, event_id: int, trail: Array = [
 @rpc("authority", "call_remote", "reliable")
 func move_denied(entity: String, reason: String) -> void:
 	_set_status("Can't move %s: %s" % [_name_of(entity), reason])
+
+
+# --- Looking back (TASK-83) ---------------------------------------------------------------
+
+## The effective events, or while a past view is built only those up to that moment.
+func _effective(entity := "") -> Array[Dictionary]:
+	var all := event_log.effective(entity)
+	if not _cutting:
+		return all
+	var out: Array[Dictionary] = []
+	for e in all:
+		if _cut.has(int(e.id)):
+			out.append(e)
+	return out
+
+
+## The ids of the effective events up to and including `last_id` in timeline order (0 = none,
+## -1 = all of them: now).
+func _ids_upto(last_id: int) -> Dictionary:
+	var out := {}
+	if last_id == 0:
+		return out
+	for e in event_log.effective():
+		out[int(e.id)] = true
+		if int(e.id) == last_id:
+			break
+	return out
+
+
+## Host: the table as `player` ("" = the DM) saw it at the moment ending with event `upto`,
+## with the ways the tokens went since the moment `from` (-1 = now): {map, tokens, paths, upto}.
+func past_view(player: String, upto: int, from := -1) -> Dictionary:
+	var then := _ids_upto(upto)
+	var before := _ids_upto(from)
+	_cut = then
+	_cutting = true
+	var view := view_for(player)
+	_cutting = false
+	_cut = {}
+	if view.is_empty():
+		return view
+	var shown := {}
+	for t: Dictionary in view.tokens:
+		shown[str(t.id)] = true
+	var paths := _paths_between(before, then)
+	for id: String in paths.keys():
+		if not shown.has(id):
+			paths.erase(id)
+	view["paths"] = paths
+	view["upto"] = upto
+	return view
+
+
+## The squares each token on this map walked between two moments (the moves in one and not
+## the other), in order; backwards when going back in time. Old moves without a trail: the
+## straight line.
+func _paths_between(a: Dictionary, b: Dictionary) -> Dictionary:
+	var back := b.size() < a.size()
+	var out := {}
+	var party_step := ""  # the party's members move together: one walk
+	for e in event_log.effective():
+		if e.type != "token.moved" or str(e.data.get("map", "")) != map_id or a.has(int(e.id)) == b.has(int(e.id)):
+			continue
+		var from := Vector2i(int(e.data.from[0]), int(e.data.from[1]))
+		var to := Vector2i(int(e.data.to[0]), int(e.data.to[1]))
+		var cells: Array = []
+		if e.data.get("trail") is Array and (e.data.trail as Array).size() >= 2:
+			for c: Array in e.data.trail:
+				cells.append(Vector2i(int(c[0]), int(c[1])))
+		else:
+			cells = [from] + Vision.path_cells(from, to)
+		var who := PARTY if str(e.data.get("group", "")) == PARTY else str(e.entity)
+		if who == PARTY:
+			if party_step == "%s>%s" % [from, to]:
+				continue
+			party_step = "%s>%s" % [from, to]
+		var path: Array = out.get(who, [])
+		if not path.is_empty() and path.back() == cells[0]:
+			cells = cells.slice(1)
+		path.append_array(cells)
+		out[who] = path
+	if back:
+		for who: String in out:
+			(out[who] as Array).reverse()
+	return out
+
+
+## Looks at the moment ending with event `upto` (-1: back to now). Only my screen changes;
+## while I look back I can't act (the DM acting in the past comes with TASK-85).
+func look_back(upto: int) -> void:
+	if upto == looking_back or not is_online():
+		return
+	var from := looking_back
+	looking_back = upto
+	grid.locked = upto >= 0
+	if upto < 0:
+		grid.end_past()
+		if not is_dm():
+			request_now.rpc_id(1)
+	elif is_dm():
+		_show_past(past_view("", upto, from))
+	else:
+		request_past.rpc_id(1, upto, from)
+	_set_status("Looking back in time (Now or Home: back to the present)" if upto >= 0 else "Back to now")
+	past_changed.emit()
+
+
+## Player -> DM: show me the moment ending with event `upto` (I came from `from`).
+@rpc("any_peer", "call_remote", "reliable")
+func request_past(upto: int, from: int) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if not is_dm() or not peers.has(sender):
+		return
+	_backs[sender] = upto
+	past_shown.rpc_id(sender, past_view(str(peers[sender]), upto, from))
+
+
+## Player -> DM: I'm back at now.
+@rpc("any_peer", "call_remote", "reliable")
+func request_now() -> void:
+	_backs.erase(multiplayer.get_remote_sender_id())
+
+
+## DM -> a player looking back: the table at that moment.
+@rpc("authority", "call_remote", "reliable")
+func past_shown(view: Dictionary) -> void:
+	if looking_back >= 0:
+		_show_past(view)
+
+
+func _reshow_past() -> void:
+	if looking_back < 0:
+		return
+	grid.end_past()
+	if is_dm():
+		_show_past(past_view("", looking_back))
+	else:
+		request_past.rpc_id(1, looking_back, -1)
+
+
+func _show_past(view: Dictionary) -> void:
+	if view.is_empty() or str(view.map.get("id", "")) != grid.map_id:
+		return
+	var list := []
+	var missing := []
+	for t: Dictionary in view.tokens:
+		var live: Sprite2D = grid.tokens.get(str(t.id))
+		var image := str(t.get("image", ""))
+		var tex: Texture2D = null
+		if live != null and str((live.get_meta("info", {}) as Dictionary).get("image", "")) == image:
+			tex = live.texture
+		else:
+			var pic := assets.texture(image) if image != "" else null
+			if pic == null and image != "":
+				missing.append(image)
+				continue
+			tex = TokenArt.compose(pic, t.get("token_style"), str(t.get("kind", "")))
+		list.append({"info": t, "texture": tex})
+	if not missing.is_empty() and not is_dm():
+		_fetch(missing)
+	grid.show_past(list, view.get("paths", {}))
 
 
 func _deny(sender: int, entity: String, reason: String) -> void:

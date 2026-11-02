@@ -25,6 +25,7 @@ var actions := {}
 var editor: LayoutEditor  ## the HUD / page editor while it is open
 var _dismissed := false  ## a click on the empty map hid it: stays hidden until Q / E or a selection
 var _pieces: Control
+var locked := false  ## looking back on the timeline (TASK-83): the pieces show but can't be used
 var _tween: Tween
 
 
@@ -229,7 +230,32 @@ func _fill() -> void:
 		w.position = rect.position
 		w.size = rect.size
 		_pieces.add_child(w)
+	_lock_pieces()
 	shown.emit()
+
+
+## Looking back (TASK-83): the HUD shows the character as it is now but can't be used.
+func set_locked(on: bool) -> void:
+	if on == locked:
+		return
+	locked = on
+	_lock_pieces()
+
+
+func _lock_pieces() -> void:
+	for w: Node in _pieces.get_children():
+		var block := w.get_node_or_null("PastLock") as Control
+		if locked and block == null and w is Control:
+			block = Control.new()
+			block.name = "PastLock"
+			block.set_anchors_preset(Control.PRESET_FULL_RECT)
+			block.mouse_filter = Control.MOUSE_FILTER_STOP
+			block.tooltip_text = "You're looking back in time: go back to Now (Home) to act"
+			w.add_child(block)
+		elif not locked and block != null:
+			block.queue_free()
+		if w is Control:
+			(w as Control).modulate.a = 0.55 if locked else 1.0
 
 
 ## Builds it again (e.g. the app's buttons changed).

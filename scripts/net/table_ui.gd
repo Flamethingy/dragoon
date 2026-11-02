@@ -103,6 +103,8 @@ func _ready() -> void:
 	timeline_bar.visible = false
 	root.add_child(timeline_bar)
 	timeline_bar.follow(table.timeline_sync, table.notes.calendar)
+	timeline_bar.cursor_changed.connect(func(_at: int) -> void: table.look_back(timeline_bar.cursor_event()))
+	table.past_changed.connect(func() -> void: hud.set_locked(table.looking_back >= 0))
 	timeline_bar.list_requested.connect(func(first: int, last: int) -> void:
 		if table.is_dm() and timeline_list_opener.is_valid():
 			timeline_list_opener.call(first, last))

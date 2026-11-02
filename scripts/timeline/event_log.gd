@@ -146,8 +146,11 @@ func own_events() -> Array[Dictionary]:
 
 ## `cost`: the squares the move cost (difficult ones count twice), -1 = not known (counted
 ## from the straight line then).
-func move_token(entity: String, map: String, from: Vector2i, to: Vector2i, by := "dm", group := "", facing := "", cost := -1) -> Dictionary:
+## `trail`: the squares it went along (from .. to, TASK-83: the timeline walks it again).
+func move_token(entity: String, map: String, from: Vector2i, to: Vector2i, by := "dm", group := "", facing := "", cost := -1, trail: Array = []) -> Dictionary:
 	var data := {"map": map, "from": [from.x, from.y], "to": [to.x, to.y]}
+	if trail.size() >= 2:
+		data["trail"] = trail.map(func(c: Vector2i) -> Array: return [c.x, c.y])
 	if cost >= 0:
 		data["cost"] = cost
 	if group != "":

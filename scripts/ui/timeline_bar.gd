@@ -80,6 +80,18 @@ func _on_cursor(at: int) -> void:
 	cursor_changed.emit(at)
 
 
+## The last event of the moment the cursor is on: -1 = now, 0 = before everything (TASK-83).
+func cursor_event() -> int:
+	if line.cursor_at < 0:
+		return -1
+	var found := 0
+	for m: Dictionary in line.moments():
+		if int(m.at) > line.cursor_at:
+			break
+		found = int(m.last_id)
+	return found
+
+
 func _show_when() -> void:
 	var ms := line.moments()
 	if line.cursor_at < 0:
@@ -90,7 +102,7 @@ func _show_when() -> void:
 		if int(m.at) > line.cursor_at:
 			break
 		i = int(m.index)
-	when_label.text = "looking back: %s" % (line.moment_text(ms[i]).get_slice("\n", 0) if i >= 0 else "before the beginning")
+	when_label.text = "looking back: %s · act at Now" % (line.moment_text(ms[i]).get_slice("\n", 0) if i >= 0 else "before the beginning")
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

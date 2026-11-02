@@ -61,6 +61,9 @@ var map_layer: MapLayer  ## walls, doors, light, terrain and fog (TASK-73)
 var budget: Callable
 ## The squares of other tokens that count as difficult for `id` (TASK-79): id -> {cell: true}.
 var crowd: Callable
+var past := {}  ## id -> Sprite2D of the moment looked back at (TASK-83); the live tokens are hidden then
+var locked := false  ## no moves, steps, selection or token menus (looking back, TASK-83)
+var _past_layer: Node2D
 var _glide := {}  ## id -> trail (cells) the next confirmed move of it glides along
 var _right_at := Vector2.ZERO  ## where the right button went down (a click opens the token's menu)
 var _box_from := Vector2.ZERO  ## map position where a selection box started
@@ -153,25 +156,114 @@ func add_token_view(info: Dictionary, texture: Texture2D, at: Vector2i) -> void:
 		if facing == "":
 			facing = str(tokens[id].get_meta("facing", ""))
 		tokens[id].queue_free()
+	var token := _token_sprite(info, texture)
+	token.set_meta("start", at)
+	token.visible = _past_layer == null  # looking back: it shows again at now
+	tokens[id] = token
+	var marks := token.get_node("Marks") as TokenMarks
+	marks.selected = selected.has(id)
+	marks.active = id == active
+	add_child(token)
+	set_token_cell(id, at, false)
+	set_token_facing(id, facing)
+
+
+func _token_sprite(info: Dictionary, texture: Texture2D) -> Sprite2D:
 	var cells: float = SIZE_CELLS.get(str(info.get("size", "medium")).to_lower(), 1.0)
 	var token := Sprite2D.new()
 	token.texture = texture
 	token.scale = Vector2.ONE * cell * cells / maxf(texture.get_width(), texture.get_height())
-	token.set_meta("entity", id)
+	token.set_meta("entity", str(info.get("id", "")))
 	token.set_meta("cells", cells)
-	token.set_meta("start", at)
 	token.set_meta("info", info)
-	tokens[id] = token
 	var marks := TokenMarks.new()
 	marks.name = "Marks"
 	marks.scale = Vector2.ONE / token.scale
 	marks.radius = cell * cells * 0.5
-	marks.selected = selected.has(id)
-	marks.active = id == active
 	token.add_child(marks)
-	add_child(token)
-	set_token_cell(id, at, false)
-	set_token_facing(id, facing)
+	return token
+
+
+# --- Looking back (TASK-83) -------------------------------------------------------------------
+
+## Shows the tokens of a past moment over the hidden live ones: `list` [{info (token view with
+## its cell), texture}], `paths` {id: [Vector2i...]}: the way each token went from the moment
+## shown before (it walks it, also backwards). The live tokens go on underneath unseen.
+func show_past(list: Array, paths: Dictionary) -> void:
+	if _past_layer == null:
+		_past_layer = Node2D.new()
+		_past_layer.name = "Past"
+		add_child(_past_layer)
+		for t: Sprite2D in tokens.values():
+			t.visible = false
+		if plans != null:
+			plans.cancel()
+	var keep := {}
+	for p: Dictionary in list:
+		var info: Dictionary = p.info
+		var id := str(info.id)
+		var at: Vector2i = info.cell
+		keep[id] = true
+		var s: Sprite2D = past.get(id)
+		if s != null and s.texture != p.texture:
+			s.queue_free()
+			s = null
+		if s == null:
+			s = _token_sprite(info, p.texture)
+			past[id] = s
+			_past_layer.add_child(s)
+			s.position = cell_center(at, s.get_meta("cells"))
+		else:
+			s.set_meta("info", info)
+			_walk(s, paths.get(id, []), at)
+		s.set_meta("cell", at)
+		if str(info.get("facing", "")) != "":
+			_face(s, str(info.facing))
+		_mark_conditions(s, id, info.get("conditions", []), int(info.get("exhaustion", 0)))
+	for id: String in past.keys():
+		if not keep.has(id):
+			past[id].queue_free()
+			past.erase(id)
+
+
+## Back to now: the past tokens go, the live ones show.
+func end_past() -> void:
+	if _past_layer == null:
+		return
+	_past_layer.queue_free()
+	_past_layer = null
+	past.clear()
+	for t: Sprite2D in tokens.values():
+		t.visible = true
+
+
+func is_past() -> bool:
+	return _past_layer != null
+
+
+## A past token walks `path` (cells, square by square) to `at`; at most ~1.5 s however far.
+func _walk(s: Sprite2D, path: Array, at: Vector2i) -> void:
+	var running: Tween = s.get_meta("tween") if s.has_meta("tween") else null
+	if running != null and running.is_valid():
+		running.kill()
+	var cells: float = s.get_meta("cells")
+	var points: Array = path.slice(1) if path.size() >= 2 and path.back() == at else [at]
+	if points.size() == 1 and cell_center(at, cells).is_equal_approx(s.position):
+		return
+	if not is_inside_tree():
+		s.position = cell_center(at, cells)
+		return
+	var step := minf(MOVE_SECONDS_PER_CELL, 1.5 / points.size())
+	var tween := s.create_tween().set_trans(Tween.TRANS_LINEAR)
+	s.set_meta("tween", tween)
+	var prev: Vector2i = path[0] if path.size() >= 2 and path.back() == at else Vector2i(-9999, -9999)
+	for c: Vector2i in points:
+		if prev != Vector2i(-9999, -9999):
+			var face := facing_of(c - prev)
+			if face != "":
+				tween.tween_callback(_face.bind(s, face))
+		tween.tween_property(s, "position", cell_center(c, cells), step)
+		prev = c
 
 
 ## Marks a token as an attack's target (TASK-54: a red ring).
@@ -184,9 +276,12 @@ func set_targeted(id: String, on: bool) -> void:
 
 ## The condition marks on a token (TASK-56): a small coloured disc with its short name each.
 func set_token_conditions(id: String, conditions: Array, exhaustion := 0) -> void:
-	if not tokens.has(id):
-		return
-	var marks := tokens[id].get_node_or_null("Marks") as TokenMarks
+	if tokens.has(id):
+		_mark_conditions(tokens[id], id, conditions, exhaustion)
+
+
+func _mark_conditions(token: Sprite2D, id: String, conditions: Array, exhaustion: int) -> void:
+	var marks := token.get_node_or_null("Marks") as TokenMarks
 	if marks == null:
 		return
 	var list := []
@@ -200,15 +295,18 @@ func set_token_conditions(id: String, conditions: Array, exhaustion := 0) -> voi
 	marks.conditions = list
 	# TASK-57: a dead (or knocked out) creature is greyed
 	var down := "dead" in conditions or ("unconscious" in conditions and not id.begins_with("characters/"))
-	tokens[id].self_modulate = Color(0.45, 0.45, 0.45, 0.8) if down else Color.WHITE
+	token.self_modulate = Color(0.45, 0.45, 0.45, 0.8) if down else Color.WHITE
 
 
 ## Turns a token (n, ne, e ... nw): the triangle at its edge, and the picture mirrored when
 ## it looks to the other side than the picture faces (token_style.faces).
 func set_token_facing(id: String, facing: String) -> void:
 	var token: Sprite2D = tokens.get(id)
-	if token == null:
-		return
+	if token != null:
+		_face(token, facing)
+
+
+func _face(token: Sprite2D, facing: String) -> void:
 	token.set_meta("facing", facing)
 	(token.get_node("Marks") as TokenMarks).set_facing(facing)
 	var dx: int = FACINGS[facing].x if FACINGS.has(facing) else 0
@@ -306,7 +404,7 @@ func _held_dir() -> Vector2i:
 ## A movement key: collected for a moment so two keys together make a diagonal.
 func key_step(key: Key, turn_only: bool, echo := false) -> bool:
 	var d := _key_dir(key)
-	if d == Vector2i.ZERO or selection().is_empty():
+	if locked or d == Vector2i.ZERO or selection().is_empty():
 		return false
 	if echo:
 		var held := _held_dir()
@@ -546,7 +644,7 @@ func _draw() -> void:
 
 func _token_under(at: Vector2) -> Sprite2D:
 	var best: Sprite2D = null
-	for token: Sprite2D in tokens.values():
+	for token: Sprite2D in (past if _past_layer != null else tokens).values():
 		if token.get_rect().has_point(token.to_local(at)):
 			best = token  # later ones are drawn on top
 	return best
@@ -598,9 +696,9 @@ func _unhandled_input(event: InputEvent) -> void:
 					_right_at = event.position
 				elif event.position.distance_to(_right_at) < 6.0:
 					var t := _token_under(get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position)
-					if t != null:
+					if t != null and not locked:
 						token_menu.emit(str(t.get_meta("entity")))
-		elif event.button_index == MOUSE_BUTTON_LEFT:
+		elif event.button_index == MOUSE_BUTTON_LEFT and not locked:
 			var at := get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position
 			if event.pressed:
 				get_viewport().gui_release_focus()  # the map has the keys now

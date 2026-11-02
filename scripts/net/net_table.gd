@@ -24,6 +24,7 @@ signal entry_received(ref: String)  ## player: an entry I asked for arrived or c
 signal accounts_changed  ## names or colors of the accounts changed
 signal sheet_received(ref: String)  ## a sheet I opened arrived or changed (TASK-10)
 signal rolls_changed  ## the roll log got a roll (TASK-12)
+signal roll_shown(entry: Dictionary)  ## a new roll card with dice in my feed: the 3D dice throw it (TASK-61)
 signal entry_imported(entry: Dictionary)
 signal condition_menu_requested(ref: String)
 signal concentration_confirm(ref: String, old_name: String, new_name: String, go: Callable)  ## a second concentration spell (TASK-59)
@@ -2533,6 +2534,8 @@ func _handle_table_roll(sender: int, id: String, hidden: bool) -> Dictionary:
 
 func _add_roll(entry: Dictionary) -> void:
 	rolls.append(entry)
+	if not (entry.get("results", []) as Array).is_empty():
+		roll_shown.emit(entry)
 	if entry.has("table") and _ui != null:  # the table on my screen shows the row
 		RollTables.set_result(str(entry.table), int(entry.value), int(entry.row))
 	if rolls.size() > ROLL_LOG_SIZE:

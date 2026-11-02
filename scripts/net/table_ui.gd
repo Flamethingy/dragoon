@@ -56,6 +56,7 @@ var _roll_hidden: CheckBox
 var condition_menu: PopupMenu  ## a creature's conditions to tick (TASK-56)
 var tracker: CombatTracker  ## the initiative order while a combat runs (TASK-58)
 var attack_bar: PanelContainer  ## picking targets for an attack (TASK-54)
+var dice_tray: DiceTray  ## 3D dice over the table (TASK-61)
 var attack := {}  ## {ref, query, multi, targets: []} while picking
 var _attack_label: Label
 var _cover: OptionButton
@@ -75,6 +76,9 @@ func _ready() -> void:
 	map_drop.name = "MapDrop"
 	map_drop.table = table
 	root.add_child(map_drop)
+	dice_tray = DiceTray.new()  # over the map, under the panels
+	dice_tray.table = table
+	root.add_child(dice_tray)
 	_build_bar(root)
 	_build_notes(root)
 	sheet = SheetPanel.new()

@@ -2,7 +2,8 @@ class_name MapDrop
 extends Control
 ## Covers the map while a compendium entry is dragged and takes the drop: a token on that
 ## cell (NetTable.drop_token, TASK-34/37). Otherwise it lets every click through to the map.
-## While it hovers, a transparent ghost of the token shows where it lands (TASK-45).
+## While it hovers, a transparent ghost of the token shows where it lands (TASK-45), in place
+## of the transparent card that follows the mouse elsewhere (TASK-93).
 ## TASK-94: an item, spell or feature dropped on a token joins that creature's lists (the token
 ## under the mouse lights up; one the dropper may not change refuses it).
 
@@ -61,6 +62,9 @@ func _can_drop_data(at: Vector2, data: Variant) -> bool:
 		var cells: float = TokenGrid.SIZE_CELLS.get(str(e.get("size", "medium")).to_lower(), 1.0)
 		var screen := get_global_transform_with_canvas() * at
 		table.grid.plans.show_spawn(ghost_texture(e), cells, table.grid.cell_at_screen(screen))
+		EntryDrag.show_preview(not table.grid.plans.spawn_visible())  # TASK-93: the ghost instead of the card (off the grid: the card)
+	else:
+		EntryDrag.show_preview(true)
 	return ok
 
 
@@ -90,5 +94,6 @@ func ghost_texture(e: Dictionary) -> Texture2D:
 
 
 func _hide_ghost() -> void:
+	EntryDrag.show_preview(true)  # TASK-93: off the map the card shows again
 	if table != null and table.grid != null and table.grid.plans != null:
 		table.grid.plans.hide_spawn()

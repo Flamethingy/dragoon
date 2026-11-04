@@ -56,17 +56,42 @@ static func ref_of(d: Variant) -> String:
 	return "%s/%s" % [e.get("_kind", ""), e.get("id", "")] if not e.is_empty() else ""
 
 
-## A label to show under the mouse while dragging.
+const PREVIEW_ALPHA := 0.55
+
+static var _preview: WeakRef  ## the card following the mouse (TASK-93)
+
+
+## TASK-93 (Nico 2026-11-04): a transparent copy of the card follows the mouse while dragging,
+## the mouse at its middle. Over the map a creature's card makes way for the token ghost
+## (MapDrop calls show_preview).
 static func preview(e: Dictionary) -> Control:
-	var l := Label.new()
-	l.text = str(e.get("name", "?"))
-	l.add_theme_color_override("font_color", UISkin.INK)
-	var bg := StyleBoxFlat.new()
-	bg.bg_color = UISkin.CREAM
-	bg.set_content_margin_all(6)
-	bg.set_corner_radius_all(4)
-	l.add_theme_stylebox_override("normal", bg)
-	return l
+	var holder := Control.new()
+	holder.name = "EntryPreview"
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var card := EntryCard.new()
+	card.setup(e)
+	card.name = "Card"
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.mouse_default_cursor_shape = Control.CURSOR_ARROW
+	card.tooltip_text = ""
+	card.size = EntryCard.SIZE
+	card.position = -EntryCard.SIZE * 0.5
+	holder.add_child(card)
+	holder.modulate.a = PREVIEW_ALPHA
+	_preview = weakref(holder)
+	return holder
+
+
+## The card following the mouse, null if none.
+static func preview_node() -> Control:
+	return _preview.get_ref() as Control if _preview != null else null
+
+
+## Shows or hides the card following the mouse (hidden while the token ghost shows).
+static func show_preview(on: bool) -> void:
+	var p := preview_node()
+	if p != null and p.visible != on:
+		p.visible = on
 
 
 ## The [[link]] a note gets for an entry.

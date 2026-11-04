@@ -4,6 +4,10 @@ extends Control
 ## active character (the same key again, or Esc, closes it); F2 edits the open one like home screens
 ## (LayoutEditor). A page is a grid (HudWidgets.PAGE_GRID) of the same pieces as the HUD,
 ## saved in the character (`sheet_pages`), for creatures in their template in the Book.
+## TASK-92 (Nico 2026-11-04): its head dragged out of the program's window pulls the page out
+## into its own window (DetachedPage), pinned to that character; several may be open. Which
+## ones are open (character, page, window rect) is remembered per player (`detached_file`)
+## and they come back with the session.
 
 const MARGIN := 16.0
 const HEAD := 44.0
@@ -13,6 +17,9 @@ var current := 0
 var _book: PanelContainer
 var _tabs: HBoxContainer
 var _pieces: Control
+var detached: Array[DetachedPage] = []
+var _pulling := false
+var _restored := false
 
 
 func _init() -> void:
@@ -30,6 +37,10 @@ func _init() -> void:
 	_tabs = HBoxContainer.new()
 	_tabs.name = "Tabs"
 	_tabs.custom_minimum_size.y = HEAD - 8
+	_tabs.mouse_filter = Control.MOUSE_FILTER_STOP
+	_tabs.mouse_default_cursor_shape = Control.CURSOR_MOVE
+	_tabs.tooltip_text = "Drag it out of the program: this page in its own window, for this character"
+	_tabs.gui_input.connect(_tabs_input)
 	col.add_child(_tabs)
 	_pieces = Control.new()
 	_pieces.name = "Pieces"
@@ -41,6 +52,110 @@ func _ready() -> void:
 	resized.connect(refresh)
 	if hud != null and hud.table != null:  # TASK-94: drop items etc. on the pages
 		EntryDrag.accept_on(self, hud.table, func() -> String: return hud.active)
+		hud.table.table_changed.connect(restore_detached)  # TASK-92: once the table is there
+		hud.table.pcs_changed.connect(restore_detached)
+
+
+# --- Detached pages (TASK-92) ------------------------------------------------------------------
+
+## The head dragged past the program's edge: the open page in its own window, in the hand.
+func _tabs_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		_pulling = event.pressed
+	elif event is InputEventMouseMotion and _pulling:
+		var at := get_viewport().get_mouse_position()
+		if not get_viewport().get_visible_rect().grow(-2).has_point(at):
+			_pulling = false
+			detach(hud.active, current, DisplayServer.mouse_get_position())
+			_tabs.accept_event()
+
+
+## May this user pull out `ref`'s pages? The DM any creature's, a player those they control.
+func may_detach(ref: String) -> bool:
+	if hud == null or hud.table == null or ref == "" or ref == NetTable.PARTY:
+		return false
+	if ref.get_slice("/", 0) not in Timeline.CREATURES:
+		return false
+	return hud.table.is_dm() or ref in hud.controlled()
+
+
+## Page `index` of `ref` in its own window; carried by the mouse when `screen` (the mouse on
+## the desktop) is given. `win`: its window's rect from last time. Null if it may not.
+func detach(ref: String, index: int, screen := Vector2i(-1, -1), win: Array = []) -> DetachedPage:
+	if not may_detach(ref):
+		return null
+	if not _restored:
+		restore_detached()  # last time's first, so this one is saved beside them
+	var dp := DetachedPage.new()
+	dp.setup(self, ref, index)
+	var g := grid_rect()  # the page at its design size
+	dp.size = g.size + Vector2(MARGIN * 2, HEAD + MARGIN)
+	if win.size() == 4:
+		dp.place.win = win
+	get_parent().add_child(dp)
+	dp.gone.connect(_on_gone)
+	detached.append(dp)
+	dp.pop_out()
+	if screen.x >= 0 and dp.window != null:
+		var grab := Vector2i(60, 14)
+		dp.window.position = screen - grab
+		dp.start_carry(grab)
+	if visible and hud.active == ref:
+		close()  # it's out now
+	save_detached()
+	return dp
+
+
+func _on_gone(dp: DetachedPage) -> void:
+	detached.erase(dp)
+	save_detached()
+
+
+## Where the open detached pages are kept: per player, beside their cache.
+func detached_file() -> String:
+	var t := hud.table if hud != null else null
+	if t == null or t.cache_dir == "user://cache/assets":
+		return "user://pages.cfg"
+	return t.cache_dir.path_join("pages.cfg")
+
+
+func _player_key() -> String:
+	var t := hud.table if hud != null else null
+	return "dm" if t != null and t.is_dm() else str(t.my_player) if t != null and str(t.my_player) != "" else "me"
+
+
+func save_detached() -> void:
+	if hud == null or hud.table == null or not _restored:
+		return
+	var list := []
+	for dp in detached:
+		if not is_instance_valid(dp) or dp.ref == "":
+			continue
+		var rect: Variant = dp.place.get("win", [])
+		list.append({"ref": dp.ref, "page": dp.page, "win": rect if rect is Array else []})
+	var cfg := ConfigFile.new()
+	cfg.load(detached_file())
+	cfg.set_value("detached", _player_key(), list)
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(detached_file().get_base_dir()))
+	cfg.save(detached_file())
+
+
+## The pages that were out last time come out again (once, when the table is there).
+func restore_detached() -> void:
+	if _restored or hud == null or hud.table == null or not hud.table.is_online() or hud.controlled().is_empty():
+		return
+	_restored = true
+	var cfg := ConfigFile.new()
+	if cfg.load(detached_file()) != OK:
+		return
+	var saved: Variant = cfg.get_value("detached", _player_key(), [])
+	if not saved is Array:
+		return
+	for one: Variant in saved:
+		if one is Dictionary:
+			var win: Variant = one.get("win", [])
+			detach(str(one.get("ref", "")), int(one.get("page", 0)), Vector2i(-1, -1), win if win is Array else [])
+	save_detached()  # the ones this player may no longer see are dropped
 
 
 ## The book's rect: centred, most of the screen.

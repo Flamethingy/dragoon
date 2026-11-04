@@ -113,9 +113,16 @@ static func accept_on(root: Control, table: NetTable, ref_of: Callable) -> void:
 	hook.call(root)
 	for n: Node in root.find_children("*", "Control", true, false):
 		hook.call(n)
-	root.get_tree().node_added.connect(func(n: Node) -> void:
-		if is_instance_valid(root) and root.is_ancestor_of(n):
-			hook.call(n))
+	var tree := root.get_tree()
+	var held: WeakRef = weakref(root)  # the root may be freed first (a closed detached page)
+	var slot := {}
+	slot.f = func(n: Node) -> void:
+		var r: Control = held.get_ref() as Control
+		if r == null:
+			tree.node_added.disconnect(slot.f)
+		elif r.is_ancestor_of(n):
+			hook.call(n)
+	tree.node_added.connect(slot.f)
 
 
 ## What a sheet gets: [list key, new list] for a dropped item/spell/feature, [] if it can't.

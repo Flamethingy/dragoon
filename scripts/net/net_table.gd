@@ -85,6 +85,16 @@ var tables := {}  ## id -> rollable table (packages' tables.json, the timeline's
 const ROLL_LOG_SIZE := 100
 var sheet_watchers := {}  ## host: ref -> {peer id: true} who has the sheet open
 var hud_ref := ""  ## the active character (CharacterHud, TASK-44): its sheet stays open
+var kept_sheets := {}  ## ref -> how many detached sheet pages show it (TASK-92): stays open
+
+
+## A detached sheet page shows `ref` (on) or not any more: its sheet stays open meanwhile.
+func keep_sheet(ref: String, on: bool) -> void:
+	var n := int(kept_sheets.get(ref, 0)) + (1 if on else -1)
+	if n > 0:
+		kept_sheets[ref] = n
+	else:
+		kept_sheets.erase(ref)
 var _show_sheet := {}  ## refs whose sheet should show in the sheet panel when it arrives
 var _state := {}  ## the last table view from the host
 var _status: ServerStatus.Responder  ## host: answers the start screens' heartbeat (TASK-38)
@@ -2941,6 +2951,8 @@ func close_sheet(ref: String) -> void:
 	_show_sheet.erase(ref)
 	if ref == hud_ref and ref != "":
 		return  # the HUD still shows it
+	if int(kept_sheets.get(ref, 0)) > 0:
+		return  # a detached sheet page shows it (TASK-92)
 	sheets.erase(ref)
 	if is_online() and not is_dm():
 		forget_sheet.rpc_id(1, ref)

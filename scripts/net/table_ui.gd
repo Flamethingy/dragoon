@@ -42,6 +42,7 @@ var _book: Compendium
 var sheet: SheetPanel
 var hud: CharacterHud  ## the active character, lower left (TASK-44)
 var chat: ChatBox  ## the chat on the right of the calm table (TASK-46)
+var bunny: TableBunny  ## the Table Bunny walking along the bottom (TASK-98)
 var timeline_bar: TimelineBar  ## the moments of the timeline, at the top (TASK-82)
 ## DM: show these events of a moment in the Timeline list (the app opens it).
 var timeline_list_opener := Callable()
@@ -99,6 +100,10 @@ func _ready() -> void:
 	chat.active_ref = func() -> String: return hud.active
 	chat.visible = false
 	root.add_child(chat)
+	bunny = TableBunny.new()
+	bunny.table = table
+	bunny.chat = chat
+	root.add_child(bunny)
 	timeline_bar = TimelineBar.new()
 	timeline_bar.visible = false
 	root.add_child(timeline_bar)
@@ -169,6 +174,7 @@ func _refresh() -> void:
 	_bar.visible = online and not minimal
 	_notes_panel.visible = online
 	chat.visible = online and minimal  # the app's calm table; otherwise the session panel has the rolls
+	bunny.visible = online and bunny.is_on()
 	timeline_bar.visible = online
 	timeline_bar.dm = dm
 	timeline_bar.line.can_extend = dm  # the DM drags into the future to pass time

@@ -480,6 +480,8 @@ func _build_esc_menu(root: Control) -> void:
 		{"text": "Book", "shown": dm, "action": toggle_view.bind("world")},
 		{"text": "Calendar", "shown": dm, "action": open_calendar},  # Nico 2026-11-02
 		{"text": "Table Bunny", "shown": dm, "action": open_bunny_settings},  # TASK-95
+		{"text": "Show the bunny", "shown": func() -> bool: return table_ui != null and table_ui.bunny != null and not table_ui.bunny.is_on(),
+			"action": func() -> void: table_ui.bunny.set_on(true)},  # TASK-98: hidden from its menu
 		{"text": "Test: fill with random events", "shown": func() -> bool: return table.is_dm() and not table.in_combat(),
 			"action": func() -> void:  # Nico 2026-11-02: chat and timeline for a long test
 				table_ui.timeline_bar.line.set_cursor(-1)

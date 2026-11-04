@@ -275,7 +275,10 @@ static func build(kind: String, s: Dictionary, hud: CharacterHud, size: Vector2,
 			body = _turn(hud)
 		_:
 			body = Label.new()
-	panel.add_child(body)
+	var fit := FitBox.new()  # content bigger than the piece shrinks into it instead of growing the frame
+	fit.name = "Fit"
+	fit.add_child(body)
+	panel.add_child(fit)
 	if kind == "portrait" and s.get("concentration") is Dictionary:  # TASK-59
 		var conc := Label.new()
 		conc.name = "Concentration"
@@ -836,3 +839,25 @@ static func _signed(n: int) -> String:
 static func _lists(s: Dictionary, key: String, name: String) -> bool:
 	var list: Variant = s.get(key)
 	return (list is Dictionary and (list as Dictionary).has(name)) or (list is Array and name in list)
+
+
+## Holds a piece's content (Nico 2026-11-04: pieces drawn bigger than their frame): it asks for
+## no size of its own, so the frame stays the piece's size; content that needs more room is
+## scaled down to fit (never up).
+class FitBox extends Container:
+	func _init() -> void:
+		clip_contents = true
+		mouse_filter = Control.MOUSE_FILTER_PASS
+		size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+	func _notification(what: int) -> void:
+		if what != NOTIFICATION_SORT_CHILDREN:
+			return
+		for c in get_children():
+			if c is Control and (c as Control).visible:
+				var m := (c as Control).get_combined_minimum_size()
+				var k := minf(1.0, minf(size.x / maxf(m.x, 1.0), size.y / maxf(m.y, 1.0)))
+				k = maxf(k, 0.05)
+				fit_child_in_rect(c, Rect2(Vector2.ZERO, size / k))
+				(c as Control).scale = Vector2(k, k)

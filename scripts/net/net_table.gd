@@ -86,6 +86,7 @@ const ROLL_LOG_SIZE := 100
 var sheet_watchers := {}  ## host: ref -> {peer id: true} who has the sheet open
 var hud_ref := ""  ## the active character (CharacterHud, TASK-44): its sheet stays open
 var bunny: BunnyBrain  ## the Table Bunny's brain: only on the host (TASK-95)
+var bunny_mcp: BunnyMcp  ## the bunny's tools over MCP for a local assistant, if the host switched it on (TASK-99)
 var bunny_state := "sleeping"  ## as the host says (TASK-97): idle / thinking / working / sleeping
 var bunny_detail := ""  ## "thinking for Borin"
 var bunny_waiting := 0  ## questions in its queue
@@ -262,6 +263,7 @@ func host(port := DEFAULT_PORT) -> Error:
 		bunny.status_changed.connect(_on_bunny_status)
 		bunny.answered.connect(_on_bunny_answered)
 		_on_bunny_status(bunny.state, bunny.detail, bunny.waiting())
+	apply_bunny_mcp()
 	_set_status("Hosting %s on port %d (%d events in the log)" % [timeline.info.get("name", timeline.id()), port, event_log.events.size()])
 	return OK
 
@@ -4889,6 +4891,23 @@ func _on_bunny_answered(sender: int, text: String, error: bool, context: Diction
 	if bool(context.get("hint", false)):
 		entry["hint"] = true
 	_send_bunny(sender, public, entry)
+
+
+## Host: the MCP server for local assistants on or off, as the bunny settings say (TASK-99).
+func apply_bunny_mcp() -> void:
+	var want := is_dm() and bool(BunnyBrain.setting("mcp_on"))
+	var at := int(BunnyBrain.setting("mcp_port"))
+	if bunny_mcp != null and (not want or bunny_mcp.port != at or bunny_mcp.token != BunnyMcp.ensure_token()):
+		bunny_mcp.stop()
+		bunny_mcp.queue_free()
+		bunny_mcp = null
+	if want and bunny_mcp == null:
+		bunny_mcp = BunnyMcp.new()
+		bunny_mcp.name = "BunnyMcp"
+		bunny_mcp.table = self
+		add_child(bunny_mcp)
+		if bunny_mcp.start(at) != OK:
+			_set_status("The bunny's MCP server can't use port %d" % at)
 
 
 ## DM: stops the bunny's long job or the answer it is working on.

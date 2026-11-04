@@ -12,6 +12,9 @@ var cooldown: SpinBox
 var name_edit: LineEdit
 var personality: TextEdit
 var used: Label
+var mcp_on: CheckBox
+var mcp_port: SpinBox
+var mcp_info: LineEdit
 
 
 func _init() -> void:
@@ -52,6 +55,19 @@ func _init() -> void:
 	pl.text = "Personality"
 	col.add_child(pl)
 	col.add_child(personality)
+	mcp_on = CheckBox.new()  # TASK-99
+	mcp_on.name = "McpOn"
+	mcp_on.text = "Let assistants on this computer use the table (MCP, with the DM's rights)"
+	col.add_child(mcp_on)
+	mcp_port = _row(col, "MCP port", SpinBox.new()) as SpinBox
+	mcp_port.name = "McpPort"
+	mcp_port.min_value = 1024
+	mcp_port.max_value = 65535
+	mcp_info = LineEdit.new()
+	mcp_info.name = "McpInfo"
+	mcp_info.editable = false
+	mcp_info.tooltip_text = "For the assistant's MCP settings: the address and the token (Authorization: Bearer ...)"
+	col.add_child(mcp_info)
 	used = Label.new()
 	used.name = "Used"
 	used.theme_type_variation = UISkin.V_MUTED
@@ -81,6 +97,9 @@ func fill() -> void:
 	cooldown.value = int(BunnyBrain.setting("cooldown"))
 	name_edit.text = str(BunnyBrain.setting("name"))
 	personality.text = str(BunnyBrain.setting("personality"))
+	mcp_on.button_pressed = bool(BunnyBrain.setting("mcp_on"))
+	mcp_port.value = int(BunnyBrain.setting("mcp_port"))
+	mcp_info.text = "http://127.0.0.1:%d/mcp   token %s" % [int(mcp_port.value), BunnyMcp.ensure_token()]
 	var spent := brain.tokens_used if brain != null else 0
 	used.text = "This session: %d of %d tokens" % [spent, int(limit.value)]
 
@@ -99,5 +118,9 @@ func save() -> void:
 	BunnyBrain.set_setting("cooldown", int(cooldown.value))
 	BunnyBrain.set_setting("name", name_edit.text.strip_edges() if name_edit.text.strip_edges() != "" else "Bunny")
 	BunnyBrain.set_setting("personality", personality.text.strip_edges())
+	BunnyBrain.set_setting("mcp_on", mcp_on.button_pressed)
+	BunnyBrain.set_setting("mcp_port", int(mcp_port.value))
 	if brain != null:
 		brain._set_state("sleeping" if not brain.awake() else "idle", "")
+		if brain.table != null:
+			brain.table.apply_bunny_mcp()

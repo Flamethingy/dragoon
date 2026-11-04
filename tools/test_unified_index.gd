@@ -96,7 +96,7 @@ func _init() -> void:
 	_check(overlay.event_log == table.event_log and overlay.timeline_dir == campaign and overlay.closable, "table: compendium with the table's log")
 	await overlay.db.loaded
 	overlay.close_requested.emit()
-	_check(not overlay.visible, "Back to the table hides it")
+	_check(not overlay.visible, "closing it hides it")
 	table.multiplayer.multiplayer_peer.close()
 
 	print("unified index: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))

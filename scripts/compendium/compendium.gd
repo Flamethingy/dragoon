@@ -176,11 +176,7 @@ func _build() -> void:
 	_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_tabs.add_theme_constant_override("separation", 6)
 	tabs_scroll.add_child(_tabs)
-	if closable:
-		var close := Button.new()
-		close.text = "Back to the table"
-		close.pressed.connect(func() -> void: close_requested.emit())
-		side.add_child(close)
+	# No "Back to the table" button (Nico 2026-11-04): the panel's own close does that.
 	_packages_button = Button.new()
 	_packages_button.name = "Packages"
 	_packages_button.theme_type_variation = UISkin.V_TAB

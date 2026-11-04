@@ -52,6 +52,7 @@ func _ready() -> void:
 	if table.grid != null:
 		table.grid.selection_changed.connect(_on_selection)
 		table.grid.cleared.connect(dismiss)
+		table.grid.token_double_clicked.connect(open_first_page)
 	table.sheet_received.connect(func(ref: String) -> void:
 		if ref == active:
 			_fill())
@@ -110,6 +111,16 @@ func cycle(step: int) -> void:
 	var next := list[posmod(at + step, list.size())] if at >= 0 else (list[0] if step >= 0 else list[list.size() - 1])
 	if next != active or at < 0:
 		set_active(next, step)
+
+
+## A double-click on a token (TASK-110, Nico 2026-11-04): it becomes the active one and its
+## first sheet page opens, as key 1 does (open, not toggle). Only tokens I control.
+func open_first_page(ref: String) -> void:
+	if table == null or not table.is_online() or editor != null or pages == null or ref not in controlled():
+		return
+	set_active(ref)
+	if not page_list().is_empty():
+		pages.open(0)
 
 
 ## Nothing active, the HUD hidden (a click on the empty map).

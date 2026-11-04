@@ -10,6 +10,7 @@ extends Node2D
 signal move_requested(entity: String, cell: Vector2i)
 ## A token was clicked (pressed and released without dragging), e.g. to open its sheet.
 signal token_clicked(entity: String)
+signal token_double_clicked(entity: String)  ## TASK-110: opens the first sheet page
 signal token_menu(entity: String)  ## right click on a token without panning (TASK-56)
 ## WASD / arrow keys with tokens selected (TASK-42): step one cell in `dir` (8 directions),
 ## or with Shift only turn that way. Whoever owns the state decides.
@@ -779,6 +780,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_resume = ghost if tokens.has(ghost) and (not can_drag.is_valid() or can_drag.call(ghost)) else ""
 				_pressed = tokens[_resume] if _resume != "" else _token_under(at)
 				_press_at = event.position
+				if _pressed != null and (event as InputEventMouseButton).double_click:
+					token_double_clicked.emit(str(_pressed.get_meta("entity")))
 				if _pressed == null:
 					_boxing = true
 					_box_from = at

@@ -84,6 +84,29 @@ func _init() -> void:
 	one.physical_keycode = KEY_1
 	hud._input(one)
 	_check(hud.pages.visible and hud.pages.current == 0, "1 opens the first sheet page")
+	# TASK-110: a double-click on my token opens the first page too (not a toggle); not on others'
+	hud.pages.close()
+	ann.grid.token_double_clicked.emit("creatures/not-mine")
+	_check(not hud.pages.visible and hud.active == "characters/aria", "a double-click on a token I don't control opens nothing")
+	ann.grid.token_double_clicked.emit("characters/aria")
+	ann.grid.token_double_clicked.emit("characters/aria")
+	_check(hud.pages.visible and hud.pages.current == 0, "a double-click on my token opens the first sheet page")
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.double_click = true
+	press.position = ann.grid.get_canvas_transform() * (ann.grid.tokens["characters/aria"] as Node2D).position
+	var got := []
+	ann.grid.token_double_clicked.connect(func(id: String) -> void: got.append(id))
+	ann.grid._unhandled_input(press)
+	var release := press.duplicate() as InputEventMouseButton
+	release.pressed = false
+	release.double_click = false
+	ann.grid._unhandled_input(release)
+	_check(got == ["characters/aria"], "the map tells a double-click on a token (%s)" % [got])
+	hud.set_active("characters/aria")
+	hud.pages.open(0)
+	await process_frame
 	_check(hud.pages.find_child("W_abilities", true, false) != null and hud.pages.find_child("W_skills", true, false) != null, "the default page has the checks")
 	var stealth: Button = hud.pages.find_child("stealth", true, false)
 	_check(stealth != null and stealth.text == "Stealth +5", "skills with the sheet's bonus (%s)" % (stealth.text if stealth else "none"))

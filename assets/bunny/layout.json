@@ -1,0 +1,30 @@
+{
+  "about": "How the parts in rig.json are stacked into Tamago. Used by scripts/pet/rig.gd (the pet) and service/web/js/portrait.js (dashboard portraits). Layers are drawn bottom to top: [name, part, bone, mirror about this canvas x (0 = no), squeeze x]. The far ear, arm, leg and eye are the near ones mirrored (the PSD has one of each) and tinted far_tint. Bones are in rig.gd.",
+  "feet": [
+    1066,
+    993
+  ],
+  "far_tint": [
+    0.86,
+    0.87,
+    0.93
+  ],
+  "recolor_tolerance": 0.06,
+  "layers": [
+    ["ear_far", "ear", "ear_far", 1062.0, 1.0],
+    ["arm_far", "arm", "arm_far", 1080.0, 1.0],
+    ["leg_far", "leg", "leg_far", 1066.0, 1.0],
+    ["tail", "tail", "tail", 0.0, 1.0],
+    ["face_fill", "face_fill", "head", 0.0, 1.0],
+    ["body", "body", "hips", 0.0, 1.0],
+    ["leg", "leg", "leg", 0.0, 1.0],
+    ["arm", "arm", "arm", 0.0, 1.0],
+    ["head", "head", "head", 0.0, 1.0],
+    ["ear", "ear", "ear", 0.0, 1.0],
+    ["hair", "hair", "head", 0.0, 1.0],
+    ["eye", "eye", "head", 0.0, 1.0],
+    ["eye_far", "eye", "head", 1065.0, 0.8],
+    ["mouth", "mouth_base", "head", 0.0, 1.0],
+    ["nose", "nose", "head", 0.0, 1.0]
+  ]
+}

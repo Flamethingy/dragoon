@@ -3,7 +3,9 @@ extends SceneTree
 ## every client, sleeps without a brain, thinks (with its badge) while the host's brain works
 ## for someone, talks in a bubble when it answers me (long answers scroll), a click opens the
 ## chat with "/bunny ", and per client it can be quiet, big or hidden (the Esc menu brings it
-## back). It walks along the bottom when idle.
+## back). It walks along the bottom when idle. TASK-101: Tamago's rig and poses, puffs when
+## it appears and vanishes, carried by the scruff and falling back, hops, and the host's look
+## (colours, behaviour) on every screen.
 ## godot --headless --path . -s tools/test_table_bunny.gd
 
 const DIR := "user://test_table_bunny"
@@ -29,22 +31,31 @@ func _init() -> void:
 	app.packages_root = base.path_join("packages")
 	root.add_child(app)
 	await process_frame
+	root.size = Vector2i(1280, 720)  # the headless window shrinks to 64 px on the first frame
 	var red := ""
 	for w: Dictionary in Worlds.list(app.worlds_root):
 		red = str(w._dir).path_join("timelines/red-fang")
 	_check(app.host(red, PORT) == OK, "hosted")
 	await process_frame
 	var bunny: TableBunny = app.table_ui.bunny
-	_check(bunny != null and bunny.visible and bunny.size.x == TableBunny.SIZES.small, "the bunny is at the DM's table")
+	_check(bunny != null and bunny.visible and absf(bunny.size.y - TableBunny.SIZES.small) <= 1.0, "the bunny is at the DM's table (%s)" % bunny.size)
 	_check(bunny.anim == "sleep", "no brain: it sleeps (%s)" % bunny.anim)
+	_check(bunny.rig != null and bunny.rig.get_child_count() >= 10, "Tamago's rig, all its parts (%d)" % bunny.rig.get_child_count())
+	var ui0 := bunny.get_parent()
+	_check(ui0.get_children().any(func(n: Node) -> bool: return n is BunnyPuff) and not bunny.body.visible, "it appears in a puff")
+	await _until(func() -> bool: return bunny.body.visible, 60)
+	_check(bunny.body.visible, "and is there when the smoke covers it")
 	await process_frame
+	_check(bunny.rig.anim == "sleep" and bunny.rig._variant.get("eye") == "eye_closed", "asleep: the sleep pose, eyes shut")
 	var ui := bunny.get_parent() as Control
-	_check(is_equal_approx(bunny.position.y + bunny.size.y + 6.0, ui.size.y), "at the bottom of the window")
+	_check(is_equal_approx(bunny.position.y + bunny.size.y + 6.0, ui.size.y), "at the bottom of the window (%s %s %s %s)" % [bunny.position, bunny.size, ui.size, bunny.state])
 
 	# per client: big, hidden, back from the Esc menu
 	bunny.set_size_name("big")
-	_check(bunny.size.x == TableBunny.SIZES.big, "big")
+	_check(absf(bunny.size.y - TableBunny.SIZES.big) <= 1.0, "big")
 	bunny.set_on(false)
+	_check(bunny.visible and bunny.get_parent().get_children().any(func(n: Node) -> bool: return n is BunnyPuff), "switched off: it vanishes in a puff")
+	await _until(func() -> bool: return not bunny.visible, 60)
 	_check(not bunny.visible, "hidden")
 	app.esc_menu.open()
 	var show := app.esc_menu.button("Show the bunny")
@@ -61,6 +72,31 @@ func _init() -> void:
 	for i in 20:
 		bunny._process(0.1)
 	_check(bunny.anim in ["walk", "idle"] and bunny.position.x != x0, "it walks along the bottom")
+	bunny.anim = "walk"
+	bunny._walk_left = 5.0
+	bunny._process(0.05)
+	_check(bunny.rig.anim == "walk", "with the walk pose")
+
+	# carried by the scruff, dropped: it falls back down and lands
+	var ground := bunny.position.y
+	bunny.pick_up(bunny.global_position + Vector2(bunny.size.x * 0.5, bunny.size.y * 0.3))
+	bunny.drag_to(Vector2(400, 200))
+	bunny._process(0.016)
+	_check(bunny.state == "dragged" and bunny.rig.anim == "dragged" and bunny.position.y < ground - 100.0, "picked up and carried (%s)" % bunny.position)
+	var neck := bunny.global_position + bunny.body.position + bunny.rig.neck_position()
+	_check(neck.distance_to(Vector2(400, 200)) < 2.0, "held by the neck (%s)" % neck)
+	bunny.drop()
+	bunny._process(0.05)
+	_check(bunny.state == "air" and bunny.rig.anim == "fall", "let go: it falls")
+	for i in 120:
+		bunny._process(0.016)
+	_check(bunny.state == "ground" and is_equal_approx(bunny.position.y, ground), "and lands at the bottom")
+	bunny.hop()
+	bunny._process(0.016)
+	_check(bunny.state == "air" and bunny.rig.anim == "jump" and bunny.position.y < ground, "a hop")
+	for i in 120:
+		bunny._process(0.016)
+	_check(bunny.state == "ground", "back down")
 
 	app.esc_menu.open()
 	app.esc_menu.button("End the session").pressed.emit()
@@ -91,15 +127,41 @@ func _init() -> void:
 		return {"code": 200, "body": {"stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1},
 			"content": [{"type": "text", "text": reply[0]}]}}
 	dm.bunny._set_state("idle", "")
+	# the host's look: on every screen
+	BunnyBrain.set_setting("colors", {"fur": "#ff8800"})
+	BunnyBrain.set_setting("behaviour", {"walk_speed": 90.0, "hop_chance": 0.0})
+	dm.share_bunny_look()
+	await _until(func() -> bool: return float(bb.behaviour.walk_speed) == 90.0)
+	_check(float(bb.behaviour.walk_speed) == 90.0 and float(bb.behaviour.hop_chance) == 0.0, "Bob's bunny walks the host's way")
+	_check(bb.rig._to.has(Color.html("#ff8800")) and dbunny.rig._to.has(Color.html("#ff8800")), "in the host's colours, everywhere")
+	# the settings: colour pickers with a preview, saved and shared
+	var dialog := BunnySettings.new()
+	dialog.brain = dm.bunny
+	root.add_child(dialog)
+	dialog.fill()
+	_check(dialog.color_pickers.size() == 4 and dialog.color_pickers.has("fur") and (dialog.color_pickers.fur as ColorPickerButton).color == Color.html("#ff8800"), "the settings show its colours")
+	(dialog.color_pickers.hair as ColorPickerButton).color = Color.html("#22aa44")
+	dialog._preview_colors()
+	_check(dialog.preview._to.has(Color.html("#22aa44")), "the preview follows the picker")
+	_check(str(dialog.picked_colors().eyes) == "", "untouched slots stay as drawn")
+	dialog.walk_speed.value = 55
+	dialog.save()
+	await _until(func() -> bool: return float(bb.behaviour.walk_speed) == 55.0)
+	_check(float(bb.behaviour.walk_speed) == 55.0 and bb.rig._to.has(Color.html("#22aa44")), "saved: Bob sees the new look")
+	dialog.queue_free()
 	await _until(func() -> bool: return bb.anim != "sleep")
 	_check(bb.anim in ["idle", "walk"], "with a brain: awake (%s)" % bb.anim)
 	bob.ask_bunny("what does grappled do?", false, BORIN)
 	await _until(func() -> bool: return bb.anim == "think" and dbunny.anim == "think")
 	_check(bb.anim == "think" and dbunny.anim == "think", "both bunnies think")
+	await process_frame
+	_check(bb.rig.anim == "thinking", "paw at its mouth")
 	_check(bb.badge.visible and "Borin" in bb.badge.text, "the badge says for whom (%s)" % bb.badge.text)
 	gate[0] = true
 	await _until(func() -> bool: return bb.bubble.visible)
 	_check(bb.bubble.visible and bb.bubble_text.text == "Grappled: speed 0!" and bb.mood == "happy", "Bob's bunny says it in a bubble, happily")
+	await process_frame
+	_check(bb.rig.talking and bb.rig.mood == "happy", "its mouth moves")
 	_check(not dbunny.bubble.visible, "the DM's bunny doesn't (it was Bob's question)")
 	_check(bb.bubble.position.y + bb.position.y >= 0.0, "the bubble stays inside the window")
 	await _until(func() -> bool: return bb.anim == "talk" or bb.anim == "idle")
@@ -126,7 +188,14 @@ func _init() -> void:
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = true
 	bb._gui_input(click)
+	var up := InputEventMouseButton.new()
+	up.button_index = MOUSE_BUTTON_LEFT
+	up.pressed = false
+	bb._gui_input(up)
 	_check(bob_chat.visible and bob_chat.line.text == "/bunny ", "a click: the chat with /bunny (%s)" % bob_chat.line.text)
+	bb.anim = "idle"
+	bb._process(0.016)
+	_check(bb.rig.anim == "listening" or not bob_chat.line.has_focus(), "typing to it: it listens")
 	var menu := bb.settings_menu()
 	_check(menu.item_count == 4, "a right click: its settings")
 

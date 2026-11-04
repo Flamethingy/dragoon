@@ -91,6 +91,7 @@ var bunny_state := "sleeping"  ## as the host says (TASK-97): idle / thinking / 
 var bunny_detail := ""  ## "thinking for Borin"
 var bunny_waiting := 0  ## questions in its queue
 var bunny_name := "Bunny"
+var bunny_look := {}  ## the host's look for the bunny: {colors, behaviour} (TASK-101)
 var kept_sheets := {}  ## ref -> how many detached sheet pages show it (TASK-92): stays open
 
 
@@ -136,6 +137,7 @@ var _peer_seg := {}  ## host, Show everyone: peer id -> the [upto, toward] they 
 var showing := false
 signal showing_changed  ## Show everyone went on or off, or the DM's cursor moved (players)
 signal bunny_message(entry: Dictionary)  ## the Table Bunny answered me (or everyone) (TASK-97)
+signal bunny_look_changed  ## the host changed the bunny's colours or behaviour (TASK-101)
 signal bunny_status_changed  ## what the bunny does now: bunny_state, bunny_detail, bunny_waiting (TASK-97)
 signal calendar_changed  ## the calendar was replaced: the world's on hosting, the DM's edit, or the DM's for a player (Nico 2026-11-02)
 
@@ -264,6 +266,7 @@ func host(port := DEFAULT_PORT) -> Error:
 		bunny.answered.connect(_on_bunny_answered)
 		_on_bunny_status(bunny.state, bunny.detail, bunny.waiting())
 	apply_bunny_mcp()
+	share_bunny_look()
 	_set_status("Hosting %s on port %d (%d events in the log)" % [timeline.info.get("name", timeline.id()), port, event_log.events.size()])
 	return OK
 
@@ -1817,6 +1820,7 @@ func hello(name_given: String) -> void:
 		receive_calendar.rpc_id(sender, notes.calendar.to_dict())
 	sync_rolls.rpc_id(sender, _rolls_for(player))
 	bunny_status.rpc_id(sender, bunny_state, bunny_detail, bunny_waiting, bunny_name)
+	bunny_look_set.rpc_id(sender, bunny_look)
 	sync_notes.rpc_id(sender, notes.session, _notes_for(player), notes.names)
 	timeline_sync.welcome(sender)
 	if showing:
@@ -4952,6 +4956,23 @@ func _on_bunny_status(state: String, detail: String, waiting: int) -> void:
 	bunny_status(state, detail, waiting, bunny_name)
 	for peer_id: int in peers:
 		bunny_status.rpc_id(peer_id, state, detail, waiting, bunny_name)
+
+
+## Host: the bunny's look from the settings, for everyone (TASK-101).
+func share_bunny_look() -> void:
+	var colors: Variant = BunnyBrain.setting("colors")
+	var ways: Variant = BunnyBrain.setting("behaviour")
+	var look := {"colors": colors if colors is Dictionary else {}, "behaviour": ways if ways is Dictionary else {}}
+	bunny_look_set(look)
+	for peer_id: int in peers:
+		bunny_look_set.rpc_id(peer_id, look)
+
+
+## DM -> everyone: how the bunny looks and behaves.
+@rpc("authority", "call_remote", "reliable")
+func bunny_look_set(look: Dictionary) -> void:
+	bunny_look = look
+	bunny_look_changed.emit()
 
 
 ## DM -> everyone: what the bunny does now.

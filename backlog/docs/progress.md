@@ -285,3 +285,9 @@ See the "Open questions" section of the concept (secrets marking, event log form
   Tests: Boggle screenshot (1 monster, 4 features, crop), MotM pages 60-70 (11 monsters with matching art, 66
   features, 2 tables, ~31k in / 15k out tokens, 2 min), a wikidot spell page; `tools/check_real_import.gd`
   merges a real job into a scratch package.
+
+- 2026-11-04: Table Bunny (TASK-95 to TASK-99, Mochi): BunnyTools (8 tools with per-player rights), BunnyBrain
+  on the host (Claude API, key in user:// only, limits, queue, stop), `/bunny` and `/bunny!` over the network
+  with the busy status for everyone, the bunny on every client, an optional MCP server for local assistants.
+  TASK-101: the bunny now uses Tamago's rig, poses, recolouring and smoke puff, and the host picks its look
+  and behaviour (Esc > Table Bunny). Both projects share it: see `bunny-shared-with-tamago.md`.

@@ -23,7 +23,8 @@ const API_VERSION := "2026-10-21"
 const MODELS := ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]  ## cheap and fast first
 const DEFAULTS := {"api_key": "", "model": "claude-haiku-5-5", "token_limit": 200000, "cooldown": 10,
 	"name": "Bunny", "personality": "A small, friendly bunny who helps at the table: short, warm, a little shy.",
-	"mcp_on": false, "mcp_port": 8770, "mcp_token": ""}  ## the MCP server for local assistants (TASK-99): off by default
+	"mcp_on": false, "mcp_port": 8770, "mcp_token": "",  ## the MCP server for local assistants (TASK-99): off by default
+	"colors": {}, "behaviour": {}}  ## its look and ways on every screen (TASK-101): colour slot -> "#rrggbb", TableBunny.BEHAVIOUR
 const MAX_ROUNDS := 6  ## tool rounds per question
 const MAX_TOKENS := 2048
 const HISTORY := 10  ## messages kept per player (questions and answers)

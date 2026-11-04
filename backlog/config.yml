@@ -1,6 +1,6 @@
 project_name: "Dragoon"
 default_status: "To Do"
-statuses: ["To Do", "In Progress", "Done"]
+statuses: ["In Planning", "To Do", "In Progress", "Done"]
 labels: []
 date_format: yyyy-mm-dd
 max_column_width: 20

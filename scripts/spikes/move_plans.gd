@@ -7,6 +7,10 @@ extends Node2D
 ## behind them. Esc drops the plans. A ghost can be picked up again to change its move
 ## (Nico, 2026-11-02): the trail goes on from where it ended. Also the ghost of a token being
 ## spawned from the Book.
+## TASK-114 (Nico 2026-11-05): a drag starts free, the ghost just follows the mouse (no trail,
+## no metres). Space while dragging starts measuring: the trail from the real token's cell to
+## the ghost, coloured as before; let go and it is a planned move (Space: go). Let go without
+## measuring and the token moves straight there at once (TokenGrid).
 ## A child of the TokenGrid, drawn above the tokens.
 
 const GHOST_ALPHA := 0.45
@@ -19,7 +23,8 @@ const RED := Color(1.0, 0.3, 0.25)  ## further than a Dash
 
 var grid: TokenGrid
 ## id -> {path: Array[Vector2i] (cells, start first), ghost: Sprite2D, done: int (cells passed),
-##        hard: difficult squares, speed: walking metres (both taken when the drag starts)}
+##        hard: difficult squares, speed: walking metres (both taken when measuring starts),
+##        measure: the trail is measured (Space while dragging, TASK-114)}
 var plans := {}
 var _dragging := {}  ## ids being dragged now -> true (their plan follows the mouse)
 var _spawn: Sprite2D  ## the ghost of a token being dropped in from the Book
@@ -39,10 +44,38 @@ func begin_drag(ids: Array) -> void:
 			continue
 		cancel(id)
 		var token: Sprite2D = grid.tokens[id]
-		plans[id] = {"path": [grid.token_cell(id)], "ghost": _ghost_of(token), "done": 0}
+		plans[id] = {"path": [grid.token_cell(id)], "ghost": _ghost_of(token), "done": 0, "measure": false}
 		(plans[id].ghost as Sprite2D).position = token.position
 		_dragging[id] = true
+	queue_redraw()
+
+
+## Space while dragging (TASK-114): every dragged ghost's trail is measured from now on, from
+## its real token's cell to where the ghost is.
+func start_measure() -> void:
+	for id: String in _dragging:
+		if not plans.has(id) or bool(plans[id].get("measure", false)) or not grid.tokens.has(id):
+			continue
+		plans[id].measure = true
+		plans[id].path = extend([grid.token_cell(id)], cell_under_ghost(id))
 		_measure(id)
+	queue_redraw()
+
+
+## Is the drag of `id` measured (a planned move on release), or free (it moves at once)?
+func is_measuring(id: String) -> bool:
+	return plans.has(id) and bool(plans[id].get("measure", false))
+
+
+func is_dragging() -> bool:
+	return not _dragging.is_empty()
+
+
+## Esc while dragging (TASK-114): the dragged ghosts go, nothing moves.
+func cancel_drag() -> void:
+	for id: String in _dragging.keys():
+		cancel(id)
+	_dragging.clear()
 	queue_redraw()
 
 
@@ -63,6 +96,7 @@ func resume_drag(id: String) -> void:
 	_dragging.clear()
 	if plans.has(id) and not plans[id].has("going"):
 		_dragging[id] = true
+		plans[id].measure = true  # a planned move stays measured
 		_measure(id)
 	queue_redraw()
 
@@ -80,7 +114,7 @@ func drag_by(lead: String, delta: Vector2) -> void:
 	for id: String in _dragging:
 		if plans.has(id):
 			(plans[id].ghost as Sprite2D).position += delta
-	if plans.has(lead):
+	if plans.has(lead) and is_measuring(lead):  # a free drag has no trail (TASK-114)
 		var cell := cell_under_ghost(lead)
 		plans[lead].path = extend(plans[lead].path, cell)
 	queue_redraw()
@@ -229,6 +263,8 @@ func _draw() -> void:
 		if not grid.tokens.has(id):
 			continue
 		var plan: Dictionary = plans[id]
+		if not bool(plan.get("measure", true)):
+			continue  # a free drag: only the ghost (TASK-114)
 		var path: Array = plan.path
 		var cells: float = grid.tokens[id].get_meta("cells")
 		# Each point of the trail with the metres walked up to it (difficult squares count

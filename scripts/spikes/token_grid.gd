@@ -528,6 +528,26 @@ func set_token_cell(id: String, at: Vector2i, animate := true) -> void:
 	tween.tween_property(token, "position", target, MOVE_SECONDS_PER_CELL * steps)
 
 
+## A free drag let go (TASK-114, Nico 2026-11-05): the ghosts go and each token is asked to
+## move straight to its cell (no trail: the log keeps a straight line, its cost the straight
+## squares).
+func move_free(ends: Dictionary) -> void:
+	for id: String in ends:
+		plans.cancel(id)
+		_glide.erase(id)
+		if tokens.has(id) and Vector2i(ends[id]) != token_cell(id):
+			move_requested.emit(id, Vector2i(ends[id]))
+
+
+## Esc while dragging (TASK-114): the ghosts go, nothing moves.
+func cancel_drag() -> void:
+	plans.cancel_drag()
+	_dragging = null
+	_drag_group.clear()
+	_drag_started = false
+	_pressed = null
+
+
 ## Space: every planned move goes (the moves are asked for; confirmed ones glide).
 func go_planned() -> bool:
 	var moves := plans.go()
@@ -720,7 +740,14 @@ func _input(event: InputEvent) -> void:
 	if k.ctrl_pressed or k.alt_pressed or _typing():
 		return
 	var code := k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode
-	if code == KEY_SPACE and not k.echo and plans.has_plans():
+	if _dragging != null and code == KEY_SPACE:  # TASK-114: measure the drag from now on
+		if not k.echo and _drag_started:
+			plans.start_measure()
+		get_viewport().set_input_as_handled()
+	elif _dragging != null and code == KEY_ESCAPE:  # the drag is dropped, nothing moves
+		cancel_drag()
+		get_viewport().set_input_as_handled()
+	elif code == KEY_SPACE and not k.echo and plans.has_plans():
 		go_planned()
 		get_viewport().set_input_as_handled()
 	elif code == KEY_ESCAPE and plans.has_plans():
@@ -797,7 +824,8 @@ func _unhandled_input(event: InputEvent) -> void:
 							if other != lead:
 								_drag_group[other] = true
 			elif _dragging:
-				# The real tokens stay; the ghosts stay at the ends as planned moves (Space: go).
+				# Measured (Space while dragging): the real tokens stay, the ghosts stay at the ends
+				# as planned moves (Space: go). Free (TASK-114): the tokens move straight there now.
 				var id: String = _dragging.get_meta("entity")
 				var group: Array = _drag_group.keys()
 				_dragging = null
@@ -806,7 +834,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					_drag_started = false
 					var target := plans.cell_under_ghost(id)
 					var ends := plan_group_move(id, group, target) if not group.is_empty() else {id: target}
-					plans.end_drag(id, ends.get(id, target), ends)
+					if plans.is_measuring(id):
+						plans.end_drag(id, ends.get(id, target), ends)
+					else:
+						move_free(ends)
 			if not event.pressed:
 				var clicked := _pressed
 				_pressed = null

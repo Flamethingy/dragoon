@@ -164,6 +164,13 @@ func _init() -> void:
 	motion.relative = (goal - lead_token.position) * zoom
 	motion.position = screen + motion.relative
 	grid._unhandled_input(motion)
+	# TASK-114: a free drag first: the ghosts follow, no trail, no metres
+	_check(not grid.plans.is_measuring(lead) and (grid.plans.plans[lead].path as Array).size() == 1, "a free drag has no trail")
+	var space_drag := InputEventKey.new()
+	space_drag.pressed = true
+	space_drag.physical_keycode = KEY_SPACE
+	grid._input(space_drag)  # Space while dragging: measured from the real token's cell
+	_check(group.all(func(id: String) -> bool: return grid.plans.is_measuring(id)), "Space while dragging measures every dragged token")
 	var release := press.duplicate() as InputEventMouseButton
 	release.pressed = false
 	release.position = motion.position
@@ -209,6 +216,7 @@ func _init() -> void:
 	grid.select([a])
 	var a_from := grid.token_cell(a)
 	grid.plans.begin_drag([a])
+	grid.plans.start_measure()
 	grid.plans.drag_by(a, Vector2(grid.cell * 2, 0))
 	grid.plans.end_drag(a, grid.plans.cell_under_ghost(a), {})
 	_check(grid.plans.has_plans(), "a plan")
@@ -236,6 +244,38 @@ func _init() -> void:
 	esc.physical_keycode = KEY_ESCAPE
 	grid._input(esc)
 	_check(not grid.plans.has_plans() and grid.token_cell(a) == a_from, "Esc drops it")
+	# TASK-114: let go without Space: it moves straight there at once (no plan, no trail)
+	var tok: Sprite2D = grid.tokens[a]
+	var at_a := grid.get_canvas_transform() * tok.position
+	var grab := InputEventMouseButton.new()
+	grab.button_index = MOUSE_BUTTON_LEFT
+	grab.pressed = true
+	grab.position = at_a
+	grid._unhandled_input(grab)
+	var pull := InputEventMouseMotion.new()
+	pull.relative = Vector2(0, grid.cell * 2) * grid._camera.zoom
+	pull.position = at_a + pull.relative
+	grid._unhandled_input(pull)
+	var let_go := grab.duplicate() as InputEventMouseButton
+	let_go.pressed = false
+	let_go.position = pull.position
+	grid._unhandled_input(let_go)
+	_check(not grid.plans.has_plans() and grid.trail_of(a).is_empty(), "a free drag leaves no plan and no trail")
+	await _until(func() -> bool: return grid.token_cell(a) == a_from + Vector2i(0, 2), 300)
+	_check(grid.token_cell(a) == a_from + Vector2i(0, 2), "a free drag moves straight there (%s)" % grid.token_cell(a))
+	# Esc while dragging: the ghost goes, nothing moves
+	var b_from := grid.token_cell(a)
+	at_a = grid.get_canvas_transform() * tok.position
+	grab.position = at_a
+	grid._unhandled_input(grab)
+	pull.position = at_a + pull.relative
+	grid._unhandled_input(pull)
+	grid._input(esc)
+	_check(grid.plans.plans.is_empty() and not grid.plans.is_dragging(), "Esc while dragging drops the drag")
+	let_go.position = pull.position
+	grid._unhandled_input(let_go)
+	await process_frame
+	_check(grid.token_cell(a) == b_from and grid.plans.plans.is_empty(), "and nothing moves on release")
 	# the ghost of a token dropped in from the Book
 	grid.plans.show_spawn(TokenArt.compose(null, {}, "creatures"), 1.0, Vector2i(2, 2))
 	_check(grid.plans.spawn_visible() and grid.plans._spawn.position == grid.cell_center(Vector2i(2, 2), 1.0), "spawn ghost on its cell")

@@ -39,6 +39,7 @@ func _init() -> void:
 	var g := me.grid
 	var from := g.token_cell("characters/borin")
 	g.plans.begin_drag(["characters/borin"])
+	g.plans.start_measure()
 	for step: Vector2 in [Vector2(1, 0), Vector2(1, 0), Vector2(1, -1), Vector2(1, -1), Vector2(1, 0)]:
 		g.plans.drag_by("characters/borin", step * g.cell)
 	g.plans.end_drag("characters/borin", g.plans.cell_under_ghost("characters/borin"), {})

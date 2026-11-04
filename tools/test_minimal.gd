@@ -58,9 +58,23 @@ func _init() -> void:
 	_check(not app.dock.is_shown("compendium") and not button.button_pressed, "pressed again: closed")
 	button.pressed.emit()
 	await process_frame
-	(app.dock.panels.compendium.frame as DockPanel).pop_out()
+	var cf: DockPanel = app.dock.panels.compendium.frame
+	_check(cf.find_child("PopOut", true, false) == null and not cf._head.get_children().any(func(n: Node) -> bool: return n is Button and (n as Button).text in ["Pop out", "Dock"]), "no Pop out / Dock buttons (TASK-91)")
+	cf.pop_out()
 	_check(app.dock.place_of("compendium") == "window", "popped out: its own window")
-	((app.dock.panels.compendium.frame as DockPanel).window as Window).close_requested.emit()
+	_check(cf.window.borderless and cf.window.find_child("WindowButtons", true, false) != null, "borderless, with its own window buttons (TASK-91)")
+	var wb := cf.window.find_child("WindowButtons", true, false)
+	_check(wb.get_node("Min") is Button and wb.get_node("Max") is Button and wb.get_node("Close") is Button, "minimise, maximise, close")
+	_check(cf.window_edge(Vector2(2, 2)) == DisplayServer.WINDOW_EDGE_TOP_LEFT and cf.window_edge(cf.size - Vector2(2, 2)) == DisplayServer.WINDOW_EDGE_BOTTOM_RIGHT \
+		and cf.window_edge(Vector2(cf.size.x * 0.5, cf.size.y - 2)) == DisplayServer.WINDOW_EDGE_BOTTOM and cf.window_edge(cf.size * 0.5) == -1, "its edges resize it")
+	(wb.get_node("Close") as Button).pressed.emit()
+	await process_frame
+	_check(not app.dock.is_shown("compendium"), "its close button closes it too")
+	button.pressed.emit()
+	await process_frame
+	if cf.window == null:
+		cf.pop_out()
+	cf.window.close_requested.emit()
 	await process_frame
 	_check(not app.dock.is_shown("compendium"), "closing the window closes it too")
 	# --- TASK-80: past the program's edge it pops out, dragged back over it docks again -------

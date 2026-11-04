@@ -3,13 +3,16 @@ extends PanelContainer
 ## A panel that docks like one in an IDE (TASK-50, made shared for TASK-80): drag it by its
 ## title to the left, right or bottom edge (the zones light up), or let it go anywhere else to
 ## float, snapped to the HUD grid's cells. Its inner edge (floating: the lower right corner)
-## resizes it. "Pop out" puts it in its own OS window (e.g. on a second screen).
+## resizes it.
 ## TASK-80 (Nico 2026-11-02): dragged by its title past the edge of the program's window it
-## pops out by itself and goes on following the mouse; a popped-out one dragged by its title
-## back over the program docks again where it is let go (its OS title bar moves it without
-## docking, so it can also sit over the program). Where it is (dock, size, floating rect, own
-## window and that window's rect) belongs to the user on this computer: saved in `place_file`
-## under `section`. The chat (ChatBox) and the books (Dock.float_panel) are DockPanels.
+## pops out into its own OS window (e.g. for a second screen) and goes on following the mouse;
+## a popped-out one dragged by its title back over the program docks again where it is let go.
+## TASK-91 (Nico 2026-11-04): no Pop out / Dock buttons, dragging does it; the popped-out
+## window is borderless (no OS title bar that would move it without docking): its edges resize
+## it, and minimise, maximise / restore and close sit at its top right (WindowButtons).
+## Where it is (dock, size, floating rect, own window and that window's rect) belongs to the
+## user on this computer: saved in `place_file` under `section`. The chat (ChatBox) and the
+## books (Dock.float_panel) are DockPanels.
 
 signal place_changed
 signal closed  ## its own window was closed and `close_hides` is set
@@ -47,6 +50,7 @@ var _home: Node  ## where it lives when docked
 var _home_index := -1
 var _restored := false  ## the first show: back into its own window if it was there last time
 var _carrying := false  ## its own window follows the mouse (dragged by the title)
+var _win_buttons: Control  ## minimise / maximise / close while popped out (TASK-91)
 
 
 func _init() -> void:
@@ -60,7 +64,7 @@ func _init() -> void:
 	_head.name = "Head"
 	_head.mouse_filter = Control.MOUSE_FILTER_STOP
 	_head.mouse_default_cursor_shape = Control.CURSOR_MOVE
-	_head.tooltip_text = "Drag: dock it left, right or at the bottom, let it float, or pull it out of the window"
+	_head.tooltip_text = "Drag: dock it left, right or at the bottom, let it float, or pull it out of the window (and back in)"
 	_head.gui_input.connect(_head_input)
 	body.add_child(_head)
 	title_label = Label.new()
@@ -69,18 +73,6 @@ func _init() -> void:
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_head.add_child(title_label)
-	var pop := Button.new()
-	pop.name = "PopOut"
-	pop.text = "Pop out"
-	pop.focus_mode = Control.FOCUS_NONE
-	pop.add_theme_font_size_override("font_size", 12)
-	pop.tooltip_text = "In its own window (close it, or drag it back by this title, to dock it again)"
-	pop.pressed.connect(func() -> void:
-		if window == null:
-			pop_out()
-		else:
-			dock_back())
-	_head.add_child(pop)
 	visibility_changed.connect(_on_visibility)
 	add_to_group("dock_panels")
 	set_process(false)
@@ -245,7 +237,14 @@ func outside(at: Vector2) -> bool:
 func _head_input(event: InputEvent) -> void:
 	if window != null:  # its own window: dragged by the title it follows the mouse (TASK-80)
 		if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			start_carry(DisplayServer.mouse_get_position() - window.position)
+			if (event as InputEventMouseButton).double_click:
+				toggle_maximized()  # TASK-91
+			else:
+				if window.mode == Window.MODE_MAXIMIZED:  # pulled off a maximised one: it comes back to its size first
+					var f := float(DisplayServer.mouse_get_position().x - window.position.x) / maxf(1.0, float(window.size.x))
+					window.mode = Window.MODE_WINDOWED
+					window.position = DisplayServer.mouse_get_position() - Vector2i(int(window.size.x * f), 12)
+				start_carry(DisplayServer.mouse_get_position() - window.position)
 			_head.accept_event()
 		return
 	if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
@@ -277,7 +276,17 @@ func _head_input(event: InputEvent) -> void:
 ## The inner edge (floating: the lower right corner) resizes it, by whole cells.
 func _gui_input(event: InputEvent) -> void:
 	if window != null:
-		if drag_anywhere:
+		var edge := window_edge(get_local_mouse_position())
+		if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT \
+				and event.pressed and edge >= 0 and window.mode == Window.MODE_WINDOWED:
+			window.start_resize(edge as DisplayServer.WindowResizeEdge)  # TASK-91: borderless, its edges resize it (the OS does it)
+			accept_event()
+		elif event is InputEventMouseMotion:
+			var shape: int = EDGE_CURSORS[edge] if edge >= 0 else Control.CURSOR_ARROW
+			mouse_default_cursor_shape = shape as Control.CursorShape
+			if drag_anywhere:
+				_head_input(event)
+		elif drag_anywhere:
 			_head_input(event)
 		return
 	var local := get_local_mouse_position()
@@ -384,6 +393,134 @@ func _show_zones(on: bool) -> void:
 
 # --- Its own window --------------------------------------------------------------------------
 
+const WIN_EDGE := 6.0  ## pixels at the border of its own window that resize it
+## DisplayServer.WindowResizeEdge -> cursor
+const EDGE_CURSORS := [Control.CURSOR_FDIAGSIZE, Control.CURSOR_VSIZE, Control.CURSOR_BDIAGSIZE, Control.CURSOR_HSIZE,
+	Control.CURSOR_HSIZE, Control.CURSOR_BDIAGSIZE, Control.CURSOR_VSIZE, Control.CURSOR_FDIAGSIZE]
+
+
+## The resize edge of its own window under `local` (DisplayServer.WINDOW_EDGE_*), -1 for none.
+func window_edge(local: Vector2) -> int:
+	if window == null:
+		return -1
+	var left := local.x < WIN_EDGE
+	var right := local.x > size.x - WIN_EDGE
+	var top := local.y < WIN_EDGE
+	var bottom := local.y > size.y - WIN_EDGE
+	if top and left:
+		return DisplayServer.WINDOW_EDGE_TOP_LEFT
+	if top and right:
+		return DisplayServer.WINDOW_EDGE_TOP_RIGHT
+	if bottom and left:
+		return DisplayServer.WINDOW_EDGE_BOTTOM_LEFT
+	if bottom and right:
+		return DisplayServer.WINDOW_EDGE_BOTTOM_RIGHT
+	if top:
+		return DisplayServer.WINDOW_EDGE_TOP
+	if bottom:
+		return DisplayServer.WINDOW_EDGE_BOTTOM
+	if left:
+		return DisplayServer.WINDOW_EDGE_LEFT
+	if right:
+		return DisplayServer.WINDOW_EDGE_RIGHT
+	return -1
+
+
+## Its own window maximised on its screen, or back to its size.
+func toggle_maximized() -> void:
+	if window == null:
+		return
+	if window.mode == Window.MODE_MAXIMIZED:
+		window.mode = Window.MODE_WINDOWED
+	else:
+		_keep_window_rect()
+		window.mode = Window.MODE_MAXIMIZED
+	if _win_buttons != null:
+		_win_buttons.queue_redraw()
+		for b: Node in _win_buttons.get_children():
+			(b as Control).queue_redraw()
+
+
+func minimize() -> void:
+	if window != null:
+		window.mode = Window.MODE_MINIMIZED
+
+
+## Its own window closed: hidden (`close_hides`) or docked back.
+func close_window() -> void:
+	if window == null:
+		return
+	if close_hides:
+		_keep_window_rect()
+		visible = false
+		closed.emit()
+	else:
+		dock_back()
+
+
+## Minimise, maximise / restore, close at the top right of its own window: in the head when it
+## has one, else over the panel's corner.
+func _add_window_buttons() -> void:
+	var box := HBoxContainer.new()
+	box.name = "WindowButtons"
+	box.add_theme_constant_override("separation", 2)
+	for kind: String in ["min", "max", "close"]:
+		var b := WindowButton.new()
+		b.kind = kind
+		b.name = kind.capitalize()
+		b.panel = self
+		box.add_child(b)
+	(box.get_node("Min") as Button).pressed.connect(minimize)
+	(box.get_node("Max") as Button).pressed.connect(toggle_maximized)
+	(box.get_node("Close") as Button).pressed.connect(close_window)
+	if _head.visible:
+		_head.add_child(box)
+	else:
+		window.add_child(box)
+		box.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, 6)
+	_win_buttons = box
+
+
+## A small window button drawn in the page's ink: a dash, a square (two when maximised) or a cross.
+class WindowButton extends Button:
+	var kind := "close"
+	var panel: DockPanel
+
+	func _init() -> void:
+		flat = true
+		focus_mode = Control.FOCUS_NONE
+		custom_minimum_size = Vector2(24, 22)
+		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+
+	func _ready() -> void:
+		tooltip_text = {"min": "Minimise", "max": "Maximise / restore", "close": "Close"}[kind]
+
+	func _draw() -> void:
+		var ink := get_theme_color("font_color", "Label")
+		if is_hovered():
+			draw_rect(Rect2(Vector2.ZERO, size), Color(0.75, 0.2, 0.15, 0.85) if kind == "close" else Color(ink, 0.12))
+			if kind == "close":
+				ink = Color.WHITE
+		var c := size * 0.5
+		var r := 5.0
+		match kind:
+			"min":
+				draw_line(c + Vector2(-r, 3), c + Vector2(r, 3), ink, 1.5)
+			"max":
+				var maxed := panel != null and panel.window != null and panel.window.mode == Window.MODE_MAXIMIZED
+				if maxed:  # restore: two squares
+					draw_polyline(PackedVector2Array([c + Vector2(-r + 3, -r + 2), c + Vector2(-r + 3, -r), c + Vector2(r, -r), c + Vector2(r, r - 3), c + Vector2(r - 2, r - 3)]), ink, 1.2)
+					draw_rect(Rect2(c + Vector2(-r, -r + 3), Vector2(r * 2 - 3, r * 2 - 3)), ink, false, 1.2)
+				else:
+					draw_rect(Rect2(c - Vector2(r, r), Vector2(r, r) * 2), ink, false, 1.2)
+			_:
+				draw_line(c + Vector2(-r, -r), c + Vector2(r, r), ink, 1.5)
+				draw_line(c + Vector2(-r, r), c + Vector2(r, -r), ink, 1.5)
+
+	func _notification(what: int) -> void:
+		if what in [NOTIFICATION_MOUSE_ENTER, NOTIFICATION_MOUSE_EXIT]:
+			queue_redraw()
+
 ## Into its own (native) window, e.g. for a second screen; where it was last, else over
 ## where it is now.
 func pop_out() -> void:
@@ -396,6 +533,7 @@ func pop_out() -> void:
 	window.title = window_title
 	window.visible = false  # force_native can only be set on a hidden window
 	window.force_native = true
+	window.borderless = true  # TASK-91: moved by its title (docks again over the program), own buttons
 	window.theme = UISkin.theme()
 	window.size = Vector2i(maxi(int(size.x), window_min.x), maxi(int(size.y), window_min.y))
 	if is_inside_tree():
@@ -404,13 +542,7 @@ func pop_out() -> void:
 	if saved is Array and (saved as Array).size() == 4 and int(saved[2]) >= 200 and int(saved[3]) >= 150:
 		window.position = Vector2i(int(saved[0]), int(saved[1]))
 		window.size = Vector2i(int(saved[2]), int(saved[3]))
-	window.close_requested.connect(func() -> void:
-		if close_hides:
-			_keep_window_rect()
-			visible = false
-			closed.emit()
-		else:
-			dock_back())
+	window.close_requested.connect(close_window)
 	var bg := Panel.new()  # the window's paper
 	bg.theme_type_variation = UISkin.V_PAGE
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -419,8 +551,8 @@ func pop_out() -> void:
 	window.add_child(self)
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_home.add_child(window)
+	_add_window_buttons()
 	window.visible = visible
-	(_head.get_node("PopOut") as Button).text = "Dock"
 	place.window = true
 	_update_top_rows()  # out of the top dock: the side docks take the room back
 	save_place()
@@ -435,6 +567,10 @@ func dock_back() -> void:
 	set_process(false)
 	var w := window
 	window = null
+	if _win_buttons != null:
+		_win_buttons.get_parent().remove_child(_win_buttons)
+		_win_buttons.queue_free()
+		_win_buttons = null
 	w.remove_child(self)
 	_home.add_child(self)
 	if _home_index >= 0:
@@ -442,7 +578,6 @@ func dock_back() -> void:
 	set_anchors_preset(Control.PRESET_TOP_LEFT)
 	w.hide()  # a freed window must not stay shown until the frame ends
 	w.queue_free()
-	(_head.get_node("PopOut") as Button).text = "Pop out"
 	place.window = false
 	apply()
 	_update_top_rows()
@@ -451,7 +586,7 @@ func dock_back() -> void:
 
 ## Its own window's rect, for the next time it pops out.
 func _keep_window_rect() -> void:
-	if window != null:
+	if window != null and window.mode == Window.MODE_WINDOWED:
 		place.win = [window.position.x, window.position.y, window.size.x, window.size.y]
 
 

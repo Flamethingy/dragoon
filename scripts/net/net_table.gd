@@ -85,6 +85,7 @@ var tables := {}  ## id -> rollable table (packages' tables.json, the timeline's
 const ROLL_LOG_SIZE := 100
 var sheet_watchers := {}  ## host: ref -> {peer id: true} who has the sheet open
 var hud_ref := ""  ## the active character (CharacterHud, TASK-44): its sheet stays open
+var bunny: BunnyBrain  ## the Table Bunny's brain: only on the host (TASK-95)
 var kept_sheets := {}  ## ref -> how many detached sheet pages show it (TASK-92): stays open
 
 
@@ -247,6 +248,11 @@ func host(port := DEFAULT_PORT) -> Error:
 		event_log.appended.connect(_on_logged)
 	if not event_log.rewritten.is_connected(_on_rewritten):
 		event_log.rewritten.connect(_on_rewritten)
+	if bunny == null:  # TASK-95: the bunny thinks on the host (gone with the table: so is its history)
+		bunny = BunnyBrain.new()
+		bunny.name = "BunnyBrain"
+		bunny.table = self
+		add_child(bunny)
 	_set_status("Hosting %s on port %d (%d events in the log)" % [timeline.info.get("name", timeline.id()), port, event_log.events.size()])
 	return OK
 

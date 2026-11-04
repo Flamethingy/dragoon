@@ -479,12 +479,24 @@ func _build_esc_menu(root: Control) -> void:
 		{"text": "Compendium", "shown": dm, "action": toggle_view.bind("compendium")},
 		{"text": "Book", "shown": dm, "action": toggle_view.bind("world")},
 		{"text": "Calendar", "shown": dm, "action": open_calendar},  # Nico 2026-11-02
+		{"text": "Table Bunny", "shown": dm, "action": open_bunny_settings},  # TASK-95
 		{"text": "Test: fill with random events", "shown": func() -> bool: return table.is_dm() and not table.in_combat(),
 			"action": func() -> void:  # Nico 2026-11-02: chat and timeline for a long test
 				table_ui.timeline_bar.line.set_cursor(-1)
 				TestFill.fill(table)},
 		{"text": func() -> String: return "End the session" if table.is_dm() else "Leave the table", "action": leave},
 	]
+
+
+## The host's Table Bunny settings (TASK-95).
+func open_bunny_settings() -> BunnySettings:
+	var s := esc_menu.get_parent().get_node_or_null("BunnySettings") as BunnySettings
+	if s == null:
+		s = BunnySettings.new()
+		esc_menu.get_parent().add_child(s)
+	s.brain = table.bunny
+	s.open()
+	return s
 
 
 ## Esc: the menu, after the table's own uses of Esc (placing an area, drawing walls ...).

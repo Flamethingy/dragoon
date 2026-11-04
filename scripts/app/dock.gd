@@ -179,6 +179,7 @@ func float_panel(id: String) -> DockPanel:
 		f.window_title = "Dragoon · %s" % p.title
 		f.title_label.text = str(p.title)
 		f.close_hides = true
+		f.closable = true  # TASK-100: an X inside the program too
 		f.window_min = Vector2i(900, 650)
 		f.place = {"dock": "float", "side": 14, "bottom": 10, "r": [8, 3, 28, 21], "window": false}
 		f.closed.connect(func() -> void: hide_panel(id))

@@ -223,6 +223,11 @@ func refresh() -> void:
 	hint.add_theme_font_size_override("font_size", 12)
 	hint.add_theme_color_override("font_color", UISkin.INK_SOFT)
 	_tabs.add_child(hint)
+	var x := DockPanel.WindowButton.new()  # TASK-100: closes like the window bar's X (Esc / the key too)
+	x.kind = "close"
+	x.name = "Close"
+	x.pressed.connect(close)
+	_tabs.add_child(x)
 	for c in _pieces.get_children():
 		_pieces.remove_child(c)
 		c.queue_free()

@@ -51,6 +51,13 @@ var _home_index := -1
 var _restored := false  ## the first show: back into its own window if it was there last time
 var _carrying := false  ## its own window follows the mouse (dragged by the title)
 var _win_buttons: Control  ## minimise / maximise / close while popped out (TASK-91)
+## TASK-100: a close (X) at the top right while it is inside the program too (docked or
+## floating), drawn like the popped-out window's; it hides the panel (`closed`).
+var closable := false:
+	set(value):
+		closable = value
+		_update_close()
+var _close_button: Button
 
 
 func _init() -> void:
@@ -446,6 +453,27 @@ func minimize() -> void:
 		window.mode = Window.MODE_MINIMIZED
 
 
+## The X inside the program (TASK-100): hidden, the place kept for the next time.
+func close_panel() -> void:
+	if window != null:
+		close_window()
+		return
+	visible = false
+	closed.emit()
+
+
+func _update_close() -> void:
+	if closable and _close_button == null:
+		_close_button = WindowButton.new()
+		_close_button.kind = "close"
+		_close_button.name = "PanelClose"
+		_close_button.panel = self
+		_close_button.pressed.connect(close_panel)
+		_head.add_child(_close_button)
+	if _close_button != null:
+		_close_button.visible = closable and window == null  # popped out: the window's own buttons
+
+
 ## Its own window closed: hidden (`close_hides`) or docked back.
 func close_window() -> void:
 	if window == null:
@@ -552,6 +580,7 @@ func pop_out() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_home.add_child(window)
 	_add_window_buttons()
+	_update_close()
 	window.visible = visible
 	place.window = true
 	_update_top_rows()  # out of the top dock: the side docks take the room back
@@ -579,6 +608,7 @@ func dock_back() -> void:
 	w.hide()  # a freed window must not stay shown until the frame ends
 	w.queue_free()
 	place.window = false
+	_update_close()
 	apply()
 	_update_top_rows()
 	save_place()

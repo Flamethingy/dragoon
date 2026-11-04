@@ -37,8 +37,9 @@ func _init() -> void:
 	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_title.clip_text = true
 	head.add_child(_title)
-	var close := Button.new()
-	close.text = "Close"
+	var close := DockPanel.WindowButton.new()  # TASK-100: the X of the window bar (TASK-91)
+	close.kind = "close"
+	close.name = "Close"
 	close.pressed.connect(close_sheet)
 	head.add_child(close)
 

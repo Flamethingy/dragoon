@@ -43,6 +43,8 @@ var sheet: SheetPanel
 var hud: CharacterHud  ## the active character, lower left (TASK-44)
 var chat: ChatBox  ## the chat on the right of the calm table (TASK-46)
 var bunny: TableBunny  ## the Table Bunny walking along the bottom (TASK-98)
+var bunny_desk: BunnyDesk  ## its see-through window on the desktop, if it walks there (TASK-102)
+var bunny_button: BunnyButton  ## its icon in the lower left corner: out / away (TASK-102)
 var timeline_bar: TimelineBar  ## the moments of the timeline, at the top (TASK-82)
 ## DM: show these events of a moment in the Timeline list (the app opens it).
 var timeline_list_opener := Callable()
@@ -104,6 +106,11 @@ func _ready() -> void:
 	bunny.table = table
 	bunny.chat = chat
 	root.add_child(bunny)
+	bunny_button = BunnyButton.new()
+	bunny_button.bunny = bunny
+	root.add_child(bunny_button)
+	bunny.place_changed.connect(home_bunny)
+	home_bunny.call_deferred()
 	timeline_bar = TimelineBar.new()
 	timeline_bar.visible = false
 	root.add_child(timeline_bar)
@@ -161,6 +168,23 @@ func _ready() -> void:
 	_show_notes()
 
 
+## The bunny on the desktop (its own see-through window) or inside Dragoon (TASK-102).
+func home_bunny() -> void:
+	if bunny.wants_desktop() and BunnyDesk.available():
+		if bunny_desk == null:
+			bunny_desk = BunnyDesk.new()
+			add_child(bunny_desk)
+		if bunny.get_parent() != bunny_desk.stage:
+			bunny_desk.hold(bunny)
+	elif bunny.get_parent() != _root:
+		bunny.reparent(_root, false)
+		bunny.floor_gap = TableBunny.FLOOR_GAP
+		bunny.apply_settings()
+		if bunny_desk != null:
+			bunny_desk.queue_free()
+			bunny_desk = null
+
+
 ## The table's calendar was replaced (hosting a world, the DM's edit): the timeline bar
 ## shows its dates (Nico 2026-11-02).
 func apply_calendar() -> void:
@@ -175,6 +199,7 @@ func _refresh() -> void:
 	_notes_panel.visible = online
 	chat.visible = online and minimal  # the app's calm table; otherwise the session panel has the rolls
 	bunny.visible = online and bunny.is_on()
+	bunny_button.visible = online
 	timeline_bar.visible = online
 	timeline_bar.dm = dm
 	timeline_bar.line.can_extend = dm  # the DM drags into the future to pass time

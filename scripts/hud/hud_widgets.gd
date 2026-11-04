@@ -82,10 +82,11 @@ const TABS := ["Character", "Checks", "Spells", "Items", "App"]
 const APP_BUTTONS := ["combat", "rules", "compendium", "book", "leave"]
 
 ## Without a layout of its own (Nico, 2026-11-01): portrait, health and spell slots, lower left.
+## Two cells in from the left: the lower left corner is the Table Bunny's icon (TASK-102).
 const DEFAULT_HUD := [
-	{"w": "portrait", "r": [0, 19, 4, 5]},
-	{"w": "hp", "r": [0, 24, 4, 1]},
-	{"w": "slots", "r": [0, 25, 4, 2]},
+	{"w": "portrait", "r": [2, 19, 4, 5]},
+	{"w": "hp", "r": [2, 24, 4, 1]},
+	{"w": "slots", "r": [2, 25, 4, 2]},
 ]
 const DEFAULT_PAGES := [
 	{"name": "Sheet", "items": [

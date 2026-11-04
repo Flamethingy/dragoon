@@ -38,7 +38,7 @@ func _init() -> void:
 	_check(app.host(red, PORT) == OK, "hosted")
 	await process_frame
 	var bunny: TableBunny = app.table_ui.bunny
-	_check(bunny != null and bunny.visible and absf(bunny.size.y - TableBunny.SIZES.small) <= 1.0, "the bunny is at the DM's table (%s)" % bunny.size)
+	_check(bunny != null and bunny.visible and absf(bunny.size.y - TableBunny.SIZES.normal) <= 1.0, "the bunny is at the DM's table, Tamago's size (%s)" % bunny.size)
 	_check(bunny.anim == "sleep", "no brain: it sleeps (%s)" % bunny.anim)
 	_check(bunny.rig != null and bunny.rig.get_child_count() >= 10, "Tamago's rig, all its parts (%d)" % bunny.rig.get_child_count())
 	var ui0 := bunny.get_parent()
@@ -51,8 +51,8 @@ func _init() -> void:
 	_check(is_equal_approx(bunny.position.y + bunny.size.y + 6.0, ui.size.y), "at the bottom of the window (%s %s %s %s)" % [bunny.position, bunny.size, ui.size, bunny.state])
 
 	# per client: big, hidden, back from the Esc menu
-	bunny.set_size_name("big")
-	_check(absf(bunny.size.y - TableBunny.SIZES.big) <= 1.0, "big")
+	bunny.set_size_name("small")
+	_check(absf(bunny.size.y - TableBunny.SIZES.small) <= 1.0, "small")
 	bunny.set_on(false)
 	_check(bunny.visible and bunny.get_parent().get_children().any(func(n: Node) -> bool: return n is BunnyPuff), "switched off: it vanishes in a puff")
 	await _until(func() -> bool: return not bunny.visible, 60)
@@ -63,7 +63,7 @@ func _init() -> void:
 	if show != null:
 		show.pressed.emit()
 	_check(bunny.visible and bunny.is_on(), "and it's back")
-	bunny.set_size_name("small")
+	bunny.set_size_name("normal")
 
 	# walking when idle
 	bunny.anim = "idle"
@@ -97,6 +97,46 @@ func _init() -> void:
 	for i in 120:
 		bunny._process(0.016)
 	_check(bunny.state == "ground", "back down")
+
+	# TASK-102: on a window top (BunnyDesk gives it Dragoon's window as a platform)
+	_check(not BunnyDesk.available() and bunny.get_parent() == app.table_ui._root, "headless: it stays inside Dragoon")
+	var top := ground + bunny.size.y - 200.0  # a window top 200 px above the floor
+	bunny.platforms = [{"id": 1, "left": 0.0, "y": top, "segments": [Vector2(0, 1000)]}]
+	bunny.anim = "idle"
+	bunny.behaviour.hop_chance = 1.0
+	bunny._rest = 0.0
+	bunny._process(0.016)
+	_check(bunny.state == "air" and bunny._vel_y < 0.0, "it jumps up onto the window")
+	for i in 200:
+		bunny._process(0.016)
+		if bunny.state == "ground":
+			break
+	_check(bunny.state == "ground" and is_equal_approx(bunny.position.y + bunny.size.y, top), "and stands on it (%s)" % (bunny.position.y + bunny.size.y))
+	bunny.behaviour.hop_chance = 0.0
+	bunny._rest = 99.0
+	var x1 := bunny.position.x
+	bunny.platforms = [{"id": 1, "left": 30.0, "y": top, "segments": [Vector2(30, 1030)]}]
+	bunny._process(0.016)
+	_check(is_equal_approx(bunny.position.x, x1 + 30.0), "it rides along when the window moves")
+	bunny.platforms = []
+	bunny._process(0.016)
+	_check(bunny.state == "air", "window gone: it falls")
+	for i in 200:
+		bunny._process(0.016)
+	_check(bunny.state == "ground" and is_equal_approx(bunny.position.y, ground), "down to the floor")
+	var poly := BunnyDesk.region_polygon(BunnyDesk.merge_overlapping([Rect2(0, 0, 10, 10), Rect2(5, 5, 10, 10), Rect2(40, 0, 10, 10)] as Array[Rect2]))
+	_check(poly.size() == 10, "the click-through region: two boxes, one polygon (%d)" % poly.size())
+
+	# the icon in the lower left corner: away and back, in puffs
+	var icon := app.table_ui.bunny_button
+	_check(icon != null and icon.visible and icon.texture_normal != null, "the bunny icon is there")
+	_check(icon.position.x < 40 and icon.position.y > ui.size.y - 80, "in the lower left corner (%s)" % icon.position)
+	icon.toggle()
+	await _until(func() -> bool: return not bunny.visible, 60)
+	_check(not bunny.visible and not bunny.is_on(), "a click sends it away")
+	icon.toggle()
+	await process_frame
+	_check(bunny.visible and bunny.is_on() and ui.get_children().any(func(n: Node) -> bool: return n is BunnyPuff), "another calls it back, in a puff")
 
 	app.esc_menu.open()
 	app.esc_menu.button("End the session").pressed.emit()
@@ -197,7 +237,7 @@ func _init() -> void:
 	bb._process(0.016)
 	_check(bb.rig.anim == "listening" or not bob_chat.line.has_focus(), "typing to it: it listens")
 	var menu := bb.settings_menu()
-	_check(menu.item_count == 4, "a right click: its settings")
+	_check(menu.item_count == 5, "a right click: its settings")
 
 	# the host's brain gone to sleep: so does it
 	BunnyBrain.set_setting("api_key", "")

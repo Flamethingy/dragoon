@@ -93,6 +93,12 @@ static func chips(e: Dictionary) -> Array:
 			out.append(["icon_boot", "Range", "Self / Touch" if r == null or float(r) == 0 else StatBlock._metres(r)])
 			out.append(["icon_helmet", "Duration", str(e.get("duration", "—"))])
 			out.append(["icon_chest", "Components", _components(e.get("components"))])
+			if str(e.get("subschool", "")) != "":  # TASK-108: every field of the data model
+				out.append(["", "Subschool", str(e.subschool)])
+			if e.get("classes") is Array and not (e.classes as Array).is_empty():
+				out.append(["", "Classes", ", ".join(PackedStringArray((e.classes as Array).map(func(x: Variant) -> String: return str(x).get_file().capitalize())))])
+			if e.get("components") is Dictionary and str(e.components.get("material_text", "")) != "":
+				out.append(["", "Material", str(e.components.material_text)])
 		"features":
 			var atk: Variant = e.get("attack")
 			if atk is Dictionary:
@@ -126,6 +132,13 @@ static func chips(e: Dictionary) -> Array:
 				out.append(["coin_gold", "Cost", StatBlock._num(e.gold) + " gp"])
 			if e.get("weight") != null:
 				out.append(["", "Weight", StatBlock._num(e.weight) + " lb"])
+			if str(e.get("rarity", "")) != "":  # TASK-108
+				out.append(["gem", "Rarity", str(e.rarity).capitalize()])
+			var types: Variant = e.get("type")
+			if types is Array and not (types as Array).is_empty():
+				out.append(["icon_chest", "Type", ", ".join(PackedStringArray((types as Array).map(func(x: Variant) -> String: return str(x))))])
+			elif types != null and str(types) != "":
+				out.append(["icon_chest", "Type", str(types)])
 			if e.get("attunement") != null and str(e.attunement) not in ["", "false", "False"]:
 				out.append(["gem", "Attunement", "required" if e.attunement is bool else str(e.attunement)])
 		_:
@@ -143,6 +156,8 @@ static func chips(e: Dictionary) -> Array:
 				if text == "" or text.length() > 60 or text.contains("\n") or text.contains("["):
 					continue
 				out.append(["", key.replace("_", " ").capitalize(), text])
+	if str(e.get("_kind", "")) in ["spells", "items"] and str(e.get("source", "")) != "":  # TASK-108
+		out.append(["", "Source", str(e.source)])
 	return out
 
 

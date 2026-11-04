@@ -119,6 +119,62 @@ now: see idea-shared-features-and-package-dependencies.md.
 (0 = touch/self), duration, concentration, ritual, components{verbal, somatic, material,
 material_text}, classes[]`. `casting_time` and `duration` are in sentence case ("1 bonus action").
 
+### Effects (`effects`, spells / features / items, TASK-65)
+
+An optional list of what the entry's buttons do (rules-automation.md 5.2). The text stays the
+source of truth; an entry without `effects` uses the text fallback.
+
+```json
+"effects": [
+  {"roll": "attack", "to_hit": "spell", "range": "ranged", "damage": [{"dice": "1d10", "type": "fire"}], "scaling": {"cantrip": "1d10"}},
+  {"roll": "save", "ability": "dex", "dc": "spell", "on_fail": {"damage": [{"dice": "8d6", "type": "fire"}], "conditions": []},
+   "on_success": "half", "area": {"shape": "sphere", "size_m": 6.1}, "duration": {"rounds": 10, "save_ends": true},
+   "scaling": {"per_slot": "1d6", "above": 3}, "concentration": true},
+  {"apply": "condition", "condition": "frightened", "duration": {"rounds": 10}, "save_ends": {"ability": "wis", "when": "end_of_turn"}},
+  {"heal": "1d8+mod", "scaling": {"per_slot": "1d8", "above": 1}},
+  {"modifier": {"target": "ac", "op": "add", "value": 5}, "duration": {"rounds": 10}},
+  {"resource": {"id": "rage", "max": 3, "reset": "long"}}
+]
+```
+
+- `to_hit` / `dc`: a number, or `"spell"` (the caster's spell attack / save DC). `heal`: `+mod` = the casting ability modifier.
+- `on_success`: `"half"` or `"none"`. `area.shape`: sphere, cone, line (`width_m`), cube, cylinder, emanation; sizes in metres.
+- `scaling`: `per_slot` dice per slot level `above` the base, `cantrip` dice at levels 5/11/17, `targets_per_slot`.
+- `duration`: `rounds` (a minute = 10), `ends: "turn_end"`, `of` (whose turns count), `save_ends`.
+- Filled by the regex parser `tools/parse_effects.gd` (`Effects.parse`; `--write` to save,
+  `--strip` removes them again); parsed entries carry `effects_parsed: true`, so the AI pass and
+  hand edits (the entry editor's effects field with presets and "From the text") can replace them.
+
+**On Use additions (TASK-108).** All of them are optional. Without them, the view works out the target from the entry.
+
+```json
+{"heal": "2d4+2", "target": {"kind": "creature", "self": true, "range_m": 0}},
+{"roll": "check", "skill": "athletics", "ability": "str", "dc": 15, "by": "self",
+ "on_success": {"note": "you climb up"}, "on_fail": {"damage": [{"dice": "1d6", "type": "bludgeoning"}], "conditions": ["prone"]}},
+{"damage": [{"dice": "1d4+1", "type": "force"}]},
+{"roll": "attack", "to_hit": 5, "damage": [{"dice": "1d8", "type": "piercing"}],
+ "then": [{"when": "hit", "roll": "save", "ability": "con", "dc": 13, "on_fail": {"conditions": ["poisoned"]}, "on_success": "none"}]}
+```
+
+- `target`: who the step affects.
+  - `kind` is `self`, `creature`, `creatures` (`count`, 0 = any number) or `area` (uses the step's `area`).
+  - `range_m` is the range; 0 = touch.
+  - `self: true` means "you or a creature".
+  - Without `target`: an area means all creatures in it; a self-range spell with a modifier means yourself; an item means "you or a creature" by touch; anything else is a creature within the entry's `range_m`.
+- `roll: "check"`: an ability or skill check against `dc` (a number or `"spell"`).
+  - `skill` is optional: without it, it's a plain ability check.
+  - `by`: `self` (the user rolls) or `target`.
+  - `on_success` / `on_fail` are result dicts.
+- **Result dicts** (`on_fail`, a check's `on_success`, an attack's hit, i.e. the step itself) can hold `damage[]`, `heal`, `conditions[]`, `modifier` and `note` (plain text).
+- A step without a roll that has `damage` deals it with no roll (e.g. Magic Missile).
+- `then`: follow-up steps, each a normal effect plus `when`:
+  - values: `hit`, `miss`, `fail`, `success` or `always` (the default);
+  - they use the same target and don't repeat it.
+- **Shown** (OnUse, TASK-108) as one short sentence per step, with chips coloured by what they are:
+  - target blue, roll purple, damage red, heal green, condition orange, modifier gold;
+  - duration and scaling grey.
+- **Edited** in the entry editor as a flow of the same coloured nodes (OnUseFlow). The JSON stays available under "Show the JSON".
+
 ### Rollable table (`tables.json`)
 
 Every Markdown table whose first column header is a die (`d4`, `1d6`, `D20`, `d100`, `d%`,

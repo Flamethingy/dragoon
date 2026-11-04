@@ -16,6 +16,7 @@ signal link_background(meta: String)
 
 const ART_HEIGHT := 300
 const SIDE_WIDTH := 340
+const ON_USE_KINDS := ["spells", "items", "features"]
 
 var entry: Dictionary
 var key := ""  ## package/kind/id
@@ -96,6 +97,8 @@ func setup(e: Dictionary) -> void:
 		left.custom_minimum_size = Vector2(SIDE_WIDTH, 0)
 		left.add_child(_art(e))
 		left.add_child(_chips(e))
+		if str(e.get("_kind", "")) in ON_USE_KINDS:  # TASK-108: what using it does, in plain words
+			right.add_child(OnUse.view(e))
 		right.add_child(_text(StatBlock.to_bbcode(e)))
 
 

@@ -390,13 +390,32 @@ func _json(key: String, value: Variant) -> CodeEdit:
 
 
 ## The effects (TASK-65): JSON, with presets to add and "From the text" (the parser).
+## TASK-108: on top the flow of coloured nodes (OnUseFlow); the JSON stays below, folded
+## ("Show the JSON"), both kept in step.
 func _effects(key: String, value: Variant) -> Control:
 	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	var flow := OnUseFlow.new()
+	flow.name = "Flow"
+	box.add_child(flow)
 	var c := CodeEdit.new()
 	c.name = "Json"
 	c.text = JSON.stringify(EntryStore.whole_numbers(value if value is Array else []), "  ")
 	c.custom_minimum_size = Vector2(0, clampi(c.get_line_count() * 22 + 16, 60, 260))
-	box.add_child(c)
+	c.visible = false
+	var syncing := {"on": false}
+	var to_flow := func() -> void:  # the JSON changed: the flow follows (when it parses)
+		if syncing.on:
+			return
+		var j: Variant = JSON.parse_string(c.text if c.text.strip_edges() != "" else "[]")
+		if j is Array:
+			flow.setup(j, original)
+	flow.changed.connect(func(list: Array) -> void:
+		syncing.on = true
+		c.text = JSON.stringify(EntryStore.whole_numbers(list), "  ")
+		syncing.on = false)
+	c.text_changed.connect(to_flow)
+	to_flow.call()
 	var row := HBoxContainer.new()
 	box.add_child(row)
 	var presets := MenuButton.new()
@@ -410,15 +429,23 @@ func _effects(key: String, value: Variant) -> Control:
 		var list: Variant = JSON.parse_string(c.text)
 		var arr: Array = list if list is Array else []
 		arr.append((Effects.PRESETS[names[i]] as Dictionary).duplicate(true))
-		c.text = JSON.stringify(arr, "  "))
+		c.text = JSON.stringify(arr, "  ")
+		to_flow.call())
 	row.add_child(presets)
 	var from_text := _button(row, "From the text", "Fill it from the description (the parser; only the clear cases)", func() -> void:
 		var e := original.duplicate()
 		for k: String in ["description", "text", "level", "concentration", "duration"]:
 			if _getters.has(k):
 				e[k] = _getters[k].call()
-		c.text = JSON.stringify(Effects.parse(e), "  "))
+		c.text = JSON.stringify(Effects.parse(e), "  ")
+		to_flow.call())
 	from_text.name = "FromText"
+	var show_json := CheckButton.new()
+	show_json.name = "ShowJson"
+	show_json.text = "Show the JSON"
+	show_json.toggled.connect(func(on: bool) -> void: c.visible = on)
+	row.add_child(show_json)
+	box.add_child(c)
 	_getters[key] = func() -> Variant:
 		var j := JSON.new()
 		if j.parse(c.text if c.text.strip_edges() != "" else "[]") != OK:

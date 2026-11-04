@@ -86,6 +86,10 @@ const ROLL_LOG_SIZE := 100
 var sheet_watchers := {}  ## host: ref -> {peer id: true} who has the sheet open
 var hud_ref := ""  ## the active character (CharacterHud, TASK-44): its sheet stays open
 var bunny: BunnyBrain  ## the Table Bunny's brain: only on the host (TASK-95)
+var bunny_state := "sleeping"  ## as the host says (TASK-97): idle / thinking / working / sleeping
+var bunny_detail := ""  ## "thinking for Borin"
+var bunny_waiting := 0  ## questions in its queue
+var bunny_name := "Bunny"
 var kept_sheets := {}  ## ref -> how many detached sheet pages show it (TASK-92): stays open
 
 
@@ -130,6 +134,8 @@ var _peer_seg := {}  ## host, Show everyone: peer id -> the [upto, toward] they 
 ## the DM shows me their moment (I can't look elsewhere then).
 var showing := false
 signal showing_changed  ## Show everyone went on or off, or the DM's cursor moved (players)
+signal bunny_message(entry: Dictionary)  ## the Table Bunny answered me (or everyone) (TASK-97)
+signal bunny_status_changed  ## what the bunny does now: bunny_state, bunny_detail, bunny_waiting (TASK-97)
 signal calendar_changed  ## the calendar was replaced: the world's on hosting, the DM's edit, or the DM's for a player (Nico 2026-11-02)
 
 
@@ -253,6 +259,9 @@ func host(port := DEFAULT_PORT) -> Error:
 		bunny.name = "BunnyBrain"
 		bunny.table = self
 		add_child(bunny)
+		bunny.status_changed.connect(_on_bunny_status)
+		bunny.answered.connect(_on_bunny_answered)
+		_on_bunny_status(bunny.state, bunny.detail, bunny.waiting())
 	_set_status("Hosting %s on port %d (%d events in the log)" % [timeline.info.get("name", timeline.id()), port, event_log.events.size()])
 	return OK
 
@@ -1805,6 +1814,7 @@ func hello(name_given: String) -> void:
 	if notes.calendar != null:
 		receive_calendar.rpc_id(sender, notes.calendar.to_dict())
 	sync_rolls.rpc_id(sender, _rolls_for(player))
+	bunny_status.rpc_id(sender, bunny_state, bunny_detail, bunny_waiting, bunny_name)
 	sync_notes.rpc_id(sender, notes.session, _notes_for(player), notes.names)
 	timeline_sync.welcome(sender)
 	if showing:
@@ -4791,6 +4801,10 @@ func say(text: String, ref := "") -> void:
 		if t.to_lower().begins_with(prefix):
 			roll(t.substr(prefix.length()), ref)
 			return
+	for prefix in ["/bunny! ", "/bunny "]:  # TASK-97: ask the Table Bunny (with "!": for everyone)
+		if t.to_lower().begins_with(prefix):
+			ask_bunny(t.substr(prefix.length()), prefix == "/bunny! ", ref)
+			return
 	if is_dm():
 		_handle_chat(1, t)
 	elif is_online():
@@ -4814,6 +4828,107 @@ func _handle_chat(sender: int, text: String) -> Dictionary:
 	for peer_id: int in peers:
 		roll_added.rpc_id(peer_id, entry)
 	return entry
+
+
+# --- The Table Bunny over the network (TASK-97, doc-3) --------------------------------------------
+
+## Asks the Table Bunny (its brain is on the host): the answer comes only to me, or to everyone
+## when `public`. `ref`: my active character (the bunny only uses it if it is mine).
+func ask_bunny(text: String, public := false, ref := "") -> void:
+	var t := text.strip_edges()
+	if t == "":
+		return
+	_add_bunny_line({"by": player_name if player_name != "" else "Me", "text": "→ %s%s: %s" % [bunny_name, " (everyone)" if public else "", t], "bunny_question": true})
+	if is_dm():
+		_handle_bunny_ask(1, t, public, ref)
+	elif is_online():
+		request_bunny.rpc_id(1, t.left(2000), public, ref.left(200))
+	else:
+		_add_bunny_line(_bunny_entry("Zzz… there's no table to ask at.", true, "sleepy"))
+
+
+## Player -> DM.
+@rpc("any_peer", "call_remote", "reliable")
+func request_bunny(text: String, public: bool, ref: String) -> void:
+	if is_dm() and peers.has(multiplayer.get_remote_sender_id()):
+		_handle_bunny_ask(multiplayer.get_remote_sender_id(), text.left(2000), public, ref.left(200))
+
+
+func _handle_bunny_ask(sender: int, text: String, public: bool, ref: String) -> void:
+	var player := _sender_player(sender)
+	if player == "":
+		return
+	if ref != "" and not may_see_sheet(player, ref):
+		ref = ""  # only one's own character as context
+	if public:  # the others see the question too
+		var q := {"by": timeline.player_name(player), "text": "→ %s (everyone): %s" % [bunny_name, text], "bunny_question": true}
+		for peer_id: int in peers:
+			if peer_id != sender:
+				bunny_said.rpc_id(peer_id, q)
+		if sender != 1:
+			_add_bunny_line(q)
+	if bunny == null:
+		_send_bunny(sender, public, _bunny_entry("Zzz… no brain set up at the table.", true, "sleepy"))
+		return
+	bunny.ask(sender, text, {"ref": ref, "public": public})
+
+
+## Host: the brain answered `sender`; to them, or to everyone if they asked so.
+func _on_bunny_answered(sender: int, text: String, error: bool, context: Dictionary) -> void:
+	var mood := "happy" if not error and "!" in text else "neutral"
+	if error:
+		mood = "sleepy" if text.begins_with("Zzz") else "sad"
+	var entry := _bunny_entry(text, error, mood)
+	entry["to"] = "all" if bool(context.get("public", false)) else _sender_player(sender)
+	_send_bunny(sender, bool(context.get("public", false)), entry)
+
+
+func _send_bunny(sender: int, public: bool, entry: Dictionary) -> void:
+	if public:
+		for peer_id: int in peers:
+			bunny_said.rpc_id(peer_id, entry)
+		_add_bunny_line(entry)
+	elif sender == 1:
+		_add_bunny_line(entry)
+	elif peers.has(sender):
+		bunny_said.rpc_id(sender, entry)
+
+
+func _bunny_entry(text: String, error: bool, mood: String) -> Dictionary:
+	return {"bunny": true, "by": bunny_name, "text": text, "error": error, "mood": mood}
+
+
+## DM -> player: something the bunny said (to me or to everyone), or someone's public question.
+@rpc("authority", "call_remote", "reliable")
+func bunny_said(entry: Dictionary) -> void:
+	_add_bunny_line(entry)
+
+
+## Into my chat feed (not the event log: the bunny's words aren't part of the game).
+func _add_bunny_line(entry: Dictionary) -> void:
+	var line := entry.duplicate()
+	line["id"] = 0
+	_add_roll(line)
+	if bool(line.get("bunny", false)):
+		bunny_message.emit(line)
+
+
+## Host: the brain's state, for everyone (doc-3 "Busy status").
+func _on_bunny_status(state: String, detail: String, waiting: int) -> void:
+	bunny_name = str(BunnyBrain.setting("name"))
+	bunny_status(state, detail, waiting, bunny_name)
+	for peer_id: int in peers:
+		bunny_status.rpc_id(peer_id, state, detail, waiting, bunny_name)
+
+
+## DM -> everyone: what the bunny does now.
+@rpc("authority", "call_remote", "reliable")
+func bunny_status(state: String, detail: String, waiting: int, name_now: String) -> void:
+	bunny_state = state
+	bunny_detail = detail
+	bunny_waiting = waiting
+	bunny_name = name_now
+	bunny_status_changed.emit()
 
 
 func _deny_roll(sender: int, reason: String) -> void:

@@ -51,9 +51,15 @@ func _init() -> void:
 		else:
 			RollTables.handle_meta(str(meta)))
 	body.add_child(log_text)
+	bunny_line = Label.new()  # TASK-97: what the Table Bunny is doing (everyone sees it)
+	bunny_line.name = "BunnyStatus"
+	bunny_line.theme_type_variation = UISkin.V_MUTED
+	bunny_line.add_theme_font_size_override("font_size", 12)
+	bunny_line.visible = false
+	body.add_child(bunny_line)
 	line = LineEdit.new()
 	line.name = "Line"
-	line.placeholder_text = "Write something...  (/r 1d20+3 rolls)"
+	line.placeholder_text = "Write something...  (/r 1d20+3 rolls, /bunny asks the bunny)"
 	line.text_submitted.connect(func(_t: String) -> void: send())
 	body.add_child(line)
 
@@ -66,6 +72,18 @@ const _MANUAL := 10
 const _LINGER := {2: 2.0, 3: 4.0, 4: 8.0}
 
 var dice_menu: MenuButton
+var bunny_line: Label
+
+
+## The bunny's status under the feed while it is busy: "Bunny is thinking for Borin… (1 waiting)".
+func show_bunny_status() -> void:
+	if table == null or bunny_line == null:
+		return
+	var busy := table.bunny_state in ["thinking", "working"]
+	bunny_line.visible = busy
+	if busy:
+		var what := table.bunny_detail if table.bunny_detail != "" else table.bunny_state
+		bunny_line.text = "%s is %s…%s" % [table.bunny_name, what, " (%d waiting)" % table.bunny_waiting if table.bunny_waiting > 0 else ""]
 
 
 func _dice_menu() -> MenuButton:
@@ -140,6 +158,7 @@ func _ready() -> void:
 	if table != null and not table.rolls_changed.is_connected(refresh):
 		table.rolls_changed.connect(refresh)
 		table.accounts_changed.connect(refresh)
+		table.bunny_status_changed.connect(show_bunny_status)
 	if place_file == "":
 		place_file = "user://chat.cfg" if table == null or table.cache_dir == "user://cache/assets" else table.cache_dir.path_join("chat.cfg")
 	super()

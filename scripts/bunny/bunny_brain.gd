@@ -14,7 +14,7 @@ extends Node
 ## many wait, for the bunny on every client (TASK-97/98).
 ## A short history per player lives only here and is gone at the end of the session.
 
-signal answered(sender: int, text: String, error: bool)
+signal answered(sender: int, text: String, error: bool, context: Dictionary)
 signal status_changed(state: String, detail: String, waiting: int)
 
 const API_URL := "https://api.anthropic.com/v1/messages"
@@ -87,7 +87,7 @@ func ask(sender: int, text: String, context := {}) -> String:
 		if wait > 0:
 			why = "One moment, please ask again in %d s." % ceili(wait / 1000.0)
 	if why != "":
-		answered.emit(sender, why, true)
+		answered.emit(sender, why, true, context)
 		return why
 	_last_ask[player] = Time.get_ticks_msec()
 	_queue.append({"sender": sender, "text": text.left(2000), "context": context})
@@ -120,7 +120,7 @@ func _next() -> void:
 	var who := table.timeline.name_of(str(q.context.get("ref", ""))) if str(q.context.get("ref", "")) != "" else table.timeline.player_name(table._sender_player(int(q.sender)))
 	_set_state("thinking", "thinking for %s" % who)
 	var result: Dictionary = await _answer(int(q.sender), str(q.text), q.context)
-	answered.emit(int(q.sender), str(result.text), bool(result.error))
+	answered.emit(int(q.sender), str(result.text), bool(result.error), q.context)
 	_next()
 
 

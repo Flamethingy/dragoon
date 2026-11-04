@@ -34,7 +34,7 @@ func _init() -> void:
 
 	var answers := []
 	var states := []
-	brain.answered.connect(func(sender: int, text: String, error: bool) -> void: answers.append([sender, text, error]))
+	brain.answered.connect(func(sender: int, text: String, error: bool, _ctx: Dictionary) -> void: answers.append([sender, text, error]))
 	brain.status_changed.connect(func(s: String, d: String, w: int) -> void: states.append([s, d, w]))
 	var sent := []
 	var replies := []

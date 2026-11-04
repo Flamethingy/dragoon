@@ -136,11 +136,9 @@ func _ready() -> void:
 	grid.areas.placed.connect(func(t: Dictionary) -> void:  # TASK-67: share it, the attack bar may take its targets
 		place_template(t)
 		area_placed.emit(t))
-	grid.budget = func(id: String) -> Dictionary:  # TASK-62: the trail's budget, on its own turn only
-		for c: Dictionary in combat_view().get("order", []):
-			if c.get("current", false) and c.get("usage") is Dictionary and (c.entity == id or (c.get("members", []) as Array).any(func(m: Dictionary) -> bool: return m.entity == id)):
-				return c.usage
-		return {}
+	grid.speed = func(id: String) -> float:  # the move trail's colour (asked once per drag: sheets are slow)
+		var s := sheet_for(Reveal.DM if is_dm() else my_player, id)
+		return Rules.speed(s, Rules.edition_of(s, rules_settings())) if not s.is_empty() else 0.0
 	grid.crowd = func(id: String) -> Dictionary: return _crowded(id)  # TASK-79
 	timeline_sync = TimelineSync.new()
 	timeline_sync.table = self

@@ -12,9 +12,13 @@ extends Node2D
 const GHOST_ALPHA := 0.45
 const DOT := 7.0  ## length of a dash, pixels on the map
 const GAP := 6.0
+const YELLOW := Color(1.0, 0.88, 0.25)  ## at the walking speed
+const ORANGE := Color(1.0, 0.55, 0.15)  ## at double (a Dash)
+const RED := Color(1.0, 0.3, 0.25)  ## further than a Dash
 
 var grid: TokenGrid
-## id -> {path: Array[Vector2i] (cells, start first), ghost: Sprite2D, done: int (cells passed)}
+## id -> {path: Array[Vector2i] (cells, start first), ghost: Sprite2D, done: int (cells passed),
+##        hard: difficult squares, speed: walking metres (both taken when the drag starts)}
 var plans := {}
 var _dragging := {}  ## ids being dragged now -> true (their plan follows the mouse)
 var _spawn: Sprite2D  ## the ghost of a token being dropped in from the Book
@@ -37,6 +41,7 @@ func begin_drag(ids: Array) -> void:
 		plans[id] = {"path": [grid.token_cell(id)], "ghost": _ghost_of(token), "done": 0}
 		(plans[id].ghost as Sprite2D).position = token.position
 		_dragging[id] = true
+		_measure(id)
 	queue_redraw()
 
 
@@ -57,7 +62,15 @@ func resume_drag(id: String) -> void:
 	_dragging.clear()
 	if plans.has(id) and not plans[id].has("going"):
 		_dragging[id] = true
+		_measure(id)
 	queue_redraw()
+
+
+## What the trail's label needs, taken once when a drag starts: looking it up on every mouse
+## move made dragging lag (Nico 2026-11-04).
+func _measure(id: String) -> void:
+	plans[id]["hard"] = grid.difficult_for(id)  # TASK-73 terrain, TASK-79 other creatures
+	plans[id]["speed"] = float(grid.speed.call(id)) if grid.speed.is_valid() else 0.0
 
 
 ## The mouse moved by `delta` (map pixels): every dragged ghost moves; the lead's trail grows
@@ -222,23 +235,30 @@ func _draw() -> void:
 			pts.append(grid.cell_center(path[i], cells))
 		if _dragging.has(id):  # the trail runs on to the ghost under the mouse
 			pts.append((plan.ghost as Sprite2D).position)
-		var b: Dictionary = grid.budget.call(id) if grid.budget.is_valid() else {}
-		var n := squares(path) + extra_cost(path, grid.difficult_for(id))  # TASK-73 terrain, TASK-79 other creatures
-		var over := not b.is_empty() and float(b.moved) + n * TokenGrid.METRES_PER_CELL > float(b.speed) + 0.01
-		_dotted(pts, Color(1.0, 0.45, 0.2, 0.9) if over else Color(1, 1, 1, 0.75), 4.0)
+		var n := squares(path) + extra_cost(path, plan.get("hard", {}))  # TASK-73 terrain, TASK-79 other creatures
+		var color := distance_color(n * TokenGrid.METRES_PER_CELL, float(plan.get("speed", 0.0)))
+		_dotted(pts, Color(color, 0.85), 4.0)
 		if plan.has("going") or path.size() < 2 and not _dragging.has(id):
 			continue
-		# This move's distance (Nico 2026-11-04). On the creature's own turn in a combat also the
-		# turn so far + this move / speed (TASK-62); over it only warns.
-		var label := "%s m" % _metres(n)
-		if not b.is_empty() and float(b.moved) > 0.01:
-			label += "  (%s / %s m this turn)" % [_num(float(b.moved) + n * TokenGrid.METRES_PER_CELL), _num(float(b.speed))]
-		elif not b.is_empty():
-			label += " / %s m" % _num(float(b.speed))
+		var label := "%s m" % _metres(n)  # just this drag's distance (Nico 2026-11-04)
 		var at: Vector2 = (plan.ghost as Sprite2D).position + Vector2(grid.cell * maxf(cells, 1.0) * 0.5 + 6, -8)
 		var size := _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
 		draw_rect(Rect2(at + Vector2(-5, -size.y + 2), size + Vector2(10, 6)), Color(0, 0, 0, 0.55))
-		draw_string(_font, at + Vector2(0, 0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.6, 0.35) if over else Color(1, 1, 1, 0.95))
+		draw_string(_font, at + Vector2(0, 0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, color)
+
+
+## The trail's colour for `metres` of a creature walking `speed` metres (Nico 2026-11-04):
+## white -> yellow at its speed (walking) -> orange at double (Dash), red beyond. White if the
+## speed isn't known.
+static func distance_color(metres: float, speed: float) -> Color:
+	if speed <= 0.0:
+		return Color.WHITE
+	var f := metres / speed
+	if f <= 1.0:
+		return Color.WHITE.lerp(YELLOW, f)
+	if f <= 2.0:
+		return YELLOW.lerp(ORANGE, f - 1.0)
+	return RED
 
 
 static func _num(m: float) -> String:

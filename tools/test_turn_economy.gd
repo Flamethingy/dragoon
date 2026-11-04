@@ -2,7 +2,7 @@ extends SceneTree
 ## Headless check of the action economy (TASK-62): Action / Bonus / Reaction / Object used this
 ## turn (an attack takes the action, a click marks a pip), the metres moved of the speed (Dash
 ## doubles it, restrained makes it 0), a new turn resets it, the tracker rows and the move trail
-## carry the budget, and the HUD's turn piece. Display only: nothing is ever blocked.
+## carry the budget, the move trail its colour, and the HUD's turn piece. Display only: nothing is ever blocked.
 ## godot --headless --path . -s tools/test_turn_economy.gd
 
 const PORT := 47806
@@ -27,7 +27,11 @@ func _init() -> void:
 	await process_frame
 	_check(dm.host(PORT) == OK, "DM hosts")
 	await _until(func() -> bool: return dm.grid.tokens.has(BORIN) and dm.grid.tokens.has(CHIEF))
-	_check(dm.turn_usage(CHIEF).moved == 0.0 and dm.grid.budget.call(CHIEF) == {}, "no combat: no budget on the trail")
+	_check(dm.turn_usage(CHIEF).moved == 0.0, "no combat: nothing moved")
+	_check(dm.grid.speed.call(CHIEF) == 9.0, "the move trail knows the walking speed")
+	_check(MovePlans.distance_color(0.0, 9.0) == Color.WHITE and MovePlans.distance_color(9.0, 9.0) == MovePlans.YELLOW
+		and MovePlans.distance_color(18.0, 9.0) == MovePlans.ORANGE and MovePlans.distance_color(19.5, 9.0) == MovePlans.RED
+		and MovePlans.distance_color(30.0, 0.0) == Color.WHITE, "trail colour: white, yellow at the speed, orange at double, red beyond")
 	var rs := dm.rules_settings().duplicate(true)
 	(rs.house_rules as Dictionary)["crowded_squares"] = "off"  # straight lines here may cross other goblins (TASK-79: test_crowd)
 	dm.set_rules_settings(rs)
@@ -53,12 +57,7 @@ func _init() -> void:
 	u = dm.turn_usage(CHIEF)
 	_check(u.dash and u.action and u.speed == 18.0, "Dash: the action, double speed (%s)" % [u])
 	var row: Dictionary = (dm.combat_view().order as Array).filter(func(c: Dictionary) -> bool: return c.entity == CHIEF)[0]
-	# The move trail shows the budget only on the creature's own turn (Nico 2026-11-04).
-	var trail: Dictionary = dm.grid.budget.call(CHIEF)
-	_check(row.usage.moved == 13.5 and row.usage.speed == 18.0 and (trail.get("speed", -1.0) == 18.0 if row.current else trail.is_empty()),
-		"the tracker row carries it, the move trail on its turn (current: %s, trail %s)" % [row.current, trail])
-	var cur: Array = (dm.combat_view().order as Array).filter(func(c: Dictionary) -> bool: return c.current)
-	_check(cur.size() == 1 and not (dm.grid.budget.call(str(cur[0].entity)) as Dictionary).is_empty(), "whoever's turn it is has the budget on the trail")
+	_check(row.usage.moved == 13.5 and row.usage.speed == 18.0, "the tracker row carries it")
 	dm.set_condition(CHIEF, "restrained")
 	_check(dm.turn_usage(CHIEF).speed == 0.0, "restrained: speed 0 (even dashing)")
 	dm.set_condition(CHIEF, "restrained", false)

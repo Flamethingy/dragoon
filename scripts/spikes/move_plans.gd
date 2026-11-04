@@ -283,8 +283,10 @@ static func _metres(squares_moved: int) -> String:
 
 
 ## A dashed line through `pts`; each dash coloured by the metres walked where it starts
-## (`metres`: one per point, interpolated along the segments).
+## (`metres`: one per point, interpolated along the segments). The dash pattern runs on
+## across the points, so dashes don't pile up where two segments meet.
 func _dotted(pts: PackedVector2Array, metres: PackedFloat32Array, speed: float, width: float) -> void:
+	var phase := 0.0  ## how far into the current dash + gap the line is
 	for i in range(pts.size() - 1):
 		var a := pts[i]
 		var b := pts[i + 1]
@@ -294,6 +296,15 @@ func _dotted(pts: PackedVector2Array, metres: PackedFloat32Array, speed: float, 
 		var dir := (b - a) / length
 		var t := 0.0
 		while t < length:
-			var m := lerpf(metres[i], metres[i + 1], t / length)
-			draw_line(a + dir * t, a + dir * minf(t + DOT, length), Color(distance_color(m, speed), 0.85), width, true)
-			t += DOT + GAP
+			if phase < DOT:  # in a dash: draw up to its end or the segment's
+				var to := minf(t + DOT - phase, length)
+				var m := lerpf(metres[i], metres[i + 1], t / length)
+				draw_line(a + dir * t, a + dir * to, Color(distance_color(m, speed), 0.85), width, true)
+				phase += to - t
+				t = to
+			else:  # in a gap
+				var to := minf(t + DOT + GAP - phase, length)
+				phase += to - t
+				t = to
+			if phase >= DOT + GAP - 0.001:
+				phase = 0.0

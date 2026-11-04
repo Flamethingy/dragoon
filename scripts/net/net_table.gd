@@ -136,9 +136,9 @@ func _ready() -> void:
 	grid.areas.placed.connect(func(t: Dictionary) -> void:  # TASK-67: share it, the attack bar may take its targets
 		place_template(t)
 		area_placed.emit(t))
-	grid.budget = func(id: String) -> Dictionary:  # TASK-62: the trail's budget in a combat
+	grid.budget = func(id: String) -> Dictionary:  # TASK-62: the trail's budget, on its own turn only
 		for c: Dictionary in combat_view().get("order", []):
-			if c.get("usage") is Dictionary and (c.entity == id or (c.get("members", []) as Array).any(func(m: Dictionary) -> bool: return m.entity == id)):
+			if c.get("current", false) and c.get("usage") is Dictionary and (c.entity == id or (c.get("members", []) as Array).any(func(m: Dictionary) -> bool: return m.entity == id)):
 				return c.usage
 		return {}
 	grid.crowd = func(id: String) -> Dictionary: return _crowded(id)  # TASK-79

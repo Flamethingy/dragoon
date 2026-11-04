@@ -53,7 +53,12 @@ func _init() -> void:
 	u = dm.turn_usage(CHIEF)
 	_check(u.dash and u.action and u.speed == 18.0, "Dash: the action, double speed (%s)" % [u])
 	var row: Dictionary = (dm.combat_view().order as Array).filter(func(c: Dictionary) -> bool: return c.entity == CHIEF)[0]
-	_check(row.usage.moved == 13.5 and row.usage.speed == 18.0 and dm.grid.budget.call(CHIEF).speed == 18.0, "the tracker row and the move trail carry it")
+	# The move trail shows the budget only on the creature's own turn (Nico 2026-11-04).
+	var trail: Dictionary = dm.grid.budget.call(CHIEF)
+	_check(row.usage.moved == 13.5 and row.usage.speed == 18.0 and (trail.get("speed", -1.0) == 18.0 if row.current else trail.is_empty()),
+		"the tracker row carries it, the move trail on its turn (current: %s, trail %s)" % [row.current, trail])
+	var cur: Array = (dm.combat_view().order as Array).filter(func(c: Dictionary) -> bool: return c.current)
+	_check(cur.size() == 1 and not (dm.grid.budget.call(str(cur[0].entity)) as Dictionary).is_empty(), "whoever's turn it is has the budget on the trail")
 	dm.set_condition(CHIEF, "restrained")
 	_check(dm.turn_usage(CHIEF).speed == 0.0, "restrained: speed 0 (even dashing)")
 	dm.set_condition(CHIEF, "restrained", false)

@@ -57,7 +57,7 @@ var _drag_started := false  ## the mouse moved since the press: the ghosts are o
 var plans: MovePlans  ## planned moves: ghosts, dotted trails, Space to go (TASK-45)
 var areas: AreaLayer  ## area templates and the ruler (TASK-67)
 var map_layer: MapLayer  ## walls, doors, light, terrain and fog (TASK-73)
-## id -> {moved, speed} (metres) in a combat, else {} (TASK-62: the trail shows the budget)
+## id -> {moved, speed} (metres) on its own turn in a combat, else {} (TASK-62: the trail shows the budget)
 var budget: Callable
 ## The squares of other tokens that count as difficult for `id` (TASK-79): id -> {cell: true}.
 var crowd: Callable

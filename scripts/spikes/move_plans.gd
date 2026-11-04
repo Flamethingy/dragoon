@@ -228,9 +228,13 @@ func _draw() -> void:
 		_dotted(pts, Color(1.0, 0.45, 0.2, 0.9) if over else Color(1, 1, 1, 0.75), 4.0)
 		if plan.has("going") or path.size() < 2 and not _dragging.has(id):
 			continue
+		# This move's distance (Nico 2026-11-04). On the creature's own turn in a combat also the
+		# turn so far + this move / speed (TASK-62); over it only warns.
 		var label := "%s m" % _metres(n)
-		if not b.is_empty():  # TASK-62: used this turn + this move / speed; over it only warns
-			label = "%s / %s m" % [_num(float(b.moved) + n * TokenGrid.METRES_PER_CELL), _num(float(b.speed))]
+		if not b.is_empty() and float(b.moved) > 0.01:
+			label += "  (%s / %s m this turn)" % [_num(float(b.moved) + n * TokenGrid.METRES_PER_CELL), _num(float(b.speed))]
+		elif not b.is_empty():
+			label += " / %s m" % _num(float(b.speed))
 		var at: Vector2 = (plan.ghost as Sprite2D).position + Vector2(grid.cell * maxf(cells, 1.0) * 0.5 + 6, -8)
 		var size := _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
 		draw_rect(Rect2(at + Vector2(-5, -size.y + 2), size + Vector2(10, 6)), Color(0, 0, 0, 0.55))

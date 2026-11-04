@@ -74,6 +74,25 @@ static func link(e: Dictionary) -> String:
 	return "[[%s/%s|%s]]" % [e.get("_kind", ""), e.get("id", ""), e.get("name", "")]
 
 
+## TASK-94: every Control under `root` (now and later) takes dropped items, spells and
+## features for the character `ref_of` names (the HUD, the sheet pages): the table adds them.
+## Controls with drops of their own keep them.
+static func accept_on(root: Control, table: NetTable, ref_of: Callable) -> void:
+	var hook := func(n: Node) -> void:
+		var c := n as Control
+		if c == null or (c.get_script() != null and (c.get_script() as Script).get_script_method_list().any(func(m: Dictionary) -> bool: return m.name == "_can_drop_data")):
+			return
+		c.set_drag_forwarding(Callable(),
+			func(_at: Vector2, d: Variant) -> bool: return is_entry(d) and table.can_take_entry(str(ref_of.call()), entry_of(d)),
+			func(_at: Vector2, d: Variant) -> void: table.add_entry_to(str(ref_of.call()), entry_of(d)))
+	hook.call(root)
+	for n: Node in root.find_children("*", "Control", true, false):
+		hook.call(n)
+	root.get_tree().node_added.connect(func(n: Node) -> void:
+		if is_instance_valid(root) and root.is_ancestor_of(n):
+			hook.call(n))
+
+
 ## What a sheet gets: [list key, new list] for a dropped item/spell/feature, [] if it can't.
 static func sheet_change(sheet: Dictionary, e: Dictionary) -> Array:
 	var kind := str(e.get("_kind", ""))

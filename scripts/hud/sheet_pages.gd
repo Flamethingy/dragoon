@@ -39,6 +39,8 @@ func _init() -> void:
 
 func _ready() -> void:
 	resized.connect(refresh)
+	if hud != null and hud.table != null:  # TASK-94: drop items etc. on the pages
+		EntryDrag.accept_on(self, hud.table, func() -> String: return hud.active)
 
 
 ## The book's rect: centred, most of the screen.

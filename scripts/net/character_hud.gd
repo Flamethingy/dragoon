@@ -56,6 +56,7 @@ func _ready() -> void:
 		if ref == active:
 			_fill())
 	resized.connect(_fill)
+	EntryDrag.accept_on(self, table, func() -> String: return active)  # TASK-94: drop items etc. on the HUD
 	_check_active()
 
 

@@ -146,7 +146,8 @@ func _on_meta(meta: Variant) -> void:
 ## A compendium item, spell or feature dropped on the sheet joins its list (TASK-37):
 ## inventory (item.gained), spells or features (sheet.changed), through the table.
 func _can_drop_data(_at: Vector2, data: Variant) -> bool:
-	return ref != "" and bool(sheet.get("_editable", false)) and EntryDrag.is_entry(data) 		and EntryDrag.SHEET_LISTS.has(str(EntryDrag.entry_of(data).get("_kind", "")))
+	return ref != "" and bool(sheet.get("_editable", false)) and EntryDrag.is_entry(data) \
+		and EntryDrag.SHEET_LISTS.has(str(EntryDrag.entry_of(data).get("_kind", "")))
 
 
 func _drop_data(_at: Vector2, data: Variant) -> void:
@@ -154,15 +155,15 @@ func _drop_data(_at: Vector2, data: Variant) -> void:
 
 
 ## Adds an item / spell / feature to this sheet; false if it can't (or has it already).
-## An item is an item.gained event (TASK-51), spells and features change their list.
+## An item is an item.gained event (TASK-51), spells and features change their list. The
+## table does it (NetTable.add_entry_to, TASK-94: the same as a drop on the token or the HUD).
 func add_entry(e: Dictionary) -> bool:
-	if str(e.get("_kind", "")) == "items" and table != null and ref != "" and str(e.get("id", "")) != "":
-		table.change_item(ref, "items/%s" % e.id, 1)
-		return true
-	var change := EntryDrag.sheet_change(sheet, e)
-	if change.is_empty() or table == null:
+	if table == null or ref == "" or not EntryDrag.SHEET_LISTS.has(str(e.get("_kind", ""))):
 		return false
-	table.change_field(ref, change[0], change[1])
+	if str(e.get("_kind", "")) != "items" and EntryDrag.sheet_change(sheet, e).is_empty():
+		table.add_entry_to(ref, e)  # says it's already there
+		return false
+	table.add_entry_to(ref, e)
 	return true
 
 

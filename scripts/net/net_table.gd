@@ -3158,6 +3158,64 @@ func _handle_resource(sender: int, ref: String, resource: String, amount: int) -
 	return e
 
 
+## TASK-94: an item, spell or feature (a Book entry) may be dropped on `ref` here: a creature
+## or character I may change. The host checks again.
+func can_take_entry(ref: String, e: Dictionary) -> bool:
+	return ref != "" and ref != PARTY and ref.get_slice("/", 0) in Timeline.CREATURES \
+		and EntryDrag.SHEET_LISTS.has(str(e.get("_kind", ""))) and str(e.get("id", "")) != "" and may_change(ref)
+
+
+## TASK-94: a dropped item / spell / feature joins `ref`'s lists (item.gained, or the spells /
+## features list); the dropper is told what happened.
+func add_entry_to(ref: String, e: Dictionary) -> void:
+	var kind := str(e.get("_kind", ""))
+	var eid := str(e.get("id", ""))
+	var label := str(e.get("name", eid))
+	if is_dm():
+		_handle_add_entry(1, ref, kind, eid, label)
+	elif is_online():
+		request_add_entry.rpc_id(1, ref, kind, eid, label)
+
+
+## Player -> DM.
+@rpc("any_peer", "call_remote", "reliable")
+func request_add_entry(ref: String, kind: String, eid: String, label: String) -> void:
+	if is_dm():
+		_handle_add_entry(multiplayer.get_remote_sender_id(), ref.left(200), kind.left(20), eid.left(200), label.left(120))
+
+
+## Host: returns what the dropper is told ("" if refused).
+func _handle_add_entry(sender: int, ref: String, kind: String, eid: String, label: String) -> String:
+	if not EntryDrag.SHEET_LISTS.has(kind) or eid == "":
+		return ""
+	var sheet := _editable_sheet(sender, ref)
+	if sheet.is_empty():
+		return ""
+	var who := str(sheet.get("name", _name_of(ref)))
+	var text := ""
+	if kind == "items":
+		_handle_item(sender, ref, "items/" + eid, 1)
+		text = "%s added to %s's inventory" % [label, who]
+	else:
+		var change := EntryDrag.sheet_change(sheet, {"_kind": kind, "id": eid})
+		if change.is_empty():
+			text = ("%s already knows %s" if kind == "spells" else "%s already has %s") % [who, label]
+		else:
+			_handle_field(sender, ref, str(change[0]), change[1])
+			text = "%s added to %s's %s" % [label, who, "spells" if kind == "spells" else "features"]
+	if sender == 1:
+		_set_status(text)
+	else:
+		entry_added.rpc_id(sender, text)
+	return text
+
+
+## DM -> player: what their drop did.
+@rpc("authority", "call_remote", "reliable")
+func entry_added(text: String) -> void:
+	_set_status(text)
+
+
 func _handle_item(sender: int, ref: String, item: String, qty: int) -> Dictionary:
 	var sheet := _editable_sheet(sender, ref)
 	if sheet.is_empty() or item == "" or qty == 0:

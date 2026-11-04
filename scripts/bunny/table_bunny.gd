@@ -392,6 +392,11 @@ func drag_to(at: Vector2) -> void:
 	_clamp()
 
 
+## Carried with the real mouse (not by code)?
+func carried_by_mouse() -> bool:
+	return state == "dragged" and _by_mouse
+
+
 ## Let go: it falls back down (onto Dragoon's window, if it is under it, or the floor).
 func drop() -> void:
 	_pressed = false
@@ -435,6 +440,8 @@ func settings_menu() -> PopupMenu:
 	_menu.set_item_checked(_menu.get_item_index(1), is_quiet())
 	_menu.add_item("Make it %s" % ("normal size" if size_name() == "small" else "small"), 2)
 	_menu.add_item("Stay inside Dragoon" if wants_desktop() else "Walk on the desktop", 4)
+	if wants_desktop() and int(setting("screen", -1)) >= 0:
+		_menu.add_item("Back to Dragoon's screen", 5)
 	_menu.add_item("Send it away (the bunny icon brings it back)", 3)
 	return _menu
 
@@ -450,6 +457,12 @@ func _on_menu(id: int) -> void:
 		set_on(false)
 	elif id == 4:
 		set_desktop(not wants_desktop())
+	elif id == 5:
+		var desk := get_window() as BunnyDesk
+		if desk != null:
+			desk.back_to_dragoon()
+		else:
+			set_setting("screen", -1)
 
 
 # --- Moving (Tamago: tamago.gd, on the window's bottom instead of the taskbar) ---------------------------
@@ -528,7 +541,7 @@ func _process(delta: float) -> void:
 				mood = "neutral"
 	_speak_left = maxf(_speak_left - delta, 0.0)
 	# safety net (Tamago): the button came up somewhere we never heard of
-	if state == "dragged" and _by_mouse and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+	if state == "dragged" and _by_mouse and not (DisplayServer.mouse_get_button_state() & MOUSE_BUTTON_MASK_LEFT):
 		drop()
 	match state:
 		"air":

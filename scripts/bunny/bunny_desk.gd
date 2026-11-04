@@ -4,7 +4,8 @@ extends Window
 ## borderless, always-on-top window over the usable area of the screen Dragoon is on
 ## (everything above the taskbar). The bunny walks along the taskbar there, and can stand on the
 ## top of Dragoon's window. Clicks go through it except on the bunny and its bubbles
-## (update_passthrough). It follows Dragoon's window to another screen.
+## (update_passthrough). It follows Dragoon's window to another screen, unless the bunny was
+## carried to another screen (TASK-105): then it stays there (per client, TableBunny "screen").
 ## Ported from Tamago's scripts/pet/screen_world.gd; see backlog doc "Bunny shared with Tamago".
 ## Where windows can't be see-through (headless, the setting off), the bunny stays inside
 ## Dragoon's window instead (TableBunny without a desk).
@@ -69,15 +70,33 @@ func hold(b: TableBunny) -> void:
 	b.apply_settings()
 
 
-## Covers the usable area of the screen Dragoon's window is on.
+## Covers the usable area of the screen the bunny was carried to, else the one Dragoon is on.
 func follow_main_window() -> void:
 	var main := get_tree().root if is_inside_tree() else null
 	var at := DisplayServer.window_get_current_screen() if main == null else main.current_screen
-	if at != screen:
+	var chosen := int(TableBunny.setting("screen", -1))
+	if chosen >= 0 and chosen < DisplayServer.get_screen_count():
+		at = chosen
+	if at != screen and (bunny == null or bunny.state != "dragged"):
 		set_screen(at)
 
 
-func set_screen(index: int) -> void:
+## Carried over another screen: the window moves there, the bunny stays under the cursor.
+func carry(mouse: Vector2i) -> void:
+	var over := DisplayServer.get_screen_from_rect(Rect2(Vector2(mouse), Vector2.ONE))
+	if over >= 0 and over != screen:
+		set_screen(over, true)
+		TableBunny.set_setting("screen", over)
+	bunny.drag_to(Vector2(mouse - position))
+
+
+## Back to the screen Dragoon is on (its menu).
+func back_to_dragoon() -> void:
+	TableBunny.set_setting("screen", -1)
+	follow_main_window()
+
+
+func set_screen(index: int, carrying := false) -> void:
 	screen = index
 	var area := DisplayServer.screen_get_usable_rect(screen)  # without the taskbar
 	# 1 px shorter than the usable area so Windows never treats it as fullscreen (Tamago)
@@ -85,7 +104,7 @@ func set_screen(index: int) -> void:
 	position = Vector2i(area.position.x, area.position.y + 1)
 	stage.size = Vector2(size)
 	_last_polygon = PackedVector2Array()
-	if bunny != null:
+	if bunny != null and not carrying:
 		bunny.position.x = clampf(bunny.position.x, 0.0, maxf(0.0, stage.size.x - bunny.size.x))
 		bunny.drop()
 
@@ -96,6 +115,8 @@ func _process(delta: float) -> void:
 		_check = SCREEN_CHECK
 		follow_main_window()
 	if bunny != null:
+		if bunny.state == "dragged" and bunny.carried_by_mouse():
+			carry(DisplayServer.mouse_get_position())  # the real cursor, also over other screens (Tamago)
 		bunny.platforms = platforms()
 	update_passthrough()
 

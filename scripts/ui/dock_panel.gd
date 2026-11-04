@@ -51,6 +51,8 @@ var _home_index := -1
 var _restored := false  ## the first show: back into its own window if it was there last time
 var _carrying := false  ## its own window follows the mouse (dragged by the title)
 var _win_buttons: Control  ## minimise / maximise / close while popped out (TASK-91)
+var _maxed := false  ## maximised by hand on its screen (toggle_maximized)
+var _maxed_from := Rect2i()  ## its rect before that
 ## TASK-100: a close (X) at the top right while it is inside the program too (docked or
 ## floating), drawn like the popped-out window's; it hides the panel (`closed`).
 var closable := false:
@@ -247,9 +249,9 @@ func _head_input(event: InputEvent) -> void:
 			if (event as InputEventMouseButton).double_click:
 				toggle_maximized()  # TASK-91
 			else:
-				if window.mode == Window.MODE_MAXIMIZED:  # pulled off a maximised one: it comes back to its size first
+				if is_maximized():  # pulled off a maximised one: it comes back to its size first
 					var f := float(DisplayServer.mouse_get_position().x - window.position.x) / maxf(1.0, float(window.size.x))
-					window.mode = Window.MODE_WINDOWED
+					_restore_size()
 					window.position = DisplayServer.mouse_get_position() - Vector2i(int(window.size.x * f), 12)
 				start_carry(DisplayServer.mouse_get_position() - window.position)
 			_head.accept_event()
@@ -285,7 +287,7 @@ func _gui_input(event: InputEvent) -> void:
 	if window != null:
 		var edge := window_edge(get_local_mouse_position())
 		if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT \
-				and event.pressed and edge >= 0 and window.mode == Window.MODE_WINDOWED:
+				and event.pressed and edge >= 0 and window.mode == Window.MODE_WINDOWED and not _maxed:
 			window.start_resize(edge as DisplayServer.WindowResizeEdge)  # TASK-91: borderless, its edges resize it (the OS does it)
 			accept_event()
 		elif event is InputEventMouseMotion:
@@ -433,19 +435,39 @@ func window_edge(local: Vector2) -> int:
 	return -1
 
 
-## Its own window maximised on its screen, or back to its size.
+## Its own window maximised on its screen, or back to its size. Done by hand (the screen's
+## usable rect): the OS maximise of a borderless window overshoots onto the next screen
+## (Nico 2026-11-04).
 func toggle_maximized() -> void:
 	if window == null:
 		return
-	if window.mode == Window.MODE_MAXIMIZED:
-		window.mode = Window.MODE_WINDOWED
+	if is_maximized():
+		_restore_size()
+		window.position = _maxed_from.position
 	else:
 		_keep_window_rect()
-		window.mode = Window.MODE_MAXIMIZED
+		_maxed_from = Rect2i(window.position, window.size)
+		var usable := DisplayServer.screen_get_usable_rect(window.current_screen)
+		_maxed = true
+		window.position = usable.position
+		window.size = usable.size
 	if _win_buttons != null:
 		_win_buttons.queue_redraw()
 		for b: Node in _win_buttons.get_children():
 			(b as Control).queue_redraw()
+
+
+func is_maximized() -> bool:
+	return window != null and (_maxed or window.mode == Window.MODE_MAXIMIZED)
+
+
+## Back to the size it had before maximising (the position is the caller's).
+func _restore_size() -> void:
+	if window.mode == Window.MODE_MAXIMIZED:
+		window.mode = Window.MODE_WINDOWED
+	if _maxed:
+		_maxed = false
+		window.size = _maxed_from.size
 
 
 func minimize() -> void:
@@ -535,7 +557,7 @@ class WindowButton extends Button:
 			"min":
 				draw_line(c + Vector2(-r, 3), c + Vector2(r, 3), ink, 1.5)
 			"max":
-				var maxed := panel != null and panel.window != null and panel.window.mode == Window.MODE_MAXIMIZED
+				var maxed := panel != null and panel.is_maximized()
 				if maxed:  # restore: two squares
 					draw_polyline(PackedVector2Array([c + Vector2(-r + 3, -r + 2), c + Vector2(-r + 3, -r), c + Vector2(r, -r), c + Vector2(r, r - 3), c + Vector2(r - 2, r - 3)]), ink, 1.2)
 					draw_rect(Rect2(c + Vector2(-r, -r + 3), Vector2(r * 2 - 3, r * 2 - 3)), ink, false, 1.2)
@@ -554,6 +576,7 @@ class WindowButton extends Button:
 func pop_out() -> void:
 	if window != null or _home == null:
 		return
+	_maxed = false
 	var at := global_position
 	_home_index = get_index()
 	window = Window.new()
@@ -616,7 +639,7 @@ func dock_back() -> void:
 
 ## Its own window's rect, for the next time it pops out.
 func _keep_window_rect() -> void:
-	if window != null and window.mode == Window.MODE_WINDOWED:
+	if window != null and window.mode == Window.MODE_WINDOWED and not _maxed:
 		place.win = [window.position.x, window.position.y, window.size.x, window.size.y]
 
 

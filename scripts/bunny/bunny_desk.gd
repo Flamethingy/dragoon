@@ -27,7 +27,9 @@ var _puffs := 0
 
 ## Can this computer show a see-through desktop window at all?
 static func available() -> bool:
-	return DisplayServer.get_name() != "headless" and DisplayServer.is_window_transparency_available() \
+	# embedded in the editor's Game view a see-through window breaks the embedding (the game
+	# was drawn scaled next to its frame, Nico 2026-11-04): the bunny stays inside Dragoon there
+	return DisplayServer.get_name() != "headless" and not OS.has_feature("embedded_in_editor") and DisplayServer.is_window_transparency_available() \
 		and bool(ProjectSettings.get_setting("display/window/per_pixel_transparency/allowed", false))
 
 

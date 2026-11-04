@@ -22,6 +22,7 @@ _mcp_game_helper="*res://addons/godot_ai/runtime/game_helper.gd"
 [display]
 
 window/per_pixel_transparency/allowed=true
+window/per_pixel_transparency/allowed.embedded_in_editor=false
 
 [editor_plugins]
 

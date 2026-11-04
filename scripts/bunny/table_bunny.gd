@@ -36,6 +36,7 @@ signal place_changed  ## the desktop or inside Dragoon (TASK-102)
 
 var table: NetTable
 var chat: ChatBox
+var chat_window: BunnyChat  ## Tamago's chat: my own conversation with it (TASK-103)
 var anim := "idle"  ## idle / walk / talk / think / work / sleep (what it does)
 var mood := "neutral"
 var state := "ground"  ## ground / air (hopping or falling) / dragged
@@ -281,8 +282,14 @@ func hide_bubble() -> void:
 	bubble.visible = false
 
 
-## A click: the chat, ready to ask.
+## A click: my chat with it (TASK-103), above it; without one, the table's chat with "/bunny ".
 func open_chat() -> void:
+	if chat_window != null:
+		var r := get_global_rect()
+		var native := not chat_window.is_embedded() and chat_window.is_inside_tree()
+		var offset := Vector2(get_window().position) if native and get_window() != null else Vector2.ZERO
+		chat_window.open_at(Vector2i(offset + Vector2(r.position.x + r.size.x * 0.5 - 40.0, r.position.y - 8.0)))
+		return
 	if chat == null:
 		return
 	chat.visible = true
@@ -295,6 +302,8 @@ func open_chat() -> void:
 
 ## Is someone typing to it ("/bunny ..." in a focused chat)? Then it listens.
 func is_listening() -> bool:
+	if chat_window != null and chat_window.visible and chat_window.input != null and chat_window.input.text.strip_edges() != "":
+		return true
 	return chat != null and chat.is_visible_in_tree() and chat.line.text.begins_with("/bunny") and chat.line.has_focus()
 
 

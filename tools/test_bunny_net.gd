@@ -3,6 +3,9 @@ extends SceneTree
 ## player's "/bunny" question reaches the host's brain (with their own character only) and the
 ## answer comes back to that player alone; "/bunny!" answers everyone (and they see the
 ## question); everyone sees the bunny's busy status while it thinks; no key: it says it sleeps.
+## TASK-103: each one's conversation is in their own bunny chat log (on their computer, per table
+## and player), not in the table's chat; only what is for everyone also goes there. The bunny
+## chat window shows my log and asks.
 ## godot --headless --path . -s tools/test_bunny_net.gd
 
 const PORT := 47853
@@ -22,6 +25,7 @@ func _init() -> void:
 	BunnyBrain.settings_file = DIR.path_join("bunny_settings.cfg")
 	BunnyBrain.set_setting("cooldown", 0)
 	BunnyBrain.set_setting("name", "Hops")
+	NetTable.bunny_log_dir = DIR.path_join("bunny_chat")
 	await process_frame
 	var dm := _table("DM", "dm")
 	var bob := _table("Bob", "bob")
@@ -38,7 +42,8 @@ func _init() -> void:
 	bob.say("/bunny hello?", BORIN)
 	await _until(func() -> bool: return not heard.is_empty())
 	_check(not heard.is_empty() and "no brain" in str(heard[0].text) and heard[0].mood == "sleepy", "no key: the bunny sleeps (%s)" % [heard])
-	_check(bob.rolls.any(func(r: Dictionary) -> bool: return bool(r.get("bunny_question", false)) and "hello?" in str(r.text)), "Bob's question is in his chat")
+	_check(bob.bunny_log.any(func(r: Dictionary) -> bool: return r.role == "user" and str(r.text) == "hello?"), "Bob's question is in his bunny chat")
+	_check(not bob.rolls.any(func(r: Dictionary) -> bool: return "hello?" in str(r.get("text", ""))), "not in the table's chat")
 
 	# with a (fake) brain
 	BunnyBrain.set_setting("api_key", "sk-ant-test")
@@ -66,7 +71,8 @@ func _init() -> void:
 	gate[0] = true
 	await _until(func() -> bool: return not heard.is_empty())
 	_check(heard.size() == 1 and "speed becomes 0" in str(heard[0].text) and heard[0].mood == "happy" and str(heard[0].by) == "Hops", "the answer comes back to Bob (%s)" % [heard])
-	_check(bob.rolls[-1].get("bunny", false) and "speed becomes 0" in NetTable.roll_bbcode(bob.rolls[-1]), "in his chat feed")
+	_check(str(bob.bunny_log[-1].role) == "bunny" and "speed becomes 0" in str(bob.bunny_log[-1].text), "in his bunny chat")
+	_check(not bob.rolls.any(func(r: Dictionary) -> bool: return "speed becomes 0" in str(r.get("text", ""))), "a private answer isn't in the table's chat")
 	await process_frame
 	_check(dm.rolls.size() == dm_before, "the DM doesn't get Bob's private answer")
 	await _until(func() -> bool: return bob.bunny_state == "idle")
@@ -80,6 +86,8 @@ func _init() -> void:
 	bob.say("/bunny! explain grappling to everyone", BORIN)
 	await _until(func() -> bool: return not heard.is_empty() and not dm_heard.is_empty())
 	_check(heard.size() == 1 and dm_heard.size() == 1 and str(dm_heard[0].to) == "all", "a public answer reaches everyone")
+	_check(bob.rolls.any(func(r: Dictionary) -> bool: return bool(r.get("bunny", false))) and dm.rolls.any(func(r: Dictionary) -> bool: return bool(r.get("bunny", false))), "and is in the table's chat")
+	_check(bool(bob.bunny_log[-1].public) and bool(dm.bunny_log[-1].public), "and in both bunny chats, marked for everyone")
 	_check(dm.rolls.any(func(r: Dictionary) -> bool: return bool(r.get("bunny_question", false)) and "explain grappling" in str(r.text)), "the DM sees the question too")
 	_check("Borin" in str(asked[-1].system), "his own character is the context")
 
@@ -92,6 +100,28 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 	_check(dm_heard.size() == 1 and heard.is_empty() and bob.rolls.size() == bob_before, "the DM's private answer stays with the DM")
+	_check(dm.bunny_log.any(func(r: Dictionary) -> bool: return "secret plan" in str(r.text)) and not bob.bunny_log.any(func(r: Dictionary) -> bool: return "secret plan" in str(r.text)), "the DM's question is in the DM's log only")
+	_check(dm.bunny_log_file() != bob.bunny_log_file() and dm.bunny_log_file().ends_with("-dm.json") and bob.bunny_log_file().ends_with("-bob.json"), "a log per player (%s, %s)" % [dm.bunny_log_file(), bob.bunny_log_file()])
+	var saved: Variant = JSON.parse_string(FileAccess.get_file_as_string(bob.bunny_log_file()))
+	_check(saved is Array and (saved as Array).size() == bob.bunny_log.size(), "Bob's log is kept on his computer")
+
+	# the bunny chat window: my log, and asking from it
+	var win := BunnyChat.new()
+	win.table = bob
+	root.add_child(win)
+	await process_frame
+	win.open_at(Vector2i(100, 600))
+	await process_frame
+	_check(win.visible and win.log_box.get_child_count() == mini(BunnyChat.PAGE, bob.bunny_log.size()), "the chat window shows my log (%d)" % win.log_box.get_child_count())
+	_check("Hops" in win.title, "talking to Hops")
+	heard.clear()
+	var n := bob.bunny_log.size()
+	win.input.text = "from the window"
+	win.submit()
+	await _until(func() -> bool: return not heard.is_empty())
+	_check(bob.bunny_log.size() == n + 2 and str(bob.bunny_log[n].text) == "from the window" and win.input.text == "", "asked from the window: question and answer in my log")
+	_check(win.log_box.get_child_count() >= mini(BunnyChat.PAGE, n) + 1, "and in the window")
+	win.queue_free()
 
 	# a long job: everyone sees it working, questions wait with a hint, the DM can stop it
 	var stopped := []

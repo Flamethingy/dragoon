@@ -218,9 +218,9 @@ func _init() -> void:
 	bb.set_quiet(true)
 	reply[0] = "Quietly."
 	bob.ask_bunny("psst", false, BORIN)
-	await _until(func() -> bool: return bob.rolls.any(func(r: Dictionary) -> bool: return str(r.get("text", "")) == "Quietly."))
+	await _until(func() -> bool: return bob.bunny_log.any(func(r: Dictionary) -> bool: return str(r.get("text", "")) == "Quietly."))
 	_check(not bb.bubble.visible, "quiet: no bubble")
-	_check(bob.rolls.any(func(r: Dictionary) -> bool: return str(r.get("text", "")) == "Quietly."), "but it's in the chat")
+	_check(bob.bunny_log.any(func(r: Dictionary) -> bool: return str(r.get("text", "")) == "Quietly."), "but it's in the bunny chat")
 	bb.set_quiet(false)
 
 	# a click opens the chat, ready to ask

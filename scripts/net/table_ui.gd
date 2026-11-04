@@ -44,6 +44,7 @@ var hud: CharacterHud  ## the active character, lower left (TASK-44)
 var chat: ChatBox  ## the chat on the right of the calm table (TASK-46)
 var bunny: TableBunny  ## the Table Bunny walking along the bottom (TASK-98)
 var bunny_desk: BunnyDesk  ## its see-through window on the desktop, if it walks there (TASK-102)
+var bunny_chat: BunnyChat  ## my own chat with the bunny, Tamago's chat window (TASK-103)
 var bunny_button: BunnyButton  ## its icon in the lower left corner: out / away (TASK-102)
 var timeline_bar: TimelineBar  ## the moments of the timeline, at the top (TASK-82)
 ## DM: show these events of a moment in the Timeline list (the app opens it).
@@ -106,6 +107,12 @@ func _ready() -> void:
 	bunny.table = table
 	bunny.chat = chat
 	root.add_child(bunny)
+	bunny_chat = BunnyChat.new()
+	bunny_chat.table = table
+	bunny_chat.active_ref = func() -> String: return hud.active
+	bunny_chat.force_native = BunnyDesk.available()  # out on the desktop with the bunny
+	add_child(bunny_chat)
+	bunny.chat_window = bunny_chat
 	bunny_button = BunnyButton.new()
 	bunny_button.bunny = bunny
 	root.add_child(bunny_button)

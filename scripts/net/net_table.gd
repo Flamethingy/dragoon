@@ -91,7 +91,11 @@ var bunny_state := "sleeping"  ## as the host says (TASK-97): idle / thinking / 
 var bunny_detail := ""  ## "thinking for Borin"
 var bunny_waiting := 0  ## questions in its queue
 var bunny_name := "Bunny"
-var bunny_look := {}  ## the host's look for the bunny: {colors, behaviour} (TASK-101)
+var bunny_look := {}  ## the host's look for the bunny: {colors, behaviour, table} (TASK-101)
+## My conversation with the bunny (TASK-103): [{role: user / bunny / error, text, public, mood, by, time}],
+## oldest first, kept on this computer only (BUNNY_LOG_DIR), per table and player.
+var bunny_log: Array = []
+var _bunny_log_file := ""
 var kept_sheets := {}  ## ref -> how many detached sheet pages show it (TASK-92): stays open
 
 
@@ -137,6 +141,7 @@ var _peer_seg := {}  ## host, Show everyone: peer id -> the [upto, toward] they 
 var showing := false
 signal showing_changed  ## Show everyone went on or off, or the DM's cursor moved (players)
 signal bunny_message(entry: Dictionary)  ## the Table Bunny answered me (or everyone) (TASK-97)
+signal bunny_log_added(entry: Dictionary)  ## a new line in my bunny chat (TASK-103)
 signal bunny_look_changed  ## the host changed the bunny's colours or behaviour (TASK-101)
 signal bunny_status_changed  ## what the bunny does now: bunny_state, bunny_detail, bunny_waiting (TASK-97)
 signal calendar_changed  ## the calendar was replaced: the world's on hosting, the DM's edit, or the DM's for a player (Nico 2026-11-02)
@@ -4847,7 +4852,8 @@ func ask_bunny(text: String, public := false, ref := "") -> void:
 	var t := text.strip_edges()
 	if t == "":
 		return
-	_add_bunny_line({"by": player_name if player_name != "" else "Me", "text": "→ %s%s: %s" % [bunny_name, " (everyone)" if public else "", t], "bunny_question": true})
+	_add_bunny_line({"by": player_name if player_name != "" else "Me", "text": "→ %s%s: %s" % [bunny_name, " (everyone)" if public else "", t],
+		"bunny_question": true, "mine": true, "public": public, "question": t})
 	if is_dm():
 		_handle_bunny_ask(1, t, public, ref)
 	elif is_online():
@@ -4870,7 +4876,7 @@ func _handle_bunny_ask(sender: int, text: String, public: bool, ref: String) -> 
 	if ref != "" and not may_see_sheet(player, ref):
 		ref = ""  # only one's own character as context
 	if public:  # the others see the question too
-		var q := {"by": timeline.player_name(player), "text": "→ %s (everyone): %s" % [bunny_name, text], "bunny_question": true}
+		var q := {"by": timeline.player_name(player), "text": "→ %s (everyone): %s" % [bunny_name, text], "bunny_question": true, "public": true}
 		for peer_id: int in peers:
 			if peer_id != sender:
 				bunny_said.rpc_id(peer_id, q)
@@ -4941,11 +4947,20 @@ func bunny_said(entry: Dictionary) -> void:
 	_add_bunny_line(entry)
 
 
-## Into my chat feed (not the event log: the bunny's words aren't part of the game).
+## Where the bunny's words go (TASK-103): my questions and its answers to me into my bunny chat
+## log only; what is for everyone (public questions and answers) also into the table's chat
+## feed. Never the event log: the bunny's words aren't part of the game.
 func _add_bunny_line(entry: Dictionary) -> void:
 	var line := entry.duplicate()
 	line["id"] = 0
-	_add_roll(line)
+	var public := bool(line.get("public", false)) or str(line.get("to", "")) == "all"
+	if public:
+		_add_roll(line)
+	if bool(line.get("mine", false)):
+		_log_bunny({"role": "user", "text": str(line.get("question", line.get("text", ""))), "public": public, "by": str(line.get("by", ""))})
+	elif bool(line.get("bunny", false)):
+		_log_bunny({"role": "error" if bool(line.get("error", false)) else "bunny", "text": str(line.get("text", "")),
+			"public": public, "mood": str(line.get("mood", "neutral")), "by": str(line.get("by", bunny_name)), "hint": bool(line.get("hint", false))})
 	if bool(line.get("bunny", false)):
 		bunny_message.emit(line)
 
@@ -4962,7 +4977,8 @@ func _on_bunny_status(state: String, detail: String, waiting: int) -> void:
 func share_bunny_look() -> void:
 	var colors: Variant = BunnyBrain.setting("colors")
 	var ways: Variant = BunnyBrain.setting("behaviour")
-	var look := {"colors": colors if colors is Dictionary else {}, "behaviour": ways if ways is Dictionary else {}}
+	var look := {"colors": colors if colors is Dictionary else {}, "behaviour": ways if ways is Dictionary else {},
+		"table": "%s-%s" % [timeline.world_id(), timeline.id()]}  # for the players' chat logs
 	bunny_look_set(look)
 	for peer_id: int in peers:
 		bunny_look_set.rpc_id(peer_id, look)
@@ -4972,7 +4988,58 @@ func share_bunny_look() -> void:
 @rpc("authority", "call_remote", "reliable")
 func bunny_look_set(look: Dictionary) -> void:
 	bunny_look = look
+	_open_bunny_log()
 	bunny_look_changed.emit()
+
+
+## --- My bunny chat log (TASK-103) -----------------------------------------------------------------
+
+const BUNNY_LOG_DIR := "user://bunny_chat"
+const BUNNY_LOG_MAX := 500
+static var bunny_log_dir := BUNNY_LOG_DIR
+
+
+## The file of my log at this table: per table (world + timeline) and who I am.
+func bunny_log_file() -> String:
+	var at := str(bunny_look.get("table", "")).validate_filename()
+	var who := "dm" if is_dm() else my_player.validate_filename()
+	if at == "" or who == "":
+		return ""
+	return bunny_log_dir.path_join("%s-%s.json" % [at, who])
+
+
+## Loads my log for this table (lines from before it was known are kept, at the end).
+func _open_bunny_log() -> void:
+	var path := bunny_log_file()
+	if path == "" or path == _bunny_log_file:
+		return
+	_bunny_log_file = path
+	var older: Array = []
+	if FileAccess.file_exists(path):
+		var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+		if data is Array:
+			older = (data as Array).filter(func(e: Variant) -> bool: return e is Dictionary)
+	bunny_log = older + bunny_log
+	_save_bunny_log()
+
+
+func _save_bunny_log() -> void:
+	if bunny_log.size() > BUNNY_LOG_MAX:
+		bunny_log = bunny_log.slice(bunny_log.size() - BUNNY_LOG_MAX)
+	if _bunny_log_file == "":
+		return
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(bunny_log_dir))
+	var f := FileAccess.open(_bunny_log_file, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(bunny_log, "	"))
+
+
+func _log_bunny(entry: Dictionary) -> void:
+	var e := entry.duplicate()
+	e["time"] = int(Time.get_unix_time_from_system())
+	bunny_log.append(e)
+	_save_bunny_log()
+	bunny_log_added.emit(e)
 
 
 ## DM -> everyone: what the bunny does now.

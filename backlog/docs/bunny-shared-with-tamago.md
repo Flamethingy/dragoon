@@ -21,6 +21,7 @@ time**. This page lists which file belongs with which, and what Dragoon does dif
 | `scripts/pet/tamago.gd` (`Tamago`) | `scripts/bunny/table_bunny.gd` (`TableBunny`), "Moving" and "Input" | Behaviour: idle and walk timers, turning at the edges, hops, carrying by the scruff, falling and landing. |
 | `scripts/pet/screen_world.gd` (`ScreenWorld`) | `scripts/bunny/bunny_desk.gd` (`BunnyDesk`) | The see-through, always-on-top window over a screen's usable area, the click-through region and the platforms. One window, on the screen Dragoon is on. The only platform is Dragoon's own window top, because there's no service to list the other windows. |
 | `assets/characters/tamago/icon.png` | `assets/bunny/icon.png` | The icon. In Dragoon it's the button in the lower left corner, recoloured like the tray icon. |
+| `scripts/ui/chat_window.gd` (`ChatWindow`) | `scripts/bunny/bunny_chat.gd` (`BunnyChat`) | The chat window: borderless, above the bunny, dragged by its header, the log paged, a multi-line input. In Dragoon it adds "To everyone", has no attachments, and keeps the log locally per table and player (`NetTable.bunny_log`) instead of the service's history. |
 | `scripts/pet/bunny.gd` (`Bunny`), "Puffs" | `table_bunny.gd`, "Puffs" | `appear()` and `vanish()` in a puff. |
 | Profile `look.colors` and `behaviour` (service `profiles.py`, dashboard "Look" tab) | `BunnyBrain` settings `colors` and `behaviour`, set in `BunnySettings` (Esc > Table Bunny) | Customization. In Dragoon the host sets it and `NetTable.bunny_look` sends it to every client. |
 

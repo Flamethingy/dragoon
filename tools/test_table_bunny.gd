@@ -68,10 +68,13 @@ func _init() -> void:
 	# walking when idle
 	bunny.anim = "idle"
 	bunny._rest = 0.0
+	var hops: float = bunny.behaviour.hop_chance
+	bunny.behaviour.hop_chance = 0.0  # a hop in place instead of the walk made this flaky
 	var x0 := bunny.position.x
 	for i in 20:
 		bunny._process(0.1)
 	_check(bunny.anim in ["walk", "idle"] and bunny.position.x != x0, "it walks along the bottom")
+	bunny.behaviour.hop_chance = hops
 	bunny.anim = "walk"
 	bunny._walk_left = 5.0
 	bunny._process(0.05)

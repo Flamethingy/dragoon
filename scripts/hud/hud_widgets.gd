@@ -71,9 +71,13 @@ const VARIANTS := {
 	"spell": ["square", "round"],
 	"item": ["square", "round"],
 	"check": ["square", "round"],
+	"features": ["list", "cards"],
+	"spells": ["list", "cards"],
+	"inventory": ["list", "cards"],
 }
 const VARIANT_LABELS := {"token": "token", "picture": "full picture", "small": "small", "bar": "bar",
-	"number": "number", "pips": "pips", "count": "count", "square": "square", "round": "round"}
+	"number": "number", "pips": "pips", "count": "count", "square": "square", "round": "round",
+	"list": "list", "cards": "cards"}
 ## Quick buttons: they need a "ref".
 const QUICK := ["spell", "item", "check"]
 ## The builder's catalog tabs (LayoutEditor).
@@ -192,10 +196,6 @@ static func catalog(s: Dictionary, shape := "square") -> Array:
 	var out := []
 	for kind: String in ["portrait", "hp", "slots", "info", "description", "features", "spells", "inventory"]:
 		var label := str(KINDS[kind].label)
-		if kind == "spells":
-			label = "Spell list"
-		elif kind == "inventory":
-			label = "Inventory list"
 		for v: String in VARIANTS.get(kind, [""]):
 			out.append({"tab": "Character", "w": kind, "v": v, "ref": "",
 				"label": label + (" · " + str(VARIANT_LABELS[v]) if v != "" else "")})
@@ -267,11 +267,11 @@ static func build(kind: String, s: Dictionary, hud: CharacterHud, size: Vector2,
 		"description":
 			body = _text(Markdown.to_bbcode(str(s.get("description", ""))), "Description")
 		"features":
-			body = _text(_list_bbcode(s, ["features", "traits", "actions", "bonus_actions", "reactions"]), "Features")
+			body = SheetLists.build(kind, s, hud, size, v)  # TASK-107: list or cards
 		"spells":
-			body = _text(_list_bbcode(s, ["spells"]), "Spells")
+			body = SheetLists.build(kind, s, hud, size, v)
 		"inventory":
-			body = _text(_inventory_bbcode(s), "Inventory")
+			body = SheetLists.build(kind, s, hud, size, v)
 		"turn":
 			body = _turn(hud)
 		_:
@@ -807,17 +807,6 @@ static func _list_bbcode(s: Dictionary, keys: Array) -> String:
 		for v: Variant in s.get(key, []):
 			var ref: Variant = (s.get("_refs", {}) as Dictionary).get(str(v)) if s.get("_refs") is Dictionary else null
 			lines.append("• " + Markdown.escape(str(ref.name) if ref is Dictionary and ref.has("name") else _name_of(v)))
-	return "\n".join(lines)
-
-
-static func _inventory_bbcode(s: Dictionary) -> String:
-	var lines := PackedStringArray()
-	for it: Variant in s.get("inventory", []):
-		if it is Dictionary:
-			var qty := int(it.get("qty", 1))
-			lines.append("• %s%s%s" % ["%d× " % qty if qty > 1 else "", Markdown.escape(_name_of(it.get("item", ""))), " (equipped)" if it.get("equipped", false) else ""])
-		else:
-			lines.append("• " + Markdown.escape(_name_of(it)))
 	return "\n".join(lines)
 
 

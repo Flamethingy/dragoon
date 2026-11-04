@@ -2929,13 +2929,27 @@ func _sheet_for(player: String, ref: String) -> Dictionary:
 			var e := catalog_entry(str(v))
 			refs[str(v)] = {"name": str(e.get("name", HudWidgets._name_of(v))), "level": int(e.get("level", 0)),
 				"cast": Rules.spell_kind(e), "ritual": bool(e.get("ritual", false)),  # TASK-49
-				"range_m": float(e.get("range_m", 0)), "area": _area_of(e)}  # TASK-67
+				"range_m": float(e.get("range_m", 0)), "area": _area_of(e),  # TASK-67
+				"school": str(e.get("school", "")), "concentration": bool(e.get("concentration", false)),  # TASK-107: the lists
+				"casting_time": str(e.get("casting_time", "")), "image": _image_of(e)}
 		for it: Variant in sheet.get("inventory", []):
 			var r := str(it.get("item", "")) if it is Dictionary else str(it)
-			refs[r] = {"name": str(catalog_entry(r).get("name", HudWidgets._name_of(r)))}
+			var e := catalog_entry(r)
+			var type: Variant = e.get("type", "")
+			refs[r] = {"name": str(e.get("name", HudWidgets._name_of(r))),
+				"type": ", ".join(PackedStringArray(type)) if type is Array else str(type),  # TASK-107: the lists
+				"rarity": str(e.get("rarity", "")), "weight": float(e.get("weight", 0)), "image": _image_of(e)}
 		for id: String in auto:  # class features: their names and levels (TASK-69)
 			var f: Dictionary = features.get(id, {})
 			refs[id] = {"name": str(f.get("name", id)), "level": int(f.get("level", 0)), "class": str(f.get("class", ""))}
+		for key in ["features", "traits", "actions", "bonus_actions", "reactions"]:  # TASK-107: the lists
+			for fid: Variant in sheet.get(key, []):
+				var f: Variant = features.get(str(fid).trim_prefix("features/"), features.get(str(fid), {}))
+				if f is Dictionary:
+					var info: Dictionary = refs.get(str(fid), {"name": str((f as Dictionary).get("name", HudWidgets._name_of(fid))),
+						"level": int((f as Dictionary).get("level", 0)), "class": str((f as Dictionary).get("class", ""))})
+					info.merge({"list": key, "attack": (f as Dictionary).get("attack") is Dictionary, "save": (f as Dictionary).get("save") is Dictionary}, true)
+					refs[str(fid)] = info
 		sheet["_refs"] = refs
 		sheet["_resources"] = resources_of(sheet)  # TASK-64
 		# the HUD and the sheet pages (TASK-47): its own, a creature copy its template's
@@ -4430,6 +4444,7 @@ func catalog_entry(ref: String) -> Dictionary:
 					if list is Array:
 						for e: Variant in list:
 							if e is Dictionary and e.has("id") and not by_id.has(str(e.id)):
+								e["_dir"] = root.path_join(d)  # its pictures are relative to the package (TASK-107)
 								by_id[str(e.id)] = e
 		_catalog[kind] = by_id
 	return (_catalog[kind] as Dictionary).get(id, {})
@@ -4494,6 +4509,14 @@ static func _heal_of(spell: Dictionary, caster: Dictionary) -> Dictionary:
 				f = f.trim_suffix("+mod") + ("%+d" % mod if mod != 0 else "")
 			return {"formula": f, "scaling": fx.get("scaling", {})}
 	return {}
+
+
+## An entry's picture as a path this computer can load ("" if it has none).
+static func _image_of(e: Dictionary) -> String:
+	var rel := str(e.get("image", ""))
+	if rel == "" or str(e.get("_dir", "")) == "":
+		return ""
+	return str(e._dir).path_join(rel)
 
 
 ## A spell's or feature's area: its effects', else the text's.

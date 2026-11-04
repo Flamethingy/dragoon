@@ -407,6 +407,36 @@ func use_quick(kind: String, ref: String) -> void:
 		table.use_action(active, ref)
 
 
+var _waiting_entry := ""  ## a player asked the host for this entry's view (TASK-109)
+
+
+## Opens a spell's, item's or feature's view in a window (TASK-109: a double-click in a sheet
+## list). Package entries are read here; a player asks the host for the timeline's own.
+func show_entry(ref: String) -> void:
+	if table == null or ref == "":
+		return
+	var e := table.lookup_entry(ref)
+	if not e.is_empty():
+		EntryWindow.show_for(self, ref, e)
+		return
+	if table.is_dm() or not table.is_online():
+		return
+	_waiting_entry = ref
+	if not table.entry_received.is_connected(_on_entry_received):
+		table.entry_received.connect(_on_entry_received)
+	table.open_entry(ref)
+
+
+func _on_entry_received(ref: String) -> void:
+	if ref != _waiting_entry or not table.entries.get(ref) is Dictionary:
+		return
+	_waiting_entry = ""
+	var e: Dictionary = (table.entries[ref] as Dictionary).duplicate()
+	if not e.has("_kind"):
+		e["_kind"] = NetTable.entry_kind(ref)
+	EntryWindow.show_for(self, ref, e)
+
+
 var cast_popup: PopupMenu
 
 ## Casting a spell (TASK-49): a cantrip at once; a levelled spell at its level, or a menu of

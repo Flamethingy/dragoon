@@ -117,7 +117,7 @@ static func _items(s: Dictionary) -> Array:
 			"amount": amount, "spent": qty <= 0, "group": "",
 			"icon": {"image": str(info.get("image", "")), "letter": name.left(1).to_upper(), "color_key": str(info.get("type", "item")),
 				"sprite": item_sprite(name, str(info.get("type", "")), w, a)},
-			"tip": "\n".join(tip) + "\nClick: use it"})
+			"tip": "\n".join(tip) + "\nClick the picture: use it · double-click: details"})
 	return out
 
 
@@ -162,7 +162,7 @@ static func _spells(s: Dictionary) -> Array:
 		out.append({"ref": ref, "use": "spell", "name": name, "detail": " · ".join(bits), "marks": marks,
 			"amount": amount, "spent": amount.begins_with("0/"), "group": "Cantrips" if level == 0 else "Level %d" % level, "level": level,
 			"icon": {"image": str(info.get("image", "")), "letter": "C" if level == 0 else str(level), "color_key": str(info.get("school", "spell")), "sprite": ""},
-			"tip": "%s\n%s%s\nClick: cast it" % [name, " · ".join(bits), "\nFree slots: " + amount if amount != "" else ""]})
+			"tip": "%s\n%s%s\nClick the picture: cast it · double-click: details" % [name, " · ".join(bits), "\nFree slots: " + amount if amount != "" else ""], "use_tip": "Cast it"})
 	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return [int(a.level), str(a.name)] < [int(b.level), str(b.name)])
 	return out
@@ -192,7 +192,7 @@ static func _features(s: Dictionary) -> Array:
 			out.append({"ref": ref, "use": "", "name": name, "detail": " · ".join(bits), "marks": [],
 				"amount": amount, "spent": not uses.is_empty() and int(uses.left) <= 0, "group": str(LIST_LABELS[key]),
 				"icon": {"image": "", "letter": name.left(1).to_upper(), "color_key": key, "sprite": sprite},
-				"tip": name + ("\n" + " · ".join(bits) if not bits.is_empty() else "") + ("\nUses left: " + amount if amount != "" else "")})
+				"tip": name + ("\n" + " · ".join(bits) if not bits.is_empty() else "") + ("\nUses left: " + amount if amount != "" else "") + "\nDouble-click: details"})
 	return out
 
 
@@ -343,7 +343,7 @@ static func _row(r: Dictionary, hud: CharacterHud) -> Control:
 	for c in row.find_children("*", "Control", true, false):
 		(c as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_connect_use(b, r, hud)
+	_connect(b, art, r, hud)
 	return b
 
 
@@ -427,7 +427,7 @@ static func _card(r: Dictionary, hud: CharacterHud) -> Control:
 		b.add_child(marks)
 	for c in b.find_children("*", "Control", true, false):
 		(c as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_connect_use(b, r, hud)
+	_connect(b, art, r, hud)
 	return b
 
 
@@ -461,10 +461,26 @@ static func _mark(letter: String, tip: String) -> Control:
 	return l
 
 
-static func _connect_use(b: Button, r: Dictionary, hud: CharacterHud) -> void:
-	var use := str(r.use)
-	if use == "" or hud == null:
+## TASK-109 (Nico 2026-11-04): a click on the picture uses the entry (an item / a spell), a
+## double-click on the row or card opens its view (CharacterHud.show_entry); a single click
+## on the text does nothing.
+static func _connect(b: Button, art: Control, r: Dictionary, hud: CharacterHud) -> void:
+	if hud == null:
 		return
 	var ref := str(r.ref)
-	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	b.pressed.connect(func() -> void: hud.use_quick(use, ref))
+	b.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and event.double_click:
+			b.accept_event()
+			hud.show_entry(ref))
+	var use := str(r.use)
+	if use == "":
+		return
+	art.mouse_filter = Control.MOUSE_FILTER_STOP
+	art.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	art.tooltip_text = str(r.get("use_tip", "Use it"))
+	art.mouse_entered.connect(func() -> void: art.modulate = Color(1.15, 1.1, 1.05))
+	art.mouse_exited.connect(func() -> void: art.modulate = Color.WHITE)
+	art.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and not event.double_click:
+			art.accept_event()
+			hud.use_quick(use, ref))

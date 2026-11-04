@@ -4450,6 +4450,29 @@ func catalog_entry(ref: String) -> Dictionary:
 	return (_catalog[kind] as Dictionary).get(id, {})
 
 
+## An entry to show (TASK-109): a spell / item from the timeline, the world or the packages,
+## else a feature by id; a copy with `_kind` and `ref`, {} if unknown here.
+func lookup_entry(ref: String) -> Dictionary:
+	var e: Dictionary = catalog_entry(ref) if ref.count("/") == 1 else {}
+	if e.is_empty():
+		var all := _features()
+		e = all.get(ref, all.get(ref.get_file(), {}))
+	if e.is_empty() and is_dm() and timeline != null:
+		e = timeline.entry(ref)
+	if e.is_empty():
+		return {}
+	var out := e.duplicate()
+	if not out.has("_kind"):
+		out["_kind"] = entry_kind(ref) if ref.count("/") == 1 else "features"
+	out["ref"] = ref
+	return out
+
+
+static func entry_kind(ref: String) -> String:
+	var k := ref.get_slice("/", 0)
+	return k if k in ["spells", "items", "features", "creatures"] else "features"
+
+
 ## The features sheets look up: the world's and the timeline's, and the packages' class
 ## features (TASK-69); the world's win.
 func _features() -> Dictionary:

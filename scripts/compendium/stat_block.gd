@@ -11,7 +11,8 @@ const XP := {0.0: 10, 0.125: 25, 0.25: 50, 0.5: 100, 1: 200, 2: 450, 3: 700, 4: 
 	23: 50000, 24: 62000, 25: 75000, 26: 90000, 27: 105000, 28: 120000, 29: 135000, 30: 155000}
 ## Keys that are shown elsewhere or are bookkeeping.
 const HIDDEN := ["id", "name", "source", "image", "description", "origin",
-	"_kind", "_package", "_package_name", "_dir", "_key", "draft", "edited", "copy_of", "copy_number"]
+	"_kind", "_package", "_package_name", "_dir", "_key", "draft", "edited", "copy_of", "copy_number",
+	"effects", "effects_parsed", "ref"]  # effects: the On Use section shows them (TASK-108)
 const SINGULAR := {"classes": "Class", "subclasses": "Subclass", "races": "Race", "subraces": "Subrace",
 	"items": "Item", "feats": "Feat", "backgrounds": "Background", "invocations": "Invocation",
 	"infusions": "Infusion", "conditions": "Condition", "diseases": "Disease", "rules": "Rule",

@@ -2496,7 +2496,7 @@ func _after_insert() -> void:
 ## `upto` would do: {count (events deleted), forks (names of forks that get their own copy of
 ## the history), error}.
 func set_back_preview(upto: int) -> Dictionary:
-	var plan := event_log.set_back_plan(upto)
+	var plan: Dictionary = event_log.set_back_plan(upto)
 	var names := []
 	if str(plan.error) == "" and timeline != null:
 		for t in timeline.forks_hit(plan.deleted, int(plan.last_kept)):
@@ -2511,7 +2511,7 @@ func set_back_preview(upto: int) -> Dictionary:
 func set_back(upto: int) -> int:
 	if not is_dm():
 		return 0
-	var plan := event_log.set_back_plan(upto)
+	var plan: Dictionary = event_log.set_back_plan(upto)
 	if str(plan.error) != "":
 		_set_status("Can't set the time back: " + str(plan.error))
 		return 0
@@ -2520,7 +2520,7 @@ func set_back(upto: int) -> int:
 	look_back(-1)
 	for t in timeline.forks_hit(plan.deleted, int(plan.last_kept)):
 		Timeline.detach(str(t._dir))
-	var gone := event_log.set_back(upto)
+	var gone: Array = event_log.set_back(upto)
 	_set_status("Set the time back: %d event%s deleted" % [gone.size(), "" if gone.size() == 1 else "s"])
 	return gone.size()
 

@@ -729,6 +729,16 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
+const WHEELS := [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]
+
+
+## TASK-90: the mouse is over a panel or window (any Control that takes the mouse), not the
+## free map. Scroll events pass through a list at its end (mouse_force_pass_scroll_events)
+## and would reach the map as unhandled input.
+func over_ui() -> bool:
+	return get_viewport().gui_get_hovered_control() != null
+
+
 func _typing() -> bool:
 	var f := get_viewport().gui_get_focus_owner()
 	return f is LineEdit or f is TextEdit or f is SpinBox
@@ -744,6 +754,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		return
 	if event is InputEventMouseButton:
+		if event.button_index in WHEELS and over_ui():
+			return  # TASK-90: scrolling a panel at its end lets the wheel through; the map stays
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			_camera.zoom = (_camera.zoom * 1.1).clampf(0.2, 4.0)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:

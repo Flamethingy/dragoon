@@ -245,6 +245,29 @@ func _init() -> void:
 	# Keys without a selection do nothing.
 	grid.select([])
 	_check(not grid.key_step(KEY_W, false, true), "no selection: keys are left alone")
+	# --- TASK-90: the wheel over a panel doesn't zoom the map ----------------------------------------
+	root.size = Vector2i(1280, 720)  # headless starts with a tiny window
+	var layer := CanvasLayer.new()
+	layer.layer = 5
+	root.add_child(layer)
+	var panel := ScrollContainer.new()  # a list at its end lets the wheel through
+	panel.position = Vector2(10, 10)
+	panel.size = Vector2(300, 300)
+	var short := Label.new()
+	short.text = "nothing to scroll"
+	panel.add_child(short)
+	layer.add_child(panel)
+	await process_frame
+	var zoom_before: Vector2 = grid._camera.zoom
+	_wheel(Vector2(100, 100))
+	await process_frame
+	_check(grid._camera.zoom == zoom_before, "the wheel over a panel leaves the map's zoom (%s -> %s, hovered %s, filter %d)" % [zoom_before, grid._camera.zoom, root.gui_get_hovered_control(), panel.mouse_filter])
+	layer.queue_free()
+	await process_frame
+	_wheel(Vector2(root.size) * 0.6)
+	await process_frame
+	_check(grid._camera.zoom != zoom_before, "over the free map it still zooms (%s -> %s)" % [zoom_before, grid._camera.zoom])
+
 	print("token moves: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))
 	quit(1 if _failed > 0 else 0)
 
@@ -261,3 +284,18 @@ func _check(ok: bool, what: String) -> void:
 	if not ok:
 		_failed += 1
 		printerr("FAIL: ", what)
+
+
+func _wheel(at: Vector2) -> void:
+	root.notification(Window.NOTIFICATION_WM_MOUSE_ENTER)  # headless: the window never gets the mouse
+	var m := InputEventMouseMotion.new()
+	m.position = at
+	m.global_position = at
+	root.push_input(m)
+	for down: bool in [true, false]:
+		var w := InputEventMouseButton.new()
+		w.button_index = MOUSE_BUTTON_WHEEL_UP
+		w.pressed = down
+		w.position = at
+		w.global_position = at
+		root.push_input(w)

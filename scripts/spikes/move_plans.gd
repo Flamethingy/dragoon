@@ -12,7 +12,8 @@ extends Node2D
 const GHOST_ALPHA := 0.45
 const DOT := 7.0  ## length of a dash, pixels on the map
 const GAP := 6.0
-const YELLOW := Color(1.0, 0.88, 0.25)  ## at the walking speed
+const FADE := 1.5  ## metres over which the colour changes at the walking speed and at double
+const YELLOW := Color(1.0, 0.88, 0.25)  ## just past the walking speed
 const ORANGE := Color(1.0, 0.55, 0.15)  ## at double (a Dash)
 const RED := Color(1.0, 0.3, 0.25)  ## further than a Dash
 
@@ -230,14 +231,24 @@ func _draw() -> void:
 		var plan: Dictionary = plans[id]
 		var path: Array = plan.path
 		var cells: float = grid.tokens[id].get_meta("cells")
+		# Each point of the trail with the metres walked up to it (difficult squares count
+		# twice), so the dots take the colour of how far the creature has come there.
+		var hard: Dictionary = plan.get("hard", {})
+		var speed := float(plan.get("speed", 0.0))
+		var walked := [0.0]
+		for i in range(1, path.size()):
+			walked.append(float(walked[i - 1]) + TokenGrid.METRES_PER_CELL * (2.0 if hard.has(path[i]) else 1.0))
 		var pts := PackedVector2Array()
+		var metres := PackedFloat32Array()
 		for i in range(int(plan.done), path.size()):
 			pts.append(grid.cell_center(path[i], cells))
+			metres.append(float(walked[i]))
 		if _dragging.has(id):  # the trail runs on to the ghost under the mouse
 			pts.append((plan.ghost as Sprite2D).position)
-		var n := squares(path) + extra_cost(path, plan.get("hard", {}))  # TASK-73 terrain, TASK-79 other creatures
-		var color := distance_color(n * TokenGrid.METRES_PER_CELL, float(plan.get("speed", 0.0)))
-		_dotted(pts, Color(color, 0.85), 4.0)
+			metres.append(float(walked[walked.size() - 1]))
+		var n := squares(path) + extra_cost(path, hard)  # TASK-73 terrain, TASK-79 other creatures
+		var color := distance_color(n * TokenGrid.METRES_PER_CELL, speed)
+		_dotted(pts, metres, speed, 4.0)
 		if plan.has("going") or path.size() < 2 and not _dragging.has(id):
 			continue
 		var label := "%s m" % _metres(n)  # just this drag's distance (Nico 2026-11-04)
@@ -247,17 +258,18 @@ func _draw() -> void:
 		draw_string(_font, at + Vector2(0, 0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, color)
 
 
-## The trail's colour for `metres` of a creature walking `speed` metres (Nico 2026-11-04):
-## white -> yellow at its speed (walking) -> orange at double (Dash), red beyond. White if the
-## speed isn't known.
+## The trail's colour after `metres` of a creature walking `speed` metres (Nico 2026-11-04):
+## white up to its speed, then a short fade to yellow, turning orange towards double (a Dash),
+## a short fade to red beyond that. White if the speed isn't known.
 static func distance_color(metres: float, speed: float) -> Color:
-	if speed <= 0.0:
+	if speed <= 0.0 or metres <= speed:
 		return Color.WHITE
-	var f := metres / speed
-	if f <= 1.0:
-		return Color.WHITE.lerp(YELLOW, f)
-	if f <= 2.0:
-		return YELLOW.lerp(ORANGE, f - 1.0)
+	if metres <= speed + FADE:
+		return Color.WHITE.lerp(YELLOW, (metres - speed) / FADE)
+	if metres <= 2.0 * speed:
+		return YELLOW.lerp(ORANGE, (metres - speed - FADE) / maxf(speed - FADE, 0.01))
+	if metres <= 2.0 * speed + FADE:
+		return ORANGE.lerp(RED, (metres - 2.0 * speed) / FADE)
 	return RED
 
 
@@ -270,7 +282,9 @@ static func _metres(squares_moved: int) -> String:
 	return str(int(m)) if is_equal_approx(m, roundf(m)) else "%.1f" % m
 
 
-func _dotted(pts: PackedVector2Array, color: Color, width: float) -> void:
+## A dashed line through `pts`; each dash coloured by the metres walked where it starts
+## (`metres`: one per point, interpolated along the segments).
+func _dotted(pts: PackedVector2Array, metres: PackedFloat32Array, speed: float, width: float) -> void:
 	for i in range(pts.size() - 1):
 		var a := pts[i]
 		var b := pts[i + 1]
@@ -280,5 +294,6 @@ func _dotted(pts: PackedVector2Array, color: Color, width: float) -> void:
 		var dir := (b - a) / length
 		var t := 0.0
 		while t < length:
-			draw_line(a + dir * t, a + dir * minf(t + DOT, length), color, width, true)
+			var m := lerpf(metres[i], metres[i + 1], t / length)
+			draw_line(a + dir * t, a + dir * minf(t + DOT, length), Color(distance_color(m, speed), 0.85), width, true)
 			t += DOT + GAP

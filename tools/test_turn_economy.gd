@@ -29,9 +29,10 @@ func _init() -> void:
 	await _until(func() -> bool: return dm.grid.tokens.has(BORIN) and dm.grid.tokens.has(CHIEF))
 	_check(dm.turn_usage(CHIEF).moved == 0.0, "no combat: nothing moved")
 	_check(dm.grid.speed.call(CHIEF) == 9.0, "the move trail knows the walking speed")
-	_check(MovePlans.distance_color(0.0, 9.0) == Color.WHITE and MovePlans.distance_color(9.0, 9.0) == MovePlans.YELLOW
-		and MovePlans.distance_color(18.0, 9.0) == MovePlans.ORANGE and MovePlans.distance_color(19.5, 9.0) == MovePlans.RED
-		and MovePlans.distance_color(30.0, 0.0) == Color.WHITE, "trail colour: white, yellow at the speed, orange at double, red beyond")
+	_check(MovePlans.distance_color(0.0, 9.0) == Color.WHITE and MovePlans.distance_color(9.0, 9.0) == Color.WHITE
+		and MovePlans.distance_color(10.5, 9.0) == MovePlans.YELLOW and MovePlans.distance_color(18.0, 9.0) == MovePlans.ORANGE
+		and MovePlans.distance_color(19.5, 9.0) == MovePlans.RED and MovePlans.distance_color(30.0, 0.0) == Color.WHITE,
+		"trail colour: white up to the speed, then yellow, orange at double, red beyond")
 	var rs := dm.rules_settings().duplicate(true)
 	(rs.house_rules as Dictionary)["crowded_squares"] = "off"  # straight lines here may cross other goblins (TASK-79: test_crowd)
 	dm.set_rules_settings(rs)

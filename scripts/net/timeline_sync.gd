@@ -33,7 +33,7 @@ func follow(log: EventLog) -> void:
 
 
 func _on_appended(e: Dictionary) -> void:
-	if e.has("undoes") or e.has("after") or e.type == "timeline.rewound" or _dm == null:
+	if e.has("undoes") or e.has("after") or _dm == null:
 		_dirty = true  # an undo changes the past: build anew
 	else:
 		_add(e)
@@ -96,7 +96,6 @@ func _send() -> void:
 		rebuild()
 		return
 	data = _pack(_dm)
-	data["branches"] = _branches()
 	changed.emit()
 	var mine := _pack(_players)
 	for peer_id: int in table.peers:
@@ -124,28 +123,6 @@ func _pack(m: TimelineMoments) -> Dictionary:
 	return {"moments": moments, "sessions": m.sessions.duplicate(true), "hours_per_day": m.hours_per_day,
 		"now_at": maxi(m.seconds_of(log.day, log.time) if log != null else 0, int(moments.back().at) if not moments.is_empty() else 0),
 		"map_names": map_names}
-
-
-## The DM's cut-off branches (TASK-86): for every set-back that wasn't restored, the moments
-## it cut off, drawn faded on the bar: [{rewind (event id), at, moments}].
-func _branches() -> Array:
-	var out := []
-	var log := table.event_log
-	if log == null:
-		return out
-	for e in log.events:
-		if e.type != "timeline.rewound" or e.has("undoes") or log.is_undone(int(e.id)):
-			continue
-		var cut: Array[Dictionary] = []
-		for x: Variant in e.data.get("ids", []):
-			var c := log.get_event(int(x))
-			if not c.is_empty():
-				cut.append(c)
-		cut.sort_custom(Replay.before)
-		var m := TimelineMoments.build(cut, _dm.hours_per_day, _dm.name_of)
-		var packed := _pack(m)
-		out.append({"rewind": int(e.id), "at": m.seconds_of(int(e.day), int(e.time)), "moments": packed.moments})
-	return out
 
 
 @rpc("authority", "call_remote", "reliable")

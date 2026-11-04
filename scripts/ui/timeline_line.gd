@@ -10,21 +10,19 @@ extends Control
 ## drag on the line moves the black cursor (below it) at once: the table follows in real time;
 ## it stays where let go, and stops at now. Nico 2026-11-02: the DM drags the orange triangle
 ## (above the line), the current time: let go later on, that much time passes; earlier, the
-## DM is asked to split the timeline there. A double click goes back to now. The rest of the
+## DM is asked to set the time back there (what came after is deleted, TASK-88). A double click goes back to now. The rest of the
 ## bar (away from the line) moves the panel. Hovering a box shows what changed; right click
 ## on a box asks for its events, elsewhere for the bar's menu (fit, show everyone, now).
 
 signal cursor_moved(at: int)  ## -1 = now (live)
 signal list_requested(moment: Dictionary)
-signal restore_requested(rewind_id: int, moments: int)  ## right click on a cut-off branch (DM, TASK-86)
 signal future_requested(minutes: int)  ## DM let go of the current time later on: pass this much time
-signal split_requested(at: int)  ## DM let go of the current time in the past: split the timeline there (asks first)
+signal split_requested(at: int)  ## DM let go of the current time in the past: set the time back there (asks first)
 signal background_input(event: InputEvent)  ## a left drag away from the line: the panel moves (DockPanel)
 signal menu_requested(at: Vector2)  ## right click away from the boxes (screen position)
 
 const MARGIN := 18.0
 const BOX := Vector2(12, 18)  ## along, across
-const BRANCH_UP := 17.0  ## cut-off branches float this far beside the line
 const MAX_LINES := 14  ## a hover shows at most this many changes
 const SNAP := 8.0  ## pixels: a click this close to a box picks it
 const MIN_SPAN := 30.0  ## seconds along the line, at most zoomed in
@@ -221,7 +219,6 @@ func _draw() -> void:
 		for i in maps.size():  # the map colour(s) as a strip on the far side
 			var w := BOX.x / maps.size()
 			draw_rect(_rect(u - BOX.x * 0.5 + w * i, y + BOX.y * 0.5 - 4, w, 4), map_color(str(maps[i])))
-	_draw_branches(y)
 	for k: Dictionary in moon_marks():  # the moons (Nico 2026-11-02): full ones filled, new ones a ring
 		var c: Color = calendar.moon_color(int(k.moon))
 		var at := _p(float(k.u), y + 15.0)
@@ -235,7 +232,7 @@ func _draw() -> void:
 	var nu := x_of(float(now_at() + future_minutes() * 60)) if now_drag else _now_u()
 	if now_drag:
 		var fm := future_minutes()
-		var text := ("+" + duration_text(fm)) if fm >= 0 else ("−%s · split here?" % duration_text(-fm))
+		var text := ("+" + duration_text(fm)) if fm >= 0 else ("−%s · set back here?" % duration_text(-fm))
 		var at := Vector2(nu + 8, y - 8) if not vertical() else _p(nu, y + 16) + Vector2(0, 4)
 		draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs + 1, NOW_COLOR)
 	draw_colored_polygon(_triangle(nu, y, -1.0, 1.25 if now_drag else 1.0), NOW_COLOR)  # above the line
@@ -254,38 +251,6 @@ func _triangle(u: float, y: float, side: float, scale := 1.0) -> PackedVector2Ar
 	var tip := y + 11.0 * side
 	var base := tip + 9.0 * scale * side
 	return PackedVector2Array([_p(u, tip), _p(u - 6 * scale, base), _p(u + 6 * scale, base)])
-
-
-## Cut-off branches (TASK-86): faded small boxes beside the line, from where it was set back.
-func _draw_branches(y: float) -> void:
-	var by := y - BRANCH_UP
-	for b: Dictionary in data.get("branches", []):
-		var ms: Array = b.moments
-		if ms.is_empty():
-			continue
-		var u0 := x_of(float(b.at))
-		var u1 := x_of(float(ms.back().at))
-		draw_dashed_line(_p(u0, y - 2), _p(u0 + 6, by), Color(ink, 0.35), 1.0, 3.0)
-		draw_dashed_line(_p(u0 + 6, by), _p(maxf(u1, u0 + 6), by), Color(ink, 0.35), 1.0, 3.0)
-		for m: Dictionary in ms:
-			var u := x_of(float(m.at))
-			if u < -BOX.x or u > _len() + BOX.x:
-				continue
-			var r := _rect(u - 4, by - 5, 8, 10)
-			draw_rect(r, Color(1, 1, 1, 0.45))
-			draw_rect(r, Color(ink, 0.35), false, 1.0)
-
-
-## The cut-off box under the local position `pos`: {rewind, moment, count} or {}.
-func branch_box_at(pos: Vector2) -> Dictionary:
-	var at := _uv(pos)
-	if absf(at.y - (_line_y() - BRANCH_UP)) > 8:
-		return {}
-	for b: Dictionary in data.get("branches", []):
-		for m: Dictionary in b.moments:
-			if absf(x_of(float(m.at)) - at.x) <= 6:
-				return {"rewind": int(b.rewind), "moment": m, "count": (b.moments as Array).size()}
-	return {}
 
 
 ## Time labels beside the line, as fine as the zoom allows (rounds, minutes, hours, days).
@@ -437,9 +402,6 @@ func moment_text(m: Dictionary) -> String:
 func _get_tooltip(pos: Vector2) -> String:
 	if _scrubbing or now_drag:
 		return ""  # a tooltip popping up while the mouse is held still takes the press away (the hold)
-	var cut := branch_box_at(pos)
-	if not cut.is_empty():
-		return "Cut off (the timeline was set back) · right click: bring it back\n" + moment_text(cut.moment)
 	var at := _uv(pos)
 	if absf(at.y - (_line_y() + 15.0)) <= 6.0:  # a moon mark
 		for k: Dictionary in moon_marks():
@@ -471,11 +433,8 @@ func _gui_input(event: InputEvent) -> void:
 				_pan_view = view_from
 			else:
 				var click := _panning and b.button_index == MOUSE_BUTTON_RIGHT and b.position.distance_to(_pan_from) < 4
-				var cut := branch_box_at(b.position)
 				var i := box_at(at.x) if absf(at.y - _line_y()) <= BOX.y else -1
-				if click and not cut.is_empty():
-					restore_requested.emit(int(cut.rewind), int(cut.count))
-				elif click and i >= 0:
+				if click and i >= 0:
 					list_requested.emit(moments()[i])
 				elif click:
 					menu_requested.emit(get_screen_transform() * b.position)  # fit, show everyone, now

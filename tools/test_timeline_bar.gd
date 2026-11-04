@@ -191,7 +191,7 @@ func _init() -> void:
 	_mouse_at(line, true, nu - 200, line.size.y - 2)
 	_mouse_at(line, false, nu - 200, line.size.y - 2)
 	_check(moved_panel.size() == 2 and line.cursor_at == -1, "a press on the background goes to the panel, not the cursor")
-	# held and moved back: split the timeline (asked first)
+	# held and moved back: set the time back (asked first, TASK-88)
 	var splits := []
 	bar.rewind_requested.connect(func(upto: int, minutes: int) -> void: splits.append([upto, minutes]))
 	line.view_from = float(line.now_at()) - 3 * 3600.0
@@ -199,9 +199,9 @@ func _init() -> void:
 	_handle(line, true, line.x_of(float(line.now_at())))
 	_motion(line, line.x_of(float(back_to.at) + 600.0))
 	_handle(line, false, line.x_of(float(back_to.at) + 600.0))
-	_check(bar.confirm.visible and bar.confirm.dialog_text.begins_with("Split the timeline"), "back in time: the DM is asked first (%s)" % bar.confirm.dialog_text)
+	_check(bar.confirm.visible and bar.confirm.dialog_text.begins_with("Set the time back"), "back in time: the DM is asked first (%s)" % bar.confirm.dialog_text)
 	bar.confirm.confirmed.emit()
-	_check(splits.size() == 1 and int(splits[0][0]) == int(back_to.last_id) and int(splits[0][1]) == 10, "yes: cut after that moment, the current time 10 min later (%s)" % [splits])
+	_check(splits.size() == 1 and int(splits[0][0]) == int(back_to.last_id) and int(splits[0][1]) == 10, "yes: back to that moment, the current time 10 min later (%s)" % [splits])
 	bar.confirm.hide()
 	line.can_extend = false
 	nu = line.x_of(float(line.now_at()))

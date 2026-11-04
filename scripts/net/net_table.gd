@@ -235,6 +235,8 @@ func host(port := DEFAULT_PORT) -> Error:
 	event_log.insert_filter = func() -> bool: return multiplayer.get_remote_sender_id() == 0
 	if not event_log.appended.is_connected(_on_logged):
 		event_log.appended.connect(_on_logged)
+	if not event_log.rewritten.is_connected(_on_rewritten):
+		event_log.rewritten.connect(_on_rewritten)
 	_set_status("Hosting %s on port %d (%d events in the log)" % [timeline.info.get("name", timeline.id()), port, event_log.events.size()])
 	return OK
 
@@ -714,7 +716,7 @@ func _memo_state() -> String:
 	if event_log != null:
 		var n := event_log.events.size()
 		parts.append_array([n, int(event_log.events[n - 1].get("id", 0)) if n > 0 else 0, event_log._undone.size(),
-			event_log._rewound.size(), event_log.day, event_log.time, event_log.insert_after.size()])
+			event_log.revision, event_log.day, event_log.time, event_log.insert_after.size()])
 	if timeline != null:
 		parts.append_array([timeline.revision, timeline.get_instance_id()])
 	return str(parts)
@@ -2490,36 +2492,50 @@ func _after_insert() -> void:
 	_set_status("Changed the past (event %d)" % _inserted)
 
 
-## DM (TASK-86): sets the timeline back to the moment ending with event `upto` (0 = the
-## beginning): everything after it is cut off (one timeline.rewound event; sessions stay) and
-## the clock goes back there. Restorable (restore). Returns the event ({} if nothing to cut).
-func rewind_to(upto: int) -> Dictionary:
+## DM (TASK-88, Nico 2026-11-04): what setting the time back to the moment ending with event
+## `upto` would do: {count (events deleted), forks (names of forks that get their own copy of
+## the history), error}.
+func set_back_preview(upto: int) -> Dictionary:
+	var plan := event_log.set_back_plan(upto)
+	var names := []
+	if str(plan.error) == "" and timeline != null:
+		for t in timeline.forks_hit(plan.deleted, int(plan.last_kept)):
+			names.append(str(t.get("name", t.get("id", ""))))
+	return {"count": (plan.deleted as Array).size(), "forks": names, "error": str(plan.error)}
+
+
+## DM (TASK-88): sets the time back to the moment ending with event `upto` (0 = the
+## beginning): every event after it is deleted for good (sessions stay), the clock goes back
+## there and every screen is rebuilt. Forks that inherited deleted events get their own copy
+## of the history first. Returns the number of events deleted.
+func set_back(upto: int) -> int:
 	if not is_dm():
-		return {}
-	var keep := _ids_upto(upto)
-	var cut := []
-	for e in event_log.effective():
-		if not keep.has(int(e.id)) and not str(e.type).begins_with("session.") and e.type != "timeline.rewound":
-			cut.append(int(e.id))
-	if cut.is_empty():
-		return {}
+		return 0
+	var plan := event_log.set_back_plan(upto)
+	if str(plan.error) != "":
+		_set_status("Can't set the time back: " + str(plan.error))
+		return 0
+	if (plan.deleted as Array).is_empty():
+		return 0
 	look_back(-1)
-	var anchor := event_log.get_event(upto) if upto > 0 else {}
-	var e := event_log.append("timeline.rewound", "", {"to": upto, "ids": cut}, "dm", -1,
-		int(anchor.get("day", 0)), int(anchor.get("time", -1)))
-	refresh_tokens()
-	_combat_changed()
-	_set_status("Set the timeline back: %d events cut off (restorable)" % cut.size())
-	return e
+	for t in timeline.forks_hit(plan.deleted, int(plan.last_kept)):
+		Timeline.detach(str(t._dir))
+	var gone := event_log.set_back(upto)
+	_set_status("Set the time back: %d event%s deleted" % [gone.size(), "" if gone.size() == 1 else "s"])
+	return gone.size()
 
 
-## DM: a set-back undone: the cut-off events count again.
-func restore(rewind_id: int) -> void:
-	if not is_dm() or event_log.undo(rewind_id).is_empty():
-		return
+## Host: the log was rewritten (set back): everything from it again, on every screen.
+func _on_rewritten() -> void:
+	_inserted = 0
+	if timeline != null:
+		timeline.revision += 1
+	timeline_sync.rebuild()
 	refresh_tokens()
 	_combat_changed()
-	_set_status("Restored the cut-off events")
+	_load_rolls()
+	for peer_id: int in peers:
+		sync_rolls.rpc_id(peer_id, _rolls_for(peers[peer_id]))
 
 
 func _reshow_past() -> void:

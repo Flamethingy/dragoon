@@ -1,3 +1,7 @@
+---
+updated_date: '2026-11-04 13:12'
+---
+
 # Worlds and timelines (replaces campaigns)
 
 Decided by Nico on 2026-11-01. Our two running campaigns play in the same world, so a separate
@@ -35,6 +39,9 @@ data/worlds/<world-id>/
 - **Fork.** A new timeline forks from another at an event (`parent`, `fork_at` = event id): it
   shares all events up to that point and has its own after it. Campaign A and B = two forks of the
   start timeline. Later forks are possible too ("what if" or a one-shot from session 12).
+  Setting a parent's time back deletes its later events (TASK-88, doc-1 Storage): a fork that
+  inherited any of them gets its own copy of the history first (no `parent` any more,
+  `forked_from` remembers it); the DM is told which forks before confirming.
 - **New things are commits.** Creating an entry during a timeline (a new item given to a PC, a new
   NPC, a PC itself) is an `entity.created` event with the full entry. It exists only in that
   timeline and its later forks. Changes are events as before (`sheet.changed`, `item.gained` ...).

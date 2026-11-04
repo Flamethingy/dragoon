@@ -90,6 +90,9 @@ func _ready() -> void:
 		event_log.appended.connect(func(_e: Dictionary) -> void:
 			if is_visible_in_tree():
 				refresh())
+		event_log.rewritten.connect(func() -> void:  # set back (TASK-88)
+			if is_visible_in_tree():
+				refresh())
 	refresh()
 
 
@@ -147,7 +150,7 @@ func _may_change(id: int) -> bool:
 	if id <= 0 or event_log == null or id <= event_log.inherited.size():
 		return false
 	var e := event_log.get_event(id)
-	return not e.is_empty() and not e.has("undoes") and not event_log.is_undone(id) and str(e.type) != "timeline.rewound"
+	return not e.is_empty() and not e.has("undoes") and not event_log.is_undone(id)
 
 
 func _update_actions() -> void:

@@ -13,17 +13,19 @@ signal cursor_changed(at: int)  ## the moment looked at, in seconds; -1 = now (l
 signal list_requested(ids: Array)  ## DM: that moment's events in the Timeline list
 signal show_toggled(on: bool)  ## DM: Show everyone (TASK-84)
 signal time_requested(minutes: int, reason: String)  ## DM moved the current time on: time passes
-## DM moved the current time back (TASK-86, Nico 2026-11-02), confirmed: everything after event
-## `upto` is cut off, then `minutes` pass (to where it was let go).
+## DM moved the current time back (TASK-88, Nico 2026-11-04), confirmed: everything after event
+## `upto` is deleted, then `minutes` pass (to where it was let go).
 signal rewind_requested(upto: int, minutes: int)
-signal restore_requested(rewind_id: int)  ## DM: bring a cut-off branch back, confirmed  ## DM: that moment's events in the Timeline list
 
 var sync: TimelineSync
 var line: TimelineLine
 var showing_all := false  ## DM: everyone's timeline follows mine (TASK-84)
 var menu: PopupMenu  ## right click: back to now, fit, Show everyone
 var shown := false  ## a player: the DM is showing me a moment (no cursor of my own)
-var dm := false  ## the DM's bar: set back, restore, change the past
+var dm := false  ## the DM's bar: set back, change the past
+## DM: what setting the time back to an event would do: upto -> {count, forks, error}
+## (NetTable.set_back_preview); not set: just ask.
+var preview := Callable()
 var confirm: ConfirmationDialog
 var _confirmed := Callable()
 
@@ -64,10 +66,6 @@ func _init() -> void:
 	line.split_requested.connect(_ask_split)
 	line.background_input.connect(_head_input)  # its background moves it, like a title
 	line.menu_requested.connect(open_menu)
-	line.restore_requested.connect(func(id: int, cut: int) -> void:
-		if dm:
-			_ask("Bring back the %d cut-off moment%s? They count again, after what happened since." % [cut, "" if cut == 1 else "s"],
-				func() -> void: restore_requested.emit(id)))
 
 
 ## The bar's menu at `at` (screen position).
@@ -132,7 +130,7 @@ func _ask(text: String, then: Callable) -> void:
 	confirm.popup_centered(Vector2i(420, 120))
 
 
-## The DM let go of the current time at `at`, before now: split the timeline there?
+## The moment the DM let go of the current time at (`at`, before now): the last one up to it.
 func split_at(at: int) -> Dictionary:
 	var found := {}
 	for m: Dictionary in line.moments():
@@ -148,7 +146,18 @@ func _ask_split(at: int) -> void:
 		return  # before everything: nothing to keep
 	var minutes := maxi(0, (at - int(m.at)) / 60)
 	var when := line.calendar.format_moment(int(m.day), int(m.time)) if line.calendar != null else "day %d" % int(m.day)
-	_ask("Split the timeline here (%s%s)?\nEverything after it is cut off for everyone and the current time goes back. It stays as a faded branch you can bring back." % [when, (" + " + line.duration_text(minutes)) if minutes > 0 else ""],
+	when += (" + " + line.duration_text(minutes)) if minutes > 0 else ""
+	var info: Dictionary = preview.call(int(m.last_id)) if preview.is_valid() else {}
+	if str(info.get("error", "")) != "":
+		_ask("Can't set the time back to %s.\n%s" % [when, str(info.error)], Callable())
+		return
+	var n := int(info.get("count", -1))
+	var what := ("The %d event%s after it %s deleted for everyone." % [n, "" if n == 1 else "s", "is" if n == 1 else "are"]) if n >= 0 \
+		else "Everything after it is deleted for everyone."
+	var forks: Array = info.get("forks", [])
+	if not forks.is_empty():
+		what += "\nForked after it: %s. %s its own copy of the history." % [", ".join(PackedStringArray(forks)), "It keeps" if forks.size() == 1 else "They keep"]
+	_ask("Set the time back to %s?\n%s This can't be undone." % [when, what],
 		func() -> void: rewind_requested.emit(int(m.last_id), minutes))
 
 

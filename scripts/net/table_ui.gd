@@ -110,12 +110,11 @@ func _ready() -> void:
 		chat.follow_time(timeline_bar.happened()))
 	timeline_bar.show_toggled.connect(func(on: bool) -> void: table.show_everyone(on))
 	timeline_bar.time_requested.connect(func(minutes: int, reason: String) -> void: table.advance_clock(minutes, reason))
-	timeline_bar.rewind_requested.connect(func(upto: int, minutes: int) -> void:  # TASK-86
-		table.rewind_to(upto)
-		if minutes > 0:  # the current time where the DM let go
+	timeline_bar.preview = table.set_back_preview
+	timeline_bar.rewind_requested.connect(func(upto: int, minutes: int) -> void:  # TASK-88: deletes what came after
+		if table.set_back(upto) > 0 and minutes > 0:  # the current time where the DM let go
 			table.advance_clock(minutes, "")
 		timeline_bar.line.set_cursor(-1))
-	timeline_bar.restore_requested.connect(func(id: int) -> void: table.restore(id))
 	table.showing_changed.connect(func() -> void:
 		timeline_bar.set_showing(table.showing, table.is_dm())
 		if not table.is_dm():

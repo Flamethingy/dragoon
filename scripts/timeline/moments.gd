@@ -16,9 +16,9 @@ extends RefCounted
 const ROUND_SECONDS := 6
 ## Event types that are history only: they belong to a moment but say nothing in its summary.
 ## Not a story event: makes no box of its own after time passed (hidden rolls neither).
-const WAITS := ["chat.message", "assistant.drafted", "session.started", "session.ended", "timeline.rewound"]
+const WAITS := ["chat.message", "assistant.drafted", "session.started", "session.ended"]
 const QUIET := ["dice.rolled", "chat.message", "initiative.rolled", "combat.order_set", "assistant.drafted",
-	"session.started", "session.ended", "timeline.rewound"]
+	"session.started", "session.ended"]
 
 ## [{index, at (s), day, time, round (0 = not in combat), maps [], entities [], events [ids],
 ##   first_id, last_id, session, lines [String] (the summary), combat (bool)}], in order.

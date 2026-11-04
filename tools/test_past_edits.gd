@@ -1,10 +1,11 @@
 extends SceneTree
-## Headless check of changing the past (TASK-85) and setting the timeline back (TASK-86):
+## Headless check of changing the past (TASK-85) and setting the time back (TASK-88):
 ## the DM's actions while looking back go in right after that moment (`after`), in timeline
 ## order, without moving the clock, while the players' actions stay at now; the moment is
-## marked as edited. Setting back cuts off everything after a moment (one restorable event,
-## the clock goes back), shows the cut-off branch faded, and restoring brings it all back.
-## Both survive reloading the log.
+## marked as edited. Setting the time back asks once and deletes everything after the moment
+## (file and memory), the clock goes back, every screen follows; forks that inherited deleted
+## events get their own copy first; going back before a fork is refused; old logs with a
+## `timeline.rewound` event are migrated.
 ## godot --headless --path . -s tools/test_past_edits.gd
 
 const PORT := 47836
@@ -87,50 +88,9 @@ func _init() -> void:
 	_check(again.effective().map(func(e: Dictionary) -> int: return int(e.id)) == log.effective().map(func(e: Dictionary) -> int: return int(e.id)), "the order survives a reload")
 	_check(Vector2i(again.day, again.time) == Vector2i(log.day, log.time), "and the clock (%s / %s)" % [Vector2i(again.day, again.time), Vector2i(log.day, log.time)])
 
-	# TASK-86: set the timeline back to moment A (after the DM's changes there)
-	var upto := int(hurt.id)
-	var before_count := log.effective().size()
-	var rw := dm.rewind_to(upto)
-	_check(not rw.is_empty() and rw.type == "timeline.rewound", "set back: one event (%s)" % rw.get("type", ""))
-	_check(log.is_undone(walk_b) and not log.is_undone(walk_a) and not log.is_undone(int(moved.id)), "what came after is cut off, the moment itself stays")
-	_check(Vector2i(log.day, log.time) == Vector2i(int(a_ev.day), int(a_ev.time)), "the clock goes back to it (%s)" % Vector2i(log.day, log.time))
-	_check(dm.grid.token_cell(BORIN) == start + Vector2i(2, 2), "the table shows that moment as now (%s)" % dm.grid.token_cell(BORIN))
-	await _until(func() -> bool: return bob.grid.token_cell(BORIN) == start + Vector2i(2, 2))
-	_check(bob.grid.token_cell(BORIN) == start + Vector2i(2, 2), "on Bob's table too")
-	await _frames(5)
-	var branches: Array = dm.timeline_sync.data.get("branches", [])
-	_check(branches.size() == 1 and not (branches[0].moments as Array).is_empty(), "the cut-off part is a branch on the DM's bar")
-	_check(not bob.timeline_sync.data.has("branches"), "players don't get it")
-	var again2 := EventLog.open(log.path)
-	_check(again2.is_undone(walk_b) and Vector2i(again2.day, again2.time) == Vector2i(log.day, log.time), "the set-back survives a reload")
-
-	# the bar: the faded branch can be hit, and Set back shows for the DM looking back
 	var home := Control.new()
 	home.size = Vector2(1600, 900)
 	root.add_child(home)
-	var bar := TimelineBar.new()
-	bar.place_file = DIR + "/panels.cfg"
-	bar.dm = true
-	home.add_child(bar)
-	bar.follow(dm.timeline_sync, dm.notes.calendar)
-	bar.line.size = Vector2(1500, 60)
-	bar.line.span = 4 * 3600.0
-	bar.line.view_from = float(branches[0].at) - 3600.0
-	var bm: Dictionary = (branches[0].moments as Array)[0]
-	var hit := bar.line.branch_box_at(Vector2(bar.line.x_of(float(bm.at)), bar.line._line_y() - TimelineLine.BRANCH_UP))
-	_check(int(hit.get("rewind", 0)) == int(rw.id), "the faded box belongs to the set-back")
-	var ms := bar.line.moments()
-	bar.line.set_cursor(int(ms[0].at))
-	_check(bar.split_at(int(ms[0].at) + 1) == ms[0] and bar.split_at(int(ms[0].at) - 1).is_empty(), "a split keeps the moment before it (none before everything)")
-	dm.look_back(-1)
-
-	# restore
-	dm.restore(int(rw.id))
-	_check(not log.is_undone(walk_b), "restored: the cut-off events count again")
-	_check(Vector2i(log.day, log.time) == clock, "and the clock is back (%s / %s)" % [Vector2i(log.day, log.time), clock])
-	await _frames(5)
-	_check((dm.timeline_sync.data.get("branches", []) as Array).is_empty(), "no branch anymore")
-	_check(log.effective().size() == before_count, "all events back (%d / %d)" % [log.effective().size(), before_count])
 
 	# TASK-85: undo and correct from the Timeline list (a box's events)
 	var view := TimelineView.new()
@@ -174,6 +134,79 @@ func _init() -> void:
 	_check(log.is_undone(int(moved.id)), "an event of the past can be undone")
 	_pick(view, int(moved.id))
 	_check(view.undo_button.disabled, "an undone one can't be undone again")
+
+	# TASK-88: forks, one before the later walk (untouched) and one after it (gets a copy)
+	var early_dir := dm.timeline.fork("Early", walk_a)
+	var later_dir := dm.timeline.fork("Later", walk_b)
+	# the DM drags the current time back to just after moment A: asked once, then deleted
+	var bar := TimelineBar.new()
+	bar.place_file = DIR + "/panels.cfg"
+	bar.dm = true
+	home.add_child(bar)
+	bar.follow(dm.timeline_sync, dm.notes.calendar)
+	bar.preview = dm.set_back_preview
+	bar.rewind_requested.connect(func(upto: int, _minutes: int) -> void: dm.set_back(upto))
+	await _frames(3)
+	var moment_a := {}
+	for m: Dictionary in bar.line.moments():
+		if (m.events as Array).has(walk_a):
+			moment_a = m
+	_check(not moment_a.is_empty(), "moment A is on the bar")
+	_check(bar.split_at(int(moment_a.at) + 60) == moment_a and bar.split_at(int(bar.line.moments()[0].at) - 1).is_empty(), "setting back keeps the moment before (none before everything)")
+	var upto := int(moment_a.last_id)
+	var plan := log.set_back_plan(upto)
+	var gone_ids: Array = plan.deleted
+	_check(gone_ids.has(walk_b) and not gone_ids.has(walk_a), "the plan deletes what came after, not the moment (%s)" % [gone_ids])
+	view.editor.hide()
+	bar._ask_split(int(moment_a.at) + 60)
+	var asked := bar.confirm.dialog_text
+	_check(bar.confirm.visible and asked.begins_with("Set the time back") and asked.contains("%d events after it are deleted" % gone_ids.size()), "the DM is asked once, with how many go (%s)" % asked)
+	_check(asked.contains("Later") and not asked.contains("Early"), "and which forks keep their own copy")
+	bar.confirm.confirmed.emit()
+	bar.confirm.hide()
+	_check(log.get_event(walk_b).is_empty() and not log.get_event(walk_a).is_empty(), "the later events are gone from memory")
+	var reread := EventLog.open(log.path)
+	_check(reread.get_event(walk_b).is_empty() and reread.events.size() == log.events.size(), "and from the file (%d events)" % reread.events.size())
+	_check(not FileAccess.get_file_as_string(log.path).contains("timeline.rewound"), "no rewound event, nothing to restore")
+	_check(Vector2i(log.day, log.time) == Vector2i(int(a_ev.day), int(a_ev.time)), "the clock goes back (%s)" % Vector2i(log.day, log.time))
+	_check(Vector2i(reread.day, reread.time) == Vector2i(log.day, log.time), "also after a reload")
+	_check(dm.grid.token_cell(BORIN) == start + Vector2i(2, 0), "the table is at that moment (%s)" % dm.grid.token_cell(BORIN))
+	await _until(func() -> bool: return bob.grid.token_cell(BORIN) == start + Vector2i(2, 0))
+	_check(bob.grid.token_cell(BORIN) == start + Vector2i(2, 0), "on Bob's table too")
+	await _frames(5)
+	var last_dm: Dictionary = (dm.timeline_sync.data.moments as Array).back()
+	_check(int(last_dm.last_id) == upto or (last_dm.events as Array).has(upto), "the bar ends at moment A")
+	await _until(func() -> bool: return (bob.timeline_sync.data.moments as Array).size() == (dm.timeline_sync.data.moments as Array).size())
+	_check((bob.timeline_sync.data.moments as Array).size() == (dm.timeline_sync.data.moments as Array).size(), "Bob's bar too")
+	_check(not dm.timeline_sync.data.has("branches"), "no faded branches")
+	# the forks
+	var later_info: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(later_dir.path_join("timeline.json")))
+	var later := Timeline.new(later_dir)
+	_check(str(later_info.parent) == "" and str(later_info.forked_from.parent) == dm.timeline.id(), "the later fork stands on its own now (%s)" % [later_info.get("forked_from")])
+	_check(not later.events_log.get_event(walk_b).is_empty() and later.events_log.inherited.is_empty(), "and still has the later walk")
+	var early_info: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(early_dir.path_join("timeline.json")))
+	_check(str(early_info.parent) == dm.timeline.id(), "the early fork still inherits")
+	var early := Timeline.new(early_dir)
+	_check(not early.events_log.get_event(walk_a).is_empty() and early.events_log.get_event(walk_b).is_empty(), "with the same events as before")
+	_check(str(early.events_log.set_back_plan(0).error) != "", "a fork can't be set back before its fork point")
+	# the next event continues; a single undo still works
+	var after := log.change_hp(BORIN, -1, 9, "later")
+	_check(int(after.id) > int(plan.last_kept), "new events get new ids (%d)" % int(after.id))
+	_check(not log.undo(int(after.id)).is_empty() and log.is_undone(int(after.id)), "and can be undone")
+
+	# an old log with a timeline.rewound event (TASK-86) is migrated once
+	var old_path := ProjectSettings.globalize_path(DIR).path_join("old/events.jsonl")
+	DirAccess.make_dir_recursive_absolute(old_path.get_base_dir())
+	var f := FileAccess.open(old_path, FileAccess.WRITE)
+	for e: Dictionary in [{"id": 1, "type": "time.advanced", "entity": "", "day": 1, "time": 60, "data": {}},
+			{"id": 2, "type": "hp.changed", "entity": BORIN, "day": 1, "time": 60, "data": {"delta": -1, "hp": 9}},
+			{"id": 3, "type": "time.advanced", "entity": "", "day": 1, "time": 120, "data": {}},
+			{"id": 4, "type": "timeline.rewound", "entity": "", "day": 1, "time": 60, "data": {"to": 2, "ids": [3]}}]:
+		f.store_line(JSON.stringify(e))
+	f.close()
+	var old := EventLog.open(old_path)
+	_check(old.events.map(func(e: Dictionary) -> int: return int(e.id)) == [1, 2] and old.time == 60, "an old set-back: the cut-off events are deleted (%s)" % [old.events.map(func(e: Dictionary) -> int: return int(e.id))])
+	_check(FileAccess.file_exists(old_path + ".bak-rewound"), "the old file is kept as a backup")
 
 	dm.multiplayer.multiplayer_peer.close()
 	await process_frame

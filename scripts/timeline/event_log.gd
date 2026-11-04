@@ -1,14 +1,16 @@
 class_name EventLog
 extends RefCounted
-## A timeline's append-only event log (backlog/docs/doc-1 - Event-format.md, timelines.md):
-## `<timeline>/events.jsonl`, one JSON event per line, never rewritten. Mistakes are
-## undone by a new event with `undoes`. Keeps the world clock (in-world day and minute,
+## A timeline's event log (backlog/docs/doc-1 - Event-format.md, timelines.md):
+## `<timeline>/events.jsonl`, one JSON event per line, only appended to. Mistakes are
+## undone by a new event with `undoes`. The one exception (TASK-88, Nico 2026-11-04): the DM
+## sets the time back (set_back): everything after that moment is deleted from the file. Keeps the world clock (in-world day and minute,
 ## session number), which every new event is stamped with.
 ## A forked timeline starts with its parent's events up to the fork (`inherited`, read-only,
 ## never written to its file); its own ids continue after them. Several EventLog objects on
 ## one file stay in step: append() reloads first if the file grew behind its back.
 
 signal appended(event: Dictionary)
+signal rewritten  ## TASK-88: events were deleted (set_back): rebuild everything from the log
 
 ## Default for append()'s at_day / at_time: use the world clock.
 const CLOCK := -999999999
@@ -31,7 +33,7 @@ var insert_after: Array = []
 var insert_filter := Callable()
 var _insert_day := 0
 var _insert_time := -1
-var _rewound := {}  ## TASK-86: id -> the timeline.rewound event that cut it off
+var revision := 0  ## TASK-88: counts set-backs (caches compare it)
 
 
 ## Opens (or creates) the log at `file` and loads it. Bad lines are skipped with a
@@ -71,6 +73,9 @@ func _load() -> void:
 			push_warning("%s line %d: not an event, skipped" % [path, n])
 			continue
 		_add(_normalize(e))
+	if events.any(func(e: Dictionary) -> bool: return e.type == LEGACY_REWOUND):
+		_migrate_rewound()
+		return
 	# The clock continues where the log stopped.
 	for e in events:
 		if _counts_for_clock(e):
@@ -94,16 +99,10 @@ func _add(e: Dictionary) -> void:
 	_next_id = maxi(_next_id, int(e.id) + 1)
 	if e.has("undoes"):
 		_undone[int(e.undoes)] = int(e.id)
-	elif e.type == "timeline.rewound":
-		for x: Variant in e.data.get("ids", []):
-			_rewound[int(x)] = int(e.id)
 
 
 func _advance_clock(e: Dictionary) -> void:
-	if e.type == "timeline.rewound" and not e.has("undoes"):  # set back: the clock too (TASK-86)
-		day = e.day
-		time = e.time
-	elif e.type == "time.advanced" or Replay.later(e.day, e.time, day, time):
+	if e.type == "time.advanced" or Replay.later(e.day, e.time, day, time):
 		day = e.day
 		time = e.time
 	if e.type == "session.started":
@@ -114,7 +113,7 @@ func _advance_clock(e: Dictionary) -> void:
 ## real time, writes it to disk at once, and returns it.
 func append(type: String, entity: String, data := {}, by := "dm", undoes := -1,
 		at_day := CLOCK, at_time := CLOCK) -> Dictionary:
-	var into := not insert_after.is_empty() and undoes < 0 and type != "timeline.rewound" \
+	var into := not insert_after.is_empty() and undoes < 0 \
 		and (not insert_filter.is_valid() or bool(insert_filter.call()))
 	var e := {
 		"id": _next_id,
@@ -145,8 +144,6 @@ func append(type: String, entity: String, data := {}, by := "dm", undoes := -1,
 	_add(e)
 	if into:
 		insert_after = (e.after as Array) + [int(e.id)]  # the next one follows this one
-	elif type == "timeline.rewound":
-		_recompute_clock()
 	else:
 		_advance_clock(e)
 	appended.emit(e)
@@ -168,25 +165,125 @@ func stop_inserting() -> void:
 	insert_after = []
 
 
-## The clock from the events again (after setting the timeline back or restoring it).
-func _recompute_clock() -> void:
-	day = 0
-	time = -1
-	for e in events:
-		if _counts_for_clock(e):
-			_advance_clock(e)
-
-
-## Events put into the past, cut-off ones and a restored set-back don't move the clock.
+## Events put into the past don't move the clock.
 func _counts_for_clock(e: Dictionary) -> bool:
-	if e.has("after") or _rewound_now(int(e.id)):
+	return not e.has("after")
+
+
+# --- Setting the time back (TASK-88) -------------------------------------------------
+
+## What set_back(`upto`) would do: {keep: id -> true, deleted: [ids], last_kept, day, time,
+## error}. `upto` = the last event of the moment to go back to (0 = before everything).
+## Kept: every event up to it in timeline order, the undo markers of kept events and the
+## session marks (real-world, they stay; moved back to that moment). Inherited events (a
+## fork's parent's) can't be deleted: going back before the fork is an `error`.
+func set_back_plan(upto: int) -> Dictionary:
+	var ordered := events.duplicate()
+	ordered.sort_custom(Replay.before)
+	var keep := {}
+	var found := upto == 0
+	if upto > 0:
+		for e: Dictionary in ordered:
+			keep[int(e.id)] = true
+			if int(e.id) == upto:
+				found = true
+				break
+	if not found:
+		return {"error": "no event %d" % upto, "keep": {}, "deleted": [], "last_kept": 0, "day": 0, "time": -1}
+	for e in events:
+		var id := int(e.id)
+		if e.has("undoes"):  # an undo stays with what it undid (the moment showed it undone)
+			if keep.has(int(e.undoes)):
+				keep[id] = true
+			else:
+				keep.erase(id)
+		elif str(e.type).begins_with("session."):
+			keep[id] = true
+	var deleted := []
+	var last_kept := 0
+	for e in events:
+		if keep.has(int(e.id)):
+			last_kept = maxi(last_kept, int(e.id))
+		else:
+			deleted.append(int(e.id))
+	var anchor := get_event(upto)
+	var out := {"keep": keep, "deleted": deleted, "last_kept": last_kept,
+		"day": int(anchor.get("day", 0)), "time": int(anchor.get("time", -1)), "error": ""}
+	for e in inherited:
+		if not keep.has(int(e.id)):
+			out.error = "That is before this timeline was forked off: those events belong to the parent timeline."
+			break
+	return out
+
+
+## Sets the time back to the moment ending with event `upto` (TASK-88): every event after it
+## is deleted from the file (sessions stay, moved back there), the clock goes back. Returns
+## the deleted ids ([] if nothing or an error).
+func set_back(upto: int) -> Array:
+	refresh()
+	var plan := set_back_plan(upto)
+	if str(plan.error) != "" or (plan.deleted as Array).is_empty():
+		return []
+	var keep: Dictionary = plan.keep
+	var kept: Array[Dictionary] = []
+	for e in own_events():
+		if not keep.has(int(e.id)):
+			continue
+		if str(e.type).begins_with("session.") and Replay.later(int(e.day), int(e.time), int(plan.day), int(plan.time)):
+			e.day = int(plan.day)
+			e.time = int(plan.time)
+		kept.append(e)
+	if not _rewrite(kept):
+		return []
+	insert_after = []
+	revision += 1
+	_load()
+	rewritten.emit()
+	return plan.deleted
+
+
+## Writes `own` as the file (a temporary file first, then swapped in).
+func _rewrite(own: Array[Dictionary]) -> bool:
+	var tmp := path + ".tmp"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	if f == null:
+		push_error("Can't write event log %s: %s" % [tmp, error_string(FileAccess.get_open_error())])
 		return false
-	return not (e.type == "timeline.rewound" and not e.has("undoes") and _undone.has(int(e.id)))
+	for e in own:
+		f.store_line(JSON.stringify(e))
+	f.close()
+	var err := DirAccess.rename_absolute(tmp, path)
+	if err != OK:
+		push_error("Can't replace event log %s: %s" % [path, error_string(err)])
+		return false
+	return true
 
 
-func _rewound_now(id: int) -> bool:
-	var r: int = _rewound.get(id, 0)
-	return r != 0 and not _undone.has(r)
+## Before TASK-88 a set-back was a `timeline.rewound` event cutting the later events off (and
+## undoing it brought them back). Such a log is turned into the new form once: cut-off events
+## are deleted, restored ones stay; the old file is kept as events.jsonl.bak-rewound.
+const LEGACY_REWOUND := "timeline.rewound"
+
+
+func _migrate_rewound() -> void:
+	var gone := {}
+	for e in events:
+		if e.type != LEGACY_REWOUND:
+			continue
+		gone[int(e.id)] = true
+		if e.has("undoes") or _undone.has(int(e.id)):  # a restore, or restored: its events count again
+			continue
+		for x: Variant in e.data.get("ids", []):
+			gone[int(x)] = true
+	var own: Array[Dictionary] = []
+	for e in own_events():
+		if not gone.has(int(e.id)):
+			own.append(e)
+	DirAccess.copy_absolute(path, path + ".bak-rewound")
+	if _rewrite(own):
+		_load()
+	else:  # can't write: at least don't loop
+		events = events.filter(func(e: Dictionary) -> bool: return e.type != LEGACY_REWOUND)
 
 
 func _file_size() -> int:
@@ -280,7 +377,7 @@ func end_session() -> Dictionary:
 ## there instead (by timeline order at that time; the clock follows if that is later).
 func correct(id: int, data: Dictionary, by := "dm", to_day := CLOCK, to_time := CLOCK) -> Dictionary:
 	var target := get_event(id)
-	if target.is_empty() or target.has("undoes") or is_undone(id) or target.type == "timeline.rewound":
+	if target.is_empty() or target.has("undoes") or is_undone(id):
 		return {}
 	var moved := (to_day != CLOCK and to_day != int(target.day)) or (to_time != CLOCK and to_time != int(target.time))
 	var keep := [insert_after.duplicate(), _insert_day, _insert_time, insert_filter]
@@ -307,10 +404,7 @@ func undo(id: int, by := "dm") -> Dictionary:
 	var target := get_event(id)
 	if target.is_empty() or is_undone(id):
 		return {}
-	var e := append(target.type, target.entity, {}, by, id, target.day, target.time)
-	if target.type == "timeline.rewound":  # restored: the cut-off events count again
-		_recompute_clock()
-	return e
+	return append(target.type, target.entity, {}, by, id, target.day, target.time)
 
 
 # --- Reading -------------------------------------------------------------------------
@@ -338,9 +432,9 @@ func in_session() -> bool:
 	return false
 
 
-## True if the event was undone, or cut off by setting the timeline back (TASK-86).
+## True if the event was undone.
 func is_undone(id: int) -> bool:
-	return _undone.has(id) or _rewound_now(id)
+	return _undone.has(id)
 
 
 ## Events that count (not undone, not undo markers), optionally only for one entity and

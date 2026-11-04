@@ -7,7 +7,7 @@ tags:
   - decision
 project: Dragoon
 created_date: '2026-11-01 11:41'
-updated_date: '2026-11-01 14:09'
+updated_date: '2026-11-04 13:12'
 ---
 
 How the VTT records changes on the world timeline (concept: *Timeline and calendars*, [[Dragoon Concept]]). Result of [[TASK-2]].
@@ -26,7 +26,7 @@ One JSON object per event.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `id` | int | Sequence number in this campaign's log, starting at 1, never reused. |
+| `id` | int | Sequence number in this timeline's log, starting at 1. Never reused, except the ids of events deleted by setting the time back (forks that held them were made independent first). |
 | `type` | string | `area.verb`, e.g. `token.moved`. See the types below. |
 | `entity` | string | Plain ref of the entity it is about, `<kind>/<id>` (e.g. `characters/mira`, `creatures/goblin-1`). Empty string for world-wide events such as `time.advanced`. |
 | `day` | int | In-world day number on the world timeline (day 0 = first day of the calendar's `first_year`). |
@@ -35,7 +35,7 @@ One JSON object per event.
 | `session` | int | Session number; `0` = prep between sessions. |
 | `by` | string | Who caused it: `dm`, a player id, or `assistant:<name>`. |
 | `data` | object | Type-specific payload (below). |
-| `undoes` | int | *Optional.* Id of an event this one cancels. The log is append-only, so mistakes are undone by a new event, never by editing. |
+| `undoes` | int | *Optional.* Id of an event this one cancels. Mistakes are undone by a new event, never by editing (the one exception, setting the time back, deletes; see Storage). |
 
 **Order on the timeline:** `(day, time, id)`. Rewinding to a moment = replaying every event at or before it (`time = -1` counts as the start of its day). Positions are grid cells on the named map.
 
@@ -51,13 +51,24 @@ One JSON object per event.
 ## Storage: one JSONL file per timeline
 
 `data/worlds/<world>/timelines/<timeline>/events.jsonl` (timelines.md, since TASK-32; it was one
-file per campaign before): one event per line, appended, never rewritten. A forked timeline
+file per campaign before): one event per line, appended. A forked timeline
 starts with its parent's events up to the fork point (`fork_at`), which stay in the parent's
 file; its own ids go on after them.
 
+**Setting the time back deletes (TASK-88, Nico 2026-11-04).** When the DM drags the current time
+into the past and confirms, every event after that moment (timeline order) is removed from the
+file for good (`EventLog.set_back`: the file is rewritten), the clock goes back there and every
+screen is rebuilt. Kept: the events up to the moment, the undo markers of kept events, and the
+session marks (moved back to that moment). There is no undo and no "bring back". Forks that
+inherited a deleted event (or forked past the last kept one) first get their own copy of the
+history (`Timeline.detach`: inherited events copied into their file, `parent` cleared,
+`forked_from` kept). A fork can't be set back before its fork point. The old `timeline.rewound`
+events (TASK-86) are migrated once when a log is opened: cut-off events deleted, the old file kept
+as `events.jsonl.bak-rewound`. Single-event undo and correction stay as above.
+
 Why JSONL over SQLite:
 - **No dependency.** Godot reads it with `FileAccess` + `JSON`. SQLite would need a GDExtension addon for every build.
-- **Append-only by nature.** Writing an event is one appended line, and a crash loses at most that line.
+- **Append-only by nature.** Writing an event is one appended line, and a crash loses at most that line. (Setting the time back writes a temporary file and swaps it in.)
 - **Readable and diffable.** You can open it in an editor, back it up with git, and the MCP server (Python/TS) reads it in two lines of code.
 - **Small.** Even a few thousand events per session stay a few MB over a whole campaign. The DM host loads the whole log into memory at start and keeps an index per entity and per day.
 - **One log per timeline.** Worlds and core have no log; play never changes them.

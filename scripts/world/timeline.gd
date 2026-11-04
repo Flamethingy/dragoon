@@ -162,6 +162,47 @@ func fork(fork_name: String, at := -1, players: Array = [], dm := {}) -> String:
 	return create(world_dir, fork_name, id(), last if at < 0 else at, players, dm)
 
 
+## TASK-88: the forks of this timeline that setting it back would change: those that
+## inherited one of the `deleted` events, or whose fork point lies past the last kept event
+## (new events would get their ids again). [timeline.json + {_dir}]
+func forks_hit(deleted: Array, last_kept: int) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for t in list(world_dir):
+		if str(t.get("parent", "")) != id():
+			continue
+		var at := int(t.get("fork_at", 0))
+		if at > last_kept or deleted.any(func(x: Variant) -> bool: return int(x) <= at):
+			out.append(t)
+	return out
+
+
+## TASK-88: makes a fork stand on its own before its parent is set back: the events it
+## inherited are copied into its own file (same ids) and it has no parent any more
+## (`forked_from` remembers where it came from).
+static func detach(fork_dir: String) -> bool:
+	var finfo: Dictionary = _read(fork_dir.path_join("timeline.json"), {})
+	var parent := str(finfo.get("parent", ""))
+	if finfo.is_empty() or parent == "":
+		return false
+	var world := fork_dir.get_base_dir().get_base_dir()
+	var lines := PackedStringArray()
+	for e in chain_events(world, parent, int(finfo.get("fork_at", 0))):
+		lines.append(JSON.stringify(e))
+	var file := fork_dir.path_join("events.jsonl")
+	var own := FileAccess.get_file_as_string(file) if FileAccess.file_exists(file) else ""
+	var f := FileAccess.open(file, FileAccess.WRITE)
+	if f == null:
+		return false
+	for line in lines:
+		f.store_line(line)
+	f.store_string(own)
+	f.close()
+	finfo["forked_from"] = {"parent": parent, "fork_at": int(finfo.get("fork_at", 0))}
+	finfo["parent"] = ""
+	finfo["fork_at"] = 0
+	return EntryStore._write(fork_dir.path_join("timeline.json"), finfo) == OK
+
+
 func save_info() -> Error:
 	revision += 1
 	return EntryStore._write(folder.path_join("timeline.json"), info)

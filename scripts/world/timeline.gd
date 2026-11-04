@@ -33,6 +33,7 @@ var events_log: EventLog
 var _world := {}  ## kind -> {id -> entry} (the world package's files)
 var _created := {}  ## kind -> {id -> entry} built from the entity events
 var _created_count := -1  ## events_log.events.size() when _created was built
+var revision := 0  ## TASK-87: counts changes outside the event log (world files, rules, info); caches compare it
 
 
 func _init(timeline_folder: String, asset_cache: AssetCache = null) -> void:
@@ -133,6 +134,7 @@ func rules_settings() -> Dictionary:
 
 ## Saves the world's rules settings (into its package.json, "rules").
 func set_rules_settings(settings: Dictionary) -> Error:
+	revision += 1
 	var manifest := world_manifest()
 	manifest["rules"] = settings
 	var f := FileAccess.open(world_dir.path_join("package.json"), FileAccess.WRITE)
@@ -161,6 +163,7 @@ func fork(fork_name: String, at := -1, players: Array = [], dm := {}) -> String:
 
 
 func save_info() -> Error:
+	revision += 1
 	return EntryStore._write(folder.path_join("timeline.json"), info)
 
 
@@ -317,6 +320,7 @@ func token_entity(e: Dictionary, by := "dm") -> String:
 ## Forgets the world files read so far (a map was added or its grid changed).
 func reload_world() -> void:
 	_world.clear()
+	revision += 1
 
 
 ## Replaces a timeline entry (`entity.edited`), or overrides a world entry in this timeline.
@@ -358,6 +362,7 @@ func promote(ref: String, by := "dm") -> Dictionary:
 	if err != OK:
 		return {"error": error_string(err)}
 	_world.erase(kind)
+	revision += 1
 	events_log.append("entity.promoted", ref, {"world": world_id()}, by)
 	return {"promoted": ref}
 

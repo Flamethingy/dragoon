@@ -687,10 +687,47 @@ static func _range_text(note: Dictionary) -> String:
 
 const ECONOMY := ["action", "bonus", "reaction", "object"]
 
+# --- Cache of slow derived views (TASK-87) ------------------------------------------------------
+# Sheets, turn usage and the combat view take milliseconds each and are asked for many times per
+# change (the broadcast per player, the tracker, the HUD). They are kept until anything they come
+# from may have changed: an event added, undone or cut off, the clock, the world files or rules
+# (Timeline.revision), looking back in time, or simply the next frame (for whatever else, e.g.
+# packages). Callers get copies, so changing a result never changes the cache.
+
+var _memo := {}
+var _memo_key := ""
+
+
+func _memo_of(name: String, build: Callable, copy := true) -> Variant:
+	var key := _memo_state()
+	if key != _memo_key:
+		_memo.clear()
+		_memo_key = key
+	if not _memo.has(name):
+		_memo[name] = build.call()
+	var v: Variant = _memo[name]
+	return v.duplicate(true) if copy and (v is Dictionary or v is Array) else v
+
+
+func _memo_state() -> String:
+	var parts := [Engine.get_process_frames(), looking_back, multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 0]
+	if event_log != null:
+		var n := event_log.events.size()
+		parts.append_array([n, int(event_log.events[n - 1].get("id", 0)) if n > 0 else 0, event_log._undone.size(),
+			event_log._rewound.size(), event_log.day, event_log.time, event_log.insert_after.size()])
+	if timeline != null:
+		parts.append_array([timeline.revision, timeline.get_instance_id()])
+	return str(parts)
+
+
 ## What `ref` used since its turn began (display only, never blocks): {action, bonus,
 ## reaction, object: bool, dash: bool, moved: metres, speed: metres (doubled by a Dash)}.
 func turn_usage(ref: String) -> Dictionary:
-	var out := {"action": false, "bonus": false, "reaction": false, "object": false, "dash": false, "moved": 0.0, "speed": 0.0}
+	return _memo_of("usage|" + ref, _turn_usage.bind(ref))
+
+
+func _turn_usage(ref: String) -> Dictionary:
+	var out :={"action": false, "bonus": false, "reaction": false, "object": false, "dash": false, "moved": 0.0, "speed": 0.0}
 	var terrains := {}  ## map -> difficult squares (TASK-73)
 	if event_log == null or timeline == null:
 		return out
@@ -1139,9 +1176,13 @@ func _action_kind(sheet: Dictionary, name: String) -> String:
 ## The initiative order for the tracker: [{entity, name, initiative, rolled, surprised,
 ## current, members: [{entity, name}]}] plus round and turn.
 func combat_view() -> Dictionary:
-	var c := combat_state()
 	if not is_dm():
-		return c
+		return combat_state()
+	return _memo_of("combat_view", _combat_view)
+
+
+func _combat_view() -> Dictionary:
+	var c := combat_state()
 	var out := []
 	var surprised: Array = c.get("surprised", [])
 	for i in (c.order as Array).size():
@@ -2763,6 +2804,10 @@ func may_see_sheet(player: String, ref: String) -> bool:
 func sheet_for(player: String, ref: String) -> Dictionary:
 	if ref.get_slice("/", 0) not in Timeline.CREATURES:
 		return {}
+	return _memo_of("sheet|%s|%s" % [player, ref], _sheet_for.bind(player, ref))
+
+
+func _sheet_for(player: String, ref: String) -> Dictionary:
 	var events := event_log.effective(ref, event_log.day, event_log.time)
 	var view := timeline.entry_view(ref, player, events)
 	if view.is_empty():
@@ -4280,6 +4325,10 @@ func catalog_entry(ref: String) -> Dictionary:
 ## The features sheets look up: the world's and the timeline's, and the packages' class
 ## features (TASK-69); the world's win.
 func _features() -> Dictionary:
+	return _memo_of("features", _all_features, false)  # read-only for the callers: no copy of the whole list
+
+
+func _all_features() -> Dictionary:
 	var own: Dictionary = timeline.entries("features") if timeline != null else {}
 	if not _class_loaded:
 		_class_loaded = true

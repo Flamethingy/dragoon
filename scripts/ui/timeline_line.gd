@@ -239,8 +239,10 @@ func _draw() -> void:
 		var at := Vector2(nu + 8, y - 8) if not vertical() else _p(nu, y + 16) + Vector2(0, 4)
 		draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs + 1, NOW_COLOR)
 	draw_colored_polygon(_triangle(nu, y, -1.0, 1.25 if now_drag else 1.0), NOW_COLOR)  # above the line
-	if cursor_at >= 0:
-		draw_colored_polygon(_triangle(x_of(float(cursor_at)), y, 1.0), ink)
+	if cursor_at >= 0:  # TASK-89: a hairline across the line too, so it doesn't drown in the dates
+		var cu := x_of(float(cursor_at))
+		draw_line(_p(cu, y - 12.0), _p(cu, y + 12.0), ink, 2.0)
+		draw_colored_polygon(_triangle(cu, y, 1.0, 1.3), ink)
 	if hint != "":
 		var hs := font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, fs - 1)
 		var hp := Vector2(size.x - hs.x - 6, size.y - 4) if not vertical() else Vector2(4, 12)

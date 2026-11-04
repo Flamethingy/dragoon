@@ -140,9 +140,33 @@ func _init() -> void:
 	line.span = 4 * 3600.0
 	line.view_from = float(line.now_at()) - 3600.0
 	var nu := line.x_of(float(line.now_at()))
+	var looked := []
+	bar.cursor_changed.connect(func(at: int) -> void: looked.append(at))
 	_mouse(line, true, nu - 30)
 	_mouse(line, false, nu - 30)
 	_check(line.cursor_at >= 0 and not line.now_drag, "a click in the past: the black cursor goes there")
+	_check(not looked.is_empty() and int(looked.back()) >= 0 and int(looked.back()) < line.now_at(), "and the bar tells the table a past time (TASK-89: %s)" % [looked])
+	# TASK-89: a click on the black triangle itself (below the line) moves it too, and Home is now
+	var cu := line.x_of(float(line.cursor_at))
+	_mouse_at(line, true, cu - 60, line._line_y() + 16)
+	_mouse_at(line, false, cu - 60, line._line_y() + 16)
+	_check(line.cursor_at >= 0 and int(looked.back()) == line.cursor_at, "a click by the black triangle moves it there")
+	var home_key := InputEventKey.new()
+	home_key.keycode = KEY_HOME
+	home_key.pressed = true
+	bar._unhandled_key_input(home_key)
+	_check(line.cursor_at == -1 and int(looked.back()) == -1, "Home: back to now")
+	# the same docked at a side (vertical)
+	var wide := line.size
+	line.size = Vector2(160, 900)
+	line.span = 4 * 3600.0
+	line.view_from = float(line.now_at()) - 3600.0
+	var vu := line.x_of(float(line.now_at())) - 30
+	_mouse(line, true, vu)
+	_mouse(line, false, vu)
+	_check(line.vertical() and line.cursor_at >= 0 and int(looked.back()) == line.cursor_at, "docked at a side: a click looks back too")
+	line.set_cursor(-1)
+	line.size = wide
 	_mouse(line, true, nu - 30)
 	_motion(line, nu + 200)
 	_check(line.cursor_at == -1 and not line.now_drag and line.future_minutes() == 0, "dragging the black one stops at now")

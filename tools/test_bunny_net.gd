@@ -93,6 +93,33 @@ func _init() -> void:
 	await process_frame
 	_check(dm_heard.size() == 1 and heard.is_empty() and bob.rolls.size() == bob_before, "the DM's private answer stays with the DM")
 
+	# a long job: everyone sees it working, questions wait with a hint, the DM can stop it
+	var stopped := []
+	dm.bunny.job_cancelled.connect(func(job: String) -> void: stopped.append(job))
+	_check(dm.bunny.start_job("importing Deep Magic"), "a job starts")
+	dm.bunny.job_progress(40)
+	await _until(func() -> bool: return bob.bunny_state == "working" and "40%" in bob.bunny_detail)
+	chat.show_bunny_status()
+	_check(bob.bunny_state == "working" and chat.bunny_line.visible and "importing Deep Magic 40%" in chat.bunny_line.text, "Bob sees it working (%s)" % chat.bunny_line.text)
+	heard.clear()
+	gate[0] = false
+	bob.say("/bunny are you there?", BORIN)
+	await _until(func() -> bool: return not heard.is_empty())
+	_check(heard.size() == 1 and bool(heard[0].get("hint", false)) and "number 1 in line" in str(heard[0].text), "busy: Bob hears he's next (%s)" % [heard])
+	await _until(func() -> bool: return bob.bunny_waiting == 1)
+	_check(bob.bunny_waiting == 1, "everyone sees one waiting")
+	dm.say("/bunny stop")
+	_check(stopped == ["importing Deep Magic"], "the DM stops the job")
+	await _until(func() -> bool: return bob.bunny_state == "thinking")
+	_check(bob.bunny_state == "thinking", "then Bob's question is answered")
+	heard.clear()
+	dm.cancel_bunny()  # and stops that answer too
+	gate[0] = true
+	await _until(func() -> bool: return not heard.is_empty())
+	_check(heard.size() == 1 and "stopped" in str(heard[0].text) and bool(heard[0].error), "an answer stopped by the DM: Bob hears so (%s)" % [heard])
+	await _until(func() -> bool: return bob.bunny_state == "idle")
+	_check(bob.bunny_state == "idle", "idle again")
+
 	chat.queue_free()
 	dm.multiplayer.multiplayer_peer.close()
 	await process_frame

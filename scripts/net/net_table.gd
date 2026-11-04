@@ -4801,6 +4801,9 @@ func say(text: String, ref := "") -> void:
 		if t.to_lower().begins_with(prefix):
 			roll(t.substr(prefix.length()), ref)
 			return
+	if t.to_lower() == "/bunny stop" and is_dm():  # the DM stops the bunny's job or answer
+		cancel_bunny()
+		return
 	for prefix in ["/bunny! ", "/bunny "]:  # TASK-97: ask the Table Bunny (with "!": for everyone)
 		if t.to_lower().begins_with(prefix):
 			ask_bunny(t.substr(prefix.length()), prefix == "/bunny! ", ref)
@@ -4878,9 +4881,20 @@ func _on_bunny_answered(sender: int, text: String, error: bool, context: Diction
 	var mood := "happy" if not error and "!" in text else "neutral"
 	if error:
 		mood = "sleepy" if text.begins_with("Zzz") else "sad"
+	if bool(context.get("hint", false)):  # busy: it'll come (only to the asker)
+		mood = "thinking"
 	var entry := _bunny_entry(text, error, mood)
-	entry["to"] = "all" if bool(context.get("public", false)) else _sender_player(sender)
-	_send_bunny(sender, bool(context.get("public", false)), entry)
+	var public := bool(context.get("public", false)) and not bool(context.get("hint", false))
+	entry["to"] = "all" if public else _sender_player(sender)
+	if bool(context.get("hint", false)):
+		entry["hint"] = true
+	_send_bunny(sender, public, entry)
+
+
+## DM: stops the bunny's long job or the answer it is working on.
+func cancel_bunny() -> void:
+	if is_dm() and bunny != null:
+		bunny.cancel()
 
 
 func _send_bunny(sender: int, public: bool, entry: Dictionary) -> void:

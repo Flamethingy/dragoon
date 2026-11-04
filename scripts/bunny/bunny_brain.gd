@@ -16,6 +16,7 @@ extends Node
 
 signal answered(sender: int, text: String, error: bool, context: Dictionary)
 signal status_changed(state: String, detail: String, waiting: int)
+signal job_cancelled(job: String)  ## the DM stopped a long job (whoever runs it stops too)
 
 const API_URL := "https://api.anthropic.com/v1/messages"
 const API_VERSION := "2026-10-21"
@@ -39,6 +40,8 @@ var _queue: Array = []  ## [{sender, text, context}]
 var _busy := false
 var _history := {}  ## player -> [{role, content}] (text only)
 var _last_ask := {}  ## player -> msec of their last question
+var _job := ""  ## a long job running (an import, building an encounter ...): "working"
+var _cancel := false  ## the DM stopped the question being answered
 
 
 func _ready() -> void:
@@ -91,6 +94,10 @@ func ask(sender: int, text: String, context := {}) -> String:
 		return why
 	_last_ask[player] = Time.get_ticks_msec()
 	_queue.append({"sender": sender, "text": text.left(2000), "context": context})
+	if _job != "":  # an important job: the question waits, and the asker hears so
+		var hint := context.duplicate()
+		hint["hint"] = true
+		answered.emit(sender, "I'm busy right now (%s), you're number %d in line." % [_job, _queue.size()], false, hint)
 	if _busy:
 		_set_state(state, detail)  # one more waiting
 	else:
@@ -101,6 +108,42 @@ func ask(sender: int, text: String, context := {}) -> String:
 ## How many questions wait (not the one being answered).
 func waiting() -> int:
 	return _queue.size()
+
+
+## A long job starts (doc-3 "Busy status"): everyone sees the bunny working on it, questions
+## wait. False if it is busy already.
+func start_job(job: String) -> bool:
+	if _busy or job == "":
+		return false
+	_busy = true
+	_job = job
+	_set_state("working", job)
+	return true
+
+
+## How far the job is (0-100).
+func job_progress(percent: int) -> void:
+	if _job != "":
+		_set_state("working", "%s %d%%" % [_job, clampi(percent, 0, 100)])
+
+
+func end_job() -> void:
+	if _job == "":
+		return
+	_job = ""
+	_next()
+
+
+## The DM stops what the bunny is doing: the job (job_cancelled), or the question being
+## answered (its asker hears so). The queue goes on.
+func cancel() -> void:
+	if _job != "":
+		var job := _job
+		_job = ""
+		job_cancelled.emit(job)
+		_next()
+	elif _busy:
+		_cancel = true
 
 
 ## The end of the session: every history is gone.
@@ -131,12 +174,19 @@ func _answer(sender: int, text: String, context: Dictionary) -> Dictionary:
 	var messages: Array = history.duplicate(true)
 	messages.append({"role": "user", "content": text})
 	var system := _system(player, context)
+	_cancel = false
 	for round_i in MAX_ROUNDS:
+		if _cancel:
+			_cancel = false
+			return {"text": "The DM stopped me there.", "error": true}
 		if tokens_used >= int(setting("token_limit")):
 			return {"text": "Zzz… I'm worn out for this session (the token limit is used up).", "error": true}
 		var body := {"model": str(setting("model")), "max_tokens": MAX_TOKENS, "system": system,
 			"tools": BunnyTools.schemas(), "messages": messages, "output_config": {"effort": "low"}}
 		var res: Dictionary = await transport.call(body, str(setting("api_key")))
+		if _cancel:
+			_cancel = false
+			return {"text": "The DM stopped me there.", "error": true}
 		if int(res.get("code", 0)) != 200 or not res.get("body") is Dictionary:
 			return {"text": _http_error(res), "error": true}
 		var reply: Dictionary = res.body

@@ -146,6 +146,38 @@ func _init() -> void:
 		"Alt + drop onto Aria groups them, Aria leads (%s)" % [alt_groups])
 	_check(grid.plans.plans.is_empty(), "no ghost left behind")
 
+	# --- Hovering up to the fanned faces keeps them open; a face is grabbed and dragged out --------
+	var gref: String = NetTable.GROUP_PREFIX + str(alt_groups.keys()[0]) if alt_groups.size() == 1 else ""
+	if grid.tokens.has(gref):
+		var tok: Sprite2D = grid.tokens[gref]
+		var st := tok.get_node("Stack") as GroupStack
+		grid._hover(tok.position)
+		_check(st.fanned, "hover fans out")
+		var spot: Dictionary = st.spots()[0]
+		var gap := tok.position + Vector2(0, -st.radius - 2.0)  # between the token and the faces
+		grid._hover(gap)
+		_check(st.fanned, "the way up to the faces keeps them open")
+		grid._hover(tok.position + (spot.at as Vector2))
+		_check(st.fanned, "over a face too")
+		var grab := InputEventMouseButton.new()
+		grab.button_index = MOUSE_BUTTON_LEFT
+		grab.pressed = true
+		grab.position = grid.get_canvas_transform() * (tok.position + (spot.at as Vector2))
+		grid._unhandled_input(grab)
+		_check(grid.ring != null and grid.ring.dragged == b, "pressing a fanned face takes that member (%s)" % (grid.ring.dragged if grid.ring else "no ring"))
+		var to := _free_cell(grid, grid.token_cell(gref) + Vector2i(0, 4))
+		var mv := InputEventMouseMotion.new()
+		mv.position = grid.get_canvas_transform() * grid.cell_center(to, 1.0)
+		grid._unhandled_input(mv)
+		var let_go := InputEventMouseButton.new()
+		let_go.button_index = MOUSE_BUTTON_LEFT
+		let_go.pressed = false
+		let_go.position = mv.position
+		grid._unhandled_input(let_go)
+		_check(grid.tokens.has(b) and grid.token_cell(b) == to and dm.groups_on(dm.map_id).is_empty(), "dropped it stands there, the group is gone")
+	else:
+		_check(false, "no group to fan out")
+
 	print("group tokens: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))
 	quit(1 if _failed > 0 else 0)
 

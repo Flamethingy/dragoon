@@ -22,21 +22,47 @@ func set_faces(list: Array, r: float) -> void:
 	queue_redraw()
 
 
-func _draw() -> void:
+## Where the other members' faces are (local, in map pixels): [{face, at, r}], the top one last.
+func spots() -> Array:
 	var others := faces.slice(1)
-	if others.is_empty():
-		return
+	var out := []
 	if fanned:  # every member in a row above the token
 		var size := radius * 0.8
 		var step := size * 1.05
 		var x0 := -step * (others.size() - 1) * 0.5
 		for i in others.size():
-			_face(Vector2(x0 + step * i, -radius - size * 0.65), size * 0.5, others[i])
+			out.append({"face": others[i], "at": Vector2(x0 + step * i, -radius - size * 0.6), "r": size * 0.5})
 	else:
 		var size := radius * 0.72
-		var shown := mini(others.size(), SHOWN)
-		for i in range(shown - 1, -1, -1):  # the first one on top
-			_face(Vector2(radius * 0.66 - i * size * 0.62, radius * 0.66 - i * size * 0.1), size * 0.5, others[i])
+		for i in range(mini(others.size(), SHOWN) - 1, -1, -1):  # the first one on top
+			out.append({"face": others[i], "at": Vector2(radius * 0.66 - i * size * 0.62, radius * 0.66 - i * size * 0.1), "r": size * 0.5})
+	return out
+
+
+## The member whose face is at `local` ("" = none; the top one wins).
+func face_at(local: Vector2) -> String:
+	var hit := ""
+	for s: Dictionary in spots():
+		if (s.at as Vector2).distance_to(local) <= float(s.r) + 3.0:
+			hit = str(s.face.get("id", ""))
+	return hit
+
+
+## Fanned out: the row of faces and the gap down to the token keep the fan open (TASK-115 fix:
+## it closed on the way up to the faces and flickered).
+func in_fan(local: Vector2) -> bool:
+	if not fanned or faces.size() < 2:
+		return false
+	var size := radius * 0.8
+	var width := maxf(size * 1.05 * (faces.size() - 1), radius * 2.0) + 8.0
+	return Rect2(-width * 0.5, -radius - size * 1.15, width, size * 1.15 + radius * 0.3).has_point(local)
+
+
+func _draw() -> void:
+	if faces.size() < 2:
+		return
+	for s: Dictionary in spots():
+		_face(s.at, s.r, s.face)
 	var badge := Vector2(radius * 0.78, -radius * 0.72)
 	var font := ThemeDB.fallback_font
 	var text := "×%d" % faces.size()

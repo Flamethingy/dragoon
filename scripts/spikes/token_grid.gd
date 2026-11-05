@@ -843,6 +843,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.button_index == MOUSE_BUTTON_LEFT and not locked and ring != null and ring.is_open() and (ring.dragged != "" or (event.pressed
 				and ring.member_at(get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position) != "")):
 			_ring_press(event as InputEventMouseButton)  # TASK-115: a member is taken out of the group
+		elif event.button_index == MOUSE_BUTTON_LEFT and not locked and event.pressed and _fan_face(get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position) != "":
+			# TASK-115 fix: a fanned face is grabbed straight away and dragged out of the group
+			var at := get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position
+			var member := _fan_face(at)
+			var gid := str(_fanned.get_meta("entity"))
+			if not can_drag.is_valid() or can_drag.call(gid):
+				open_ring(gid)
+				if ring != null and ring.is_open():
+					ring.dragged = member
+					ring.drag_at = at
+					ring.queue_redraw()
+			get_viewport().set_input_as_handled()
 		elif event.button_index == MOUSE_BUTTON_LEFT and not locked:
 			var at := get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position
 			if event.pressed and ring != null and ring.is_open():
@@ -957,7 +969,21 @@ func _ring_press(event: InputEventMouseButton) -> void:
 	get_viewport().set_input_as_handled()
 
 
+## The member under `at` among the faces of the group token fanned out now ("" = none).
+func _fan_face(at: Vector2) -> String:
+	if _fanned == null or not is_instance_valid(_fanned) or not _fanned.has_node("Stack"):
+		return ""
+	return (_fanned.get_node("Stack") as GroupStack).face_at(at - _fanned.position)
+
+
 func _hover(at: Vector2) -> void:
+	if _fanned != null and is_instance_valid(_fanned) and _fanned.has_node("Stack") and (_fanned.get_node("Stack") as GroupStack).in_fan(at - _fanned.position):
+		var face := _fan_face(at)  # over the fanned faces: it stays open, the face's name shows
+		var stack := _fanned.get_node("Stack") as GroupStack
+		for f: Dictionary in stack.faces:
+			if str(f.id) == face:
+				set_info("%s  · drag it out of the group" % f.name)
+		return
 	var token := _token_under(at)
 	var fan := token if token != null and token.has_node("Stack") else null
 	if fan != _fanned:

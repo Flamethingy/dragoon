@@ -1,3 +1,7 @@
+---
+updated_date: '2026-11-02 02:33'
+---
+
 # Package format (core data)
 
 Decided 2026-11-01. Core data (monsters, spells, items ...) does **not** live as markdown files.

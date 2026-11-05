@@ -1,9 +1,10 @@
 ---
 id: TASK-40
 title: 'Live Lab: try out UI elements in the running VTT'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-01 17:37'
+updated_date: '2026-11-05 00:23'
 labels:
   - dev-tools
   - later

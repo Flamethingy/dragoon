@@ -1,9 +1,10 @@
 ---
 id: TASK-31
 title: 'Later: move the import agent into the VTT (GDScript or C#, no Python)'
-status: To Do
+status: In Planning
 assignee: []
 created_date: '2026-11-01 15:12'
+updated_date: '2026-11-05 00:23'
 labels:
   - import
   - later

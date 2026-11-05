@@ -22,6 +22,9 @@ static var layout_file := "user://layout.json"
 
 var top_margin := 96.0  ## room for the bars at the top
 var close_hides := false  ## closing a panel's window hides the panel (else it docks back)
+## TASK-113 (Nico 2026-11-05): every panel is its own OS window (a DockPanel that always pops
+## out); the tab areas and docking are only left for a run without own windows (headless).
+var windows_only := true
 var sizes := DEFAULT_SIZES.duplicate()
 var panels := {}  ## id -> {title, holder: Control, place: area|"window"|"hidden", last_area, window: Window, rect: Rect2i, screen}
 var areas := {}  ## area -> TabContainer
@@ -124,6 +127,8 @@ func show_panel(id: String, place := "") -> void:
 		place = place_of(id)
 		if place == "hidden":
 			place = str(p.wanted) if str(p.wanted) in AREAS or str(p.wanted) in ["window", "float"] else str(p.last_area)
+	if windows_only and DockPanel.native_windows:
+		place = "float"  # TASK-113: its own window (the DockPanel pops out by itself)
 	if place == "float":
 		float_panel(id)
 	elif place == "window":
@@ -179,6 +184,7 @@ func float_panel(id: String) -> DockPanel:
 		f.window_title = "Dragoon · %s" % p.title
 		f.title_label.text = str(p.title)
 		f.close_hides = true
+		f.always_window = windows_only  # TASK-113
 		f.closable = true  # TASK-100: an X inside the program too
 		f.window_min = Vector2i(900, 650)
 		f.place = {"dock": "float", "side": 14, "bottom": 10, "r": [8, 3, 28, 21], "window": false}

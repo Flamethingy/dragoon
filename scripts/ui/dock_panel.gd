@@ -32,6 +32,12 @@ var place_file := "user://panels.cfg"
 var section := "panel"
 var window_title := "Dragoon"
 var close_hides := false  ## closing its own window hides it (`closed`), else it docks back
+## TASK-113 (Nico 2026-11-05): always in its own OS window, never docked in the program: shown,
+## it opens straight in its window where it was last; dragged over the program it stays a
+## window; closing it hides it. Only the chat still docks.
+var always_window := false
+## Own windows can be made (not in a headless run: the panels stay inside the program there).
+static var native_windows := DisplayServer.get_name() != "headless"
 var allow_top := false  ## it may dock at the top (a wide, low panel like the timeline bar)
 ## Nico 2026-11-02: a slim panel (the timeline bar): docked at a side it is as wide as it is high
 ## at the top (`place.top`), from the top of the screen, and the other panels at that side sit
@@ -500,9 +506,10 @@ func _update_close() -> void:
 func close_window() -> void:
 	if window == null:
 		return
-	if close_hides:
+	if close_hides or always_window:
 		_keep_window_rect()
 		visible = false
+		save_place()
 		closed.emit()
 	else:
 		dock_back()
@@ -593,6 +600,9 @@ func pop_out() -> void:
 	if saved is Array and (saved as Array).size() == 4 and int(saved[2]) >= 200 and int(saved[3]) >= 150:
 		window.position = Vector2i(int(saved[0]), int(saved[1]))
 		window.size = Vector2i(int(saved[2]), int(saved[3]))
+	if always_window:
+		window.transient = true  # TASK-113: belongs to the program's window (minimised with it, Alt-Tab)
+		window.position = _on_a_screen(Rect2i(window.position, window.size))
 	window.close_requested.connect(close_window)
 	var bg := Panel.new()  # the window's paper
 	bg.theme_type_variation = UISkin.V_PAGE
@@ -610,9 +620,23 @@ func pop_out() -> void:
 	save_place()
 
 
+## Where a window at `r` stays seen: on the screen it was on, else on the program's screen.
+func _on_a_screen(r: Rect2i) -> Vector2i:
+	for i in DisplayServer.get_screen_count():
+		var screen := DisplayServer.screen_get_usable_rect(i)
+		if screen.grow(-40).intersects(r):
+			return r.position
+	var main := get_tree().root if is_inside_tree() else null
+	var at := DisplayServer.screen_get_usable_rect(main.current_screen if main != null else DisplayServer.get_primary_screen())
+	return at.position + (at.size - r.size).maxi(0) / 2
+
+
 ## Back from its own window to its dock.
 func dock_back() -> void:
 	if window == null:
+		return
+	if always_window and native_windows:  # TASK-113: it has no place in the program
+		close_window()
 		return
 	_keep_window_rect()
 	_carrying = false
@@ -688,7 +712,7 @@ func drop_at(screen: Vector2i) -> void:
 	if window == null or _home == null or not _home.is_inside_tree():
 		return
 	var main := (_home as Node).get_window()
-	if main == null or not Rect2i(main.position, main.size).has_point(screen):
+	if main == null or not Rect2i(main.position, main.size).has_point(screen) or always_window:  # TASK-113: stays a window
 		_keep_window_rect()
 		save_place()
 		return
@@ -707,6 +731,9 @@ func _on_visibility() -> void:
 		_update_top_rows.call_deferred()  # a top-docked panel shown or hidden moves the side docks
 	if window != null:
 		window.visible = visible
+	elif visible and is_inside_tree() and always_window and native_windows:
+		_restored = true
+		pop_out.call_deferred()  # TASK-113: straight into its own window
 	elif visible and is_inside_tree() and not _restored:
 		_restored = true
 		if bool(place.get("window", false)):

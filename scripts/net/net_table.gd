@@ -21,6 +21,7 @@ signal notes_changed
 signal table_changed  ## the map or tokens were (re)built
 signal pcs_changed  ## lobby: the PC list or my PC changed
 signal entry_received(ref: String)  ## player: an entry I asked for arrived or changed
+signal quick_index_received(list: Array)  ## player: the world's names I may find (TASK-104)
 signal accounts_changed  ## names or colors of the accounts changed
 signal sheet_received(ref: String)  ## a sheet I opened arrived or changed (TASK-10)
 signal rolls_changed  ## the roll log got a roll (TASK-12)
@@ -2797,6 +2798,48 @@ func open_entry(ref: String) -> void:
 		entry_received.emit(ref)
 	elif is_online():
 		request_entry.rpc_id(1, ref)
+
+
+## The world's and the timeline's entries `player` may find in the quick search (TASK-104):
+## [{name, kind, ref}], no drafts; a name inside a hidden passage only once it is revealed.
+func quick_index_for(player: String) -> Array:
+	var out := []
+	if timeline == null:
+		return out
+	for kind: String in PackageDB.KINDS + ["characters", "places", "npcs", "factions", "locations"]:
+		var all := timeline.entries(kind)
+		for id: String in all:
+			var e: Dictionary = all[id]
+			if EntryStore.is_draft(e):
+				continue
+			var ref := "%s/%s" % [kind, id]
+			var name := str(e.get("name", id))
+			if "<reveal" in name:  # only the visible part, without the tags (the frames are the sheet's)
+				var seen := str(entry_for(player, ref).get("name", "")) if player != Reveal.DM else name
+				name = RegEx.create_from_string("</?reveal[^>]*>").sub(seen, "", true)
+			name = name.strip_edges()
+			if name != "":
+				out.append({"name": name, "kind": kind, "ref": ref})
+	return out
+
+
+## Player: asks the host for the names to find.
+func request_quick_index() -> void:
+	if is_online() and not is_dm():
+		_send_quick_index.rpc_id(1)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _send_quick_index() -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if not is_dm() or not peers.has(sender):
+		return
+	_receive_quick_index.rpc_id(sender, quick_index_for(str(peers[sender])))
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_quick_index(list: Array) -> void:
+	quick_index_received.emit(list)
 
 
 ## Player -> DM.

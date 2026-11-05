@@ -41,6 +41,7 @@ var _book_button: Button
 var _book: Compendium
 var sheet: SheetPanel
 var hud: CharacterHud  ## the active character, lower left (TASK-44)
+var quick_search: QuickSearch  ## Ctrl+K (TASK-104)
 var chat: ChatBox  ## the chat on the right of the calm table (TASK-46)
 var bunny: TableBunny  ## the Table Bunny walking along the bottom (TASK-98)
 var bunny_desk: BunnyDesk  ## its see-through window on the desktop, if it walks there (TASK-102)
@@ -146,6 +147,11 @@ func _ready() -> void:
 	hud.pages.hud = hud
 	root.add_child(hud.pages)
 	_build_attack_bar(root)
+	quick_search = QuickSearch.new()  # Ctrl+K, over everything at the table (TASK-104)
+	quick_search.table = table
+	quick_search.hud = hud
+	root.add_child(quick_search)
+	table.quick_index_received.connect(quick_search.set_remote)
 	tracker = CombatTracker.new()
 	tracker.table = table
 	root.add_child(tracker)
@@ -706,6 +712,12 @@ func _build_bar(root: Control) -> void:
 		else:
 			open_compendium())
 	row.add_child(_book_button)
+	var find := Button.new()
+	find.name = "QuickSearchButton"
+	find.text = "🔍"
+	find.tooltip_text = "Quick search (Ctrl+K): items, spells, creatures, rules ..."
+	find.pressed.connect(func() -> void: quick_search.open())
+	row.add_child(find)
 	_color = ColorPickerButton.new()
 	_color.custom_minimum_size = Vector2(36, 28)
 	_color.edit_alpha = false

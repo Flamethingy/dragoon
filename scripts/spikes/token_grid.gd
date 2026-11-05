@@ -884,7 +884,12 @@ func _unhandled_input(event: InputEvent) -> void:
 					_drag_started = false
 					var target := plans.cell_under_ghost(id)
 					var ends := plan_group_move(id, group, target) if not group.is_empty() else {id: target}
-					if plans.is_measuring(id):
+					var onto := _token_under(at) if (event as InputEventMouseButton).alt_pressed else null
+					if onto != null and str(onto.get_meta("entity")) != id and not str(onto.get_meta("entity")) in group:
+						for g: String in [id] + group:  # TASK-115: Alt + drop onto a token groups them (it leads)
+							plans.cancel(g)
+						group_requested.emit([str(onto.get_meta("entity")), id] + group)
+					elif plans.is_measuring(id):
 						plans.end_drag(id, ends.get(id, target), ends)
 					else:
 						move_free(ends)

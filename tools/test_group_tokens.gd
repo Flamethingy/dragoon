@@ -123,6 +123,29 @@ func _init() -> void:
 	_check(dm.groups_on(dm.map_id).is_empty(), "no groups during a combat")
 	dm.end_combat()
 
+	# --- Alt + drop onto a token groups them ------------------------------------------------------
+	grid.select([])
+	await process_frame
+	var down := InputEventMouseButton.new()
+	down.button_index = MOUSE_BUTTON_LEFT
+	down.pressed = true
+	down.position = grid.get_canvas_transform() * grid.tokens[b].position
+	grid._unhandled_input(down)
+	var move := InputEventMouseMotion.new()
+	move.relative = (grid.tokens[aria].position - grid.tokens[b].position) * grid._camera.zoom
+	move.position = grid.get_canvas_transform() * grid.tokens[aria].position
+	grid._unhandled_input(move)
+	var up := InputEventMouseButton.new()
+	up.button_index = MOUSE_BUTTON_LEFT
+	up.pressed = false
+	up.alt_pressed = true
+	up.position = grid.get_canvas_transform() * grid.tokens[aria].position
+	grid._unhandled_input(up)
+	var alt_groups := dm.groups_on(dm.map_id)
+	_check(alt_groups.size() == 1 and alt_groups.values()[0].members == [aria, b] and alt_groups.values()[0].leader == aria,
+		"Alt + drop onto Aria groups them, Aria leads (%s)" % [alt_groups])
+	_check(grid.plans.plans.is_empty(), "no ghost left behind")
+
 	print("group tokens: %s" % ("all good" if _failed == 0 else "%d failed" % _failed))
 	quit(1 if _failed > 0 else 0)
 

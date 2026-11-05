@@ -566,10 +566,15 @@ func cancel_attack() -> void:
 
 const _EXHAUSTION_UP := 1000
 const _EXHAUSTION_DOWN := 1001
+const _GROUP_SELECTED := 1002  ## TASK-115
+const _GROUP_OPEN := 1003
+const _UNGROUP := 1004
 
 ## The conditions of `ref` to tick and untick (the DM, or the player whose sheet it is), at
 ## the mouse. The rules text of the world's edition is each one's tooltip. null if not allowed.
 func open_condition_menu(ref: String, at := Vector2(-1, -1)) -> PopupMenu:
+	if ref.begins_with(NetTable.GROUP_PREFIX):  # TASK-115: a group token's own menu
+		return _open_group_menu(ref, at)
 	if ref == "" or not table.may_change(ref):
 		return null
 	if condition_menu == null:
@@ -599,9 +604,43 @@ func open_condition_menu(ref: String, at := Vector2(-1, -1)) -> PopupMenu:
 	m.set_item_tooltip(m.item_count - 1, str(Rules.condition("exhaustion", edition, maxi(level + 1, 1)).text))
 	m.add_item("Exhaustion -1", _EXHAUSTION_DOWN)
 	m.set_item_disabled(m.item_count - 1, level == 0)
+	if ref in table.grid.selection() and table.grid.selection().size() >= 2 and not table.in_combat():  # TASK-115
+		m.add_separator()
+		m.add_item("Group the %d selected  (G)" % table.grid.selection().size(), _GROUP_SELECTED)
 	var pos := at if at.x >= 0 else _root.get_viewport().get_mouse_position()
 	m.popup(Rect2i(Vector2i(pos), Vector2i.ZERO))
 	return m
+
+
+var group_menu: PopupMenu
+
+## A group token's menu (TASK-115): open its ring (drag members out), ungroup everyone.
+func _open_group_menu(ref: String, at: Vector2) -> PopupMenu:
+	var info: Dictionary = table.grid.tokens[ref].get_meta("info", {}) if table.grid.tokens.has(ref) else {}
+	if info.is_empty() or not table.may_change(ref):
+		return null
+	if group_menu == null:
+		group_menu = PopupMenu.new()
+		group_menu.name = "GroupMenu"
+		group_menu.id_pressed.connect(func(id: int) -> void:
+			var g := str(group_menu.get_meta("ref", ""))
+			if id == _GROUP_OPEN:
+				table.grid.open_ring(g)
+			elif id == _UNGROUP:
+				table.split_group(g))
+		_root.add_child(group_menu)
+	group_menu.set_meta("ref", ref)
+	group_menu.clear()
+	group_menu.add_separator("Group of %d" % (info.get("members", []) as Array).size())
+	for f: Dictionary in info.get("faces", []):
+		group_menu.add_item(str(f.name))
+		group_menu.set_item_disabled(group_menu.item_count - 1, true)
+	group_menu.add_separator()
+	group_menu.add_item("Open: drag members out  (double-click)", _GROUP_OPEN)
+	group_menu.add_item("Ungroup all", _UNGROUP)
+	var pos := at if at.x >= 0 else _root.get_viewport().get_mouse_position()
+	group_menu.popup(Rect2i(Vector2i(pos), Vector2i.ZERO))
+	return group_menu
 
 
 func _on_condition_picked(id: int) -> void:
@@ -615,6 +654,10 @@ func _on_condition_picked(id: int) -> void:
 	if id == _EXHAUSTION_DOWN:
 		table.set_condition(ref, "exhaustion", level > 1, level - 1)
 		condition_menu.hide()
+		return
+	if id == _GROUP_SELECTED:
+		condition_menu.hide()
+		table.group_tokens(table.grid.selection())
 		return
 	var index := condition_menu.get_item_index(id)
 	var cond := str(condition_menu.get_item_metadata(index))

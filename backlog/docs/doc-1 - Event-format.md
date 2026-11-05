@@ -117,6 +117,8 @@ Added 2026-11-01 by Mochi. `Replay.entity_state` rebuilds the per-entity ones; `
 | `relationship.changed` | NPC or faction | `with` (entity or `party`), `from`, `to` (word or number), `reason` | `relations` {with: to} |
 | `quest.updated` | quest | `status` (`open` / `done` / `failed`, optional), `step` + `text` (optional) | `quest_status`, `progress` list |
 | `party.split` / `party.merged` | `""` | `groups: [[pc refs]]` / `place` (optional) | world: `party_groups` ([] = one party) |
+| `group.formed` | `""` | `map`, `group` (id; its token is `groups/<id>`), `members` (refs), `leader` (its picture). Tokens on a map grouped into one stack token (TASK-115); a member leaves any group it was in. Its moves: one `token.moved` per member with `group: "groups/<id>"` | `NetTable.groups_on(map)` |
+| `group.split` | `""` | `map`, `group`, `members` (the ones leaving, `[]` = all), `why` (optional, `combat`). Fewer than two left: the group is gone. A combat start splits every group on its map | `NetTable.groups_on(map)` |
 | `party.arrived` | PC (one per member) | `place`, `map`, `at` | `location` |
 | `weather.changed` | `""` | `region` (place ref, `""` = everywhere), `weather`, `temperature`, `wind` | world: `weather` per region |
 | `assistant.drafted` | the entity drafted for | `assistant`, `field`, `text`, `status` (`draft` / `accepted` / `rejected`) | history only |

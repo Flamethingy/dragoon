@@ -37,6 +37,7 @@ signal attack_requested(ref: String, query: String, multi: bool, kind: String, o
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
 const PARTY := "party"  ## id of the group token on world maps
+const GROUP_PREFIX := "groups/"  ## a group token's id: "groups/<id>" (TASK-115)
 ## What a sheet shows to someone who doesn't own it: the info page, no stats.
 const INFO_FIELDS := ["name", "size", "type", "subtype", "race", "alignment", "description", "image", "tags"]
 ## Sheet fields nobody changes from the table.
@@ -157,12 +158,22 @@ func _ready() -> void:
 	grid.step_requested.connect(_on_step_requested)
 	grid.token_clicked.connect(_on_token_clicked)
 	grid.token_menu.connect(func(entity: String) -> void: condition_menu_requested.emit(entity))
+	grid.group_requested.connect(group_tokens)  # TASK-115
+	grid.member_out_requested.connect(func(g: String, member: String, at: Vector2i) -> void: split_group(g, member, at))
 	grid.map_layer.edited.connect(func(changes: Dictionary) -> void: edit_map(changes))  # TASK-73
 	grid.map_layer.door_clicked.connect(func(i: int) -> void: toggle_door(i))
 	grid.areas.placed.connect(func(t: Dictionary) -> void:  # TASK-67: share it, the attack bar may take its targets
 		place_template(t)
 		area_placed.emit(t))
 	grid.speed = func(id: String) -> float:  # the move trail's colour (asked once per drag: sheets are slow)
+		if id.begins_with(GROUP_PREFIX) and grid.tokens.has(id):  # TASK-115: a group goes at its slowest member's speed
+			var slowest := -1.0
+			for m: Variant in (grid.tokens[id].get_meta("info", {}) as Dictionary).get("members", []):
+				var ms := sheet_for(Reveal.DM if is_dm() else my_player, str(m))
+				var v := Rules.speed(ms, Rules.edition_of(ms, rules_settings())) if not ms.is_empty() else 0.0
+				if v > 0.0 and (slowest < 0.0 or v < slowest):
+					slowest = v
+			return maxf(slowest, 0.0)
 		var s := sheet_for(Reveal.DM if is_dm() else my_player, id)
 		return Rules.speed(s, Rules.edition_of(s, rules_settings())) if not s.is_empty() else 0.0
 	grid.crowd = func(id: String) -> Dictionary: return _crowded(id)  # TASK-79
@@ -323,6 +334,8 @@ func view_for(player: String) -> Dictionary:
 			t["cell"] = start + Vector2i(newcomers, 0)
 			newcomers += 1
 		tokens.append(t)
+	if not world:
+		tokens = _group_tokens(tokens)  # TASK-115: grouped tokens show as one
 	var view := {"map": map, "tokens": tokens, "rules": rules_settings(), "combat": combat_view(), "templates": templates}
 	_map_sight(view, player)
 	return view
@@ -381,6 +394,12 @@ func _map_sight(view: Dictionary, player: String) -> void:
 func sight_of(player: String, tokens: Array) -> Dictionary:
 	var viewers := []
 	for t: Dictionary in tokens:
+		if str(t.get("kind", "")) == "group":  # TASK-115: each member of the group sees from its cell
+			for m: String in t.get("cells", {}):
+				if owns(player, m):
+					var at: Array = t.cells[m]
+					viewers.append({"cell": Vector2i(int(at[0]), int(at[1])), "cells": 1.0, "darkvision": Vision.darkvision_m(sheet_for(Reveal.DM, m))})
+			continue
 		if owns(player, str(t.id)) or (str(t.id) == PARTY and player in (t.get("players", []) as Array)):
 			viewers.append({"cell": t.cell, "cells": float(TokenGrid.SIZE_CELLS.get(str(t.get("size", "medium")).to_lower(), 1.0)),
 				"darkvision": Vision.darkvision_m(sheet_for(Reveal.DM, str(t.id))) if "/" in str(t.id) else 0.0})
@@ -586,6 +605,7 @@ func in_combat() -> bool:
 func start_combat(surprised: Array = [], groups: Array = []) -> Dictionary:
 	if not is_dm() or in_combat():
 		return {}
+	_split_groups()  # TASK-115: everyone fights on their own
 	var order := []
 	for id: String in grid.tokens:
 		if id == PARTY:
@@ -2046,6 +2066,10 @@ func _apply_state(view: Dictionary) -> void:
 			if pic != null or str(t.get("image", "")) == "":
 				grid.add_token_view(t, TokenArt.compose(pic, t.get("token_style"), str(t.get("kind", ""))), cell)
 				grid.set_token_conditions(id, t.get("conditions", []), int(t.get("exhaustion", 0)))
+		if t.has("faces") and grid.tokens.has(id):  # TASK-115: a group token's members at its edge
+			grid.set_group_faces(id, (t.faces as Array).map(func(f: Dictionary) -> Dictionary:
+				var img := assets.texture(str(f.image)) if str(f.image) != "" else null
+				return {"id": f.id, "name": f.name, "texture": TokenArt.compose(img, f.get("token_style"), str(f.get("kind", "")))}))
 	for id: String in grid.tokens.keys():
 		if not keep.has(id):
 			grid.tokens[id].queue_free()
@@ -2154,6 +2178,12 @@ func _handle_move(sender: int, entity: String, cell: Vector2i, path: Array = [])
 	if entity == PARTY:
 		_handle_party_move(sender, cell)
 		return
+	if entity.begins_with(GROUP_PREFIX):
+		if _backs.has(sender):
+			_deny(sender, entity, "you're looking back in time: go back to now to act")
+			return
+		_handle_group_move(sender, entity, cell, path)
+		return
 	if _backs.has(sender):
 		_deny(sender, entity, "you're looking back in time: go back to now to act")
 		return
@@ -2188,6 +2218,214 @@ func _handle_move(sender: int, entity: String, cell: Vector2i, path: Array = [])
 	_set_status("%s moved to %s (event %d)" % [_name_of(entity), cell, int(e.get("id", 0))])
 	if in_combat():  # TASK-62: the movement budget on the tracker and the HUD
 		_combat_changed()
+
+
+# --- Token groups (TASK-115) ---------------------------------------------------------------------
+
+## Groups of tokens on a map that move as one (Nico 2026-11-05, look A: a stack token). The
+## events: `group.formed` {map, group, members, leader} and `group.split` {map, group, members:
+## the ones leaving, [] = all}. The members keep their own token.moved events (a group move logs
+## one per member with data.group), so their places and timelines stay complete; the group only
+## changes what the map shows: one token with the leader's picture, the others small at its edge.
+
+## The groups on `map`: group id -> {members, leader} (two members at least).
+func groups_on(map: String) -> Dictionary:
+	var out := {}
+	if event_log == null:
+		return out
+	for e: Dictionary in _effective():
+		var d: Dictionary = e.get("data", {})
+		if str(d.get("map", "")) != map:
+			continue
+		if e.type == "group.formed":
+			var joining: Array = d.get("members", [])
+			for gid: String in out.keys():  # a token is in one group at a time
+				(out[gid].members as Array).assign((out[gid].members as Array).filter(func(m: Variant) -> bool: return not m in joining))
+				if (out[gid].members as Array).size() < 2:
+					out.erase(gid)
+			out[str(d.get("group", ""))] = {"members": joining.duplicate(), "leader": str(d.get("leader", joining[0] if not joining.is_empty() else ""))}
+		elif e.type == "group.split" and out.has(str(d.get("group", ""))):
+			var gid := str(d.group)
+			var leaving: Array = d.get("members", [])
+			if leaving.is_empty():
+				out.erase(gid)
+				continue
+			var left: Array = (out[gid].members as Array).filter(func(m: Variant) -> bool: return not m in leaving)
+			if left.size() < 2:
+				out.erase(gid)
+			else:
+				out[gid].members = left
+				if not out[gid].leader in left:
+					out[gid].leader = str(left[0])
+	return out
+
+
+## The view's member tokens become one group token each (members on the map only).
+func _group_tokens(tokens: Array) -> Array:
+	var groups := groups_on(map_id)
+	if groups.is_empty():
+		return tokens
+	var by_id := {}
+	for t: Dictionary in tokens:
+		by_id[str(t.id)] = t
+	var gone := {}
+	var out := []
+	for gid: String in groups:
+		var members: Array = (groups[gid].members as Array).filter(func(m: Variant) -> bool: return by_id.has(str(m)))
+		if members.size() < 2:
+			continue
+		var leader := str(groups[gid].leader) if by_id.has(str(groups[gid].leader)) else str(members[0])
+		var lead: Dictionary = by_id[leader]
+		members.erase(leader)
+		members.push_front(leader)
+		var names := PackedStringArray()
+		var faces := []
+		var cells := {}
+		var players := []
+		for m: Variant in members:
+			var t: Dictionary = by_id[str(m)]
+			names.append(str(t.get("name", m)))
+			faces.append({"id": str(m), "name": str(t.get("name", m)), "image": str(t.get("image", "")), "token_style": t.get("token_style"), "kind": str(t.get("kind", ""))})
+			cells[str(m)] = [int(t.cell.x), int(t.cell.y)]
+			for p: Variant in t.get("owners", []):
+				if not p in players:
+					players.append(p)
+			gone[str(m)] = true
+		out.append({"id": GROUP_PREFIX + gid, "kind": "group", "group": gid, "image": lead.get("image", ""), "token_style": lead.get("token_style"),
+			"name": "%s ×%d: %s" % [names[0], members.size(), ", ".join(names)], "size": lead.get("size", "medium"), "members": members,
+			"faces": faces, "cells": cells, "players": players, "cell": lead.cell})
+	for t: Dictionary in tokens:
+		if not gone.has(str(t.id)):
+			out.append(t)
+	return out
+
+
+## Groups these tokens (the first leads; a group token among them brings its members).
+func group_tokens(ids: Array) -> void:
+	if not is_online():
+		return
+	if is_dm():
+		_handle_group(1, ids)
+	else:
+		request_group.rpc_id(1, ids)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_group(ids: Array) -> void:
+	if is_dm():
+		_handle_group(multiplayer.get_remote_sender_id(), ids)
+
+
+func _handle_group(sender: int, ids: Array) -> void:
+	var members := []
+	var groups := groups_on(map_id)
+	for v: Variant in ids:
+		var id := str(v)
+		if id.begins_with(GROUP_PREFIX) and groups.has(id.trim_prefix(GROUP_PREFIX)):
+			for m: Variant in groups[id.trim_prefix(GROUP_PREFIX)].members:
+				if not m in members:
+					members.append(str(m))
+		elif grid.tokens.has(id) and "/" in id and id != PARTY and not id in members:
+			members.append(id)
+	if members.size() < 2:
+		_deny(sender, "", "pick two tokens or more to group")
+		return
+	if in_combat():
+		_deny(sender, "", "no groups during a combat")
+		return
+	var player := "" if sender == 1 else str(peers.get(sender, ""))
+	if sender != 1 and not members.all(func(m: String) -> bool: return owns(player, m)):
+		_deny(sender, "", "you can only group your own tokens")
+		return
+	var gid := "g%d%03d" % [Time.get_unix_time_from_system(), randi() % 1000]
+	event_log.append("group.formed", "", {"map": map_id, "group": gid, "members": members, "leader": members[0]}, "dm" if sender == 1 else player)
+	_groups_changed()
+	_set_status("Grouped %d tokens" % members.size())
+
+
+## Splits a group: everyone (`member` "") stays where they stand in the formation; one member
+## dragged out goes to `cell`.
+func split_group(group_ref: String, member := "", cell := Vector2i(-1, -1)) -> void:
+	if not is_online():
+		return
+	if is_dm():
+		_handle_split_group(1, group_ref, member, cell)
+	else:
+		request_split_group.rpc_id(1, group_ref, member, cell)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_split_group(group_ref: String, member: String, cell: Vector2i) -> void:
+	if is_dm():
+		_handle_split_group(multiplayer.get_remote_sender_id(), group_ref, member, cell)
+
+
+func _handle_split_group(sender: int, group_ref: String, member: String, cell: Vector2i) -> void:
+	var gid := group_ref.trim_prefix(GROUP_PREFIX)
+	var g: Dictionary = groups_on(map_id).get(gid, {})
+	if g.is_empty() or (member != "" and not member in (g.members as Array)):
+		_deny(sender, group_ref, "no such group")
+		return
+	var player := "" if sender == 1 else str(peers.get(sender, ""))
+	if sender != 1 and not (g.members as Array).any(func(m: Variant) -> bool: return owns(player, str(m))):
+		_deny(sender, group_ref, "that's not your group")
+		return
+	var by := "dm" if sender == 1 else player
+	event_log.append("group.split", "", {"map": map_id, "group": gid, "members": [member] if member != "" else []}, by)
+	if member != "" and cell.x >= 0:
+		var info: Dictionary = grid.tokens[group_ref].get_meta("info", {}) if grid.tokens.has(group_ref) else {}
+		var at: Array = (info.get("cells", {}) as Dictionary).get(member, [cell.x, cell.y])
+		var from := Vector2i(int(at[0]), int(at[1]))
+		if from != cell:
+			event_log.move_token(member, grid.map_id, from, cell, by, GROUP_PREFIX + gid)
+	_groups_changed()
+
+
+## A group token moves: every member the same way, keeping the formation (one token.moved each,
+## data.group; the leader's carries the trail and the cost).
+func _handle_group_move(sender: int, entity: String, cell: Vector2i, path: Array) -> void:
+	var info: Dictionary = grid.tokens[entity].get_meta("info", {})
+	var player := "" if sender == 1 else str(peers.get(sender, ""))
+	if sender != 1 and not (info.get("members", []) as Array).any(func(m: Variant) -> bool: return owns(player, str(m))):
+		_deny(sender, entity, "that's not your group")
+		return
+	if not grid.can_place(entity, cell):
+		_deny(sender, entity, "that square is blocked")
+		return
+	var from := grid.token_cell(entity)
+	var by := "dm" if sender == 1 else player
+	var trail := path if _valid_trail(from, cell, path) else []
+	var cells: Dictionary = info.get("cells", {})
+	var leader := str((info.get("members", [""]) as Array)[0])
+	var moved := {}
+	var last := {}
+	for m: Variant in info.get("members", []):
+		var at: Array = cells.get(str(m), [from.x, from.y])
+		var m_from := Vector2i(int(at[0]), int(at[1]))
+		var m_to := m_from + (cell - from)
+		if str(m) == leader:
+			last = event_log.move_token(str(m), grid.map_id, m_from, m_to, by, entity, "", _move_cost(entity, from, cell, path), trail)
+		else:
+			last = event_log.move_token(str(m), grid.map_id, m_from, m_to, by, entity)
+		moved[str(m)] = [m_to.x, m_to.y]
+	info["cells"] = moved
+	grid.glide_along(entity, trail)
+	grid.set_token_cell(entity, cell)
+	for peer_id: int in peers:
+		token_moved.rpc_id(peer_id, entity, cell, int(last.get("id", 0)), trail)
+	_set_status("The group moved to %s" % cell)
+
+
+## Groups split when a combat starts (each member has its own initiative and turn).
+func _split_groups() -> void:
+	for gid: String in groups_on(map_id):
+		event_log.append("group.split", "", {"map": map_id, "group": gid, "members": [], "why": "combat"})
+	_apply_state(view_for(""))
+
+
+func _groups_changed() -> void:
+	_apply_state(view_for(""))
+	_send_tables()
 
 
 ## The party token travels: one token.moved per member (data.group = "party"), so

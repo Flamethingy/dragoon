@@ -11,6 +11,8 @@ signal move_requested(entity: String, cell: Vector2i)
 ## A token was clicked (pressed and released without dragging), e.g. to open its sheet.
 signal token_clicked(entity: String)
 signal token_double_clicked(entity: String)  ## TASK-110: opens the first sheet page
+signal group_requested(ids: Array)  ## TASK-115: G with two tokens or more selected
+signal member_out_requested(group: String, member: String, cell: Vector2i)  ## dragged out of a group's ring
 signal token_menu(entity: String)  ## right click on a token without panning (TASK-56)
 ## WASD / arrow keys with tokens selected (TASK-42): step one cell in `dir` (8 directions),
 ## or with Shift only turn that way. Whoever owns the state decides.
@@ -75,6 +77,8 @@ var _box: Node2D
 var _pending := Vector2i.ZERO  ## keys pressed together, collected for COMBINE_SECONDS
 var _pending_turn := false
 var _combine: Timer
+var ring: GroupStack.Ring  ## a group's members around it, opened by a double-click (TASK-115)
+var _fanned: Sprite2D  ## the group token whose members fan out under the mouse
 
 
 func _ready() -> void:
@@ -177,6 +181,37 @@ func add_token_view(info: Dictionary, texture: Texture2D, at: Vector2i) -> void:
 	add_child(token)
 	set_token_cell(id, at, false)
 	set_token_facing(id, facing)
+
+
+## A group token's members (TASK-115): [{id, name, texture}], the leader first.
+func set_group_faces(id: String, faces: Array) -> void:
+	var token: Sprite2D = tokens.get(id)
+	if token == null:
+		return
+	var stack := token.get_node_or_null("Stack") as GroupStack
+	if stack == null:
+		stack = GroupStack.new()
+		stack.name = "Stack"
+		stack.scale = Vector2.ONE / token.scale
+		token.add_child(stack)
+	stack.set_faces(faces, cell * float(token.get_meta("cells", 1.0)) * 0.5)
+	if ring != null and ring.group == id:
+		ring.open(id, faces, cell * float(token.get_meta("cells", 1.0)))
+
+
+## Opens the ring of a group token's members (a double-click on it).
+func open_ring(id: String) -> void:
+	var token: Sprite2D = tokens.get(id)
+	var stack := token.get_node_or_null("Stack") as GroupStack if token != null else null
+	if stack == null:
+		return
+	if ring == null:
+		ring = GroupStack.Ring.new()
+		ring.name = "GroupRing"
+		ring.z_index = 5
+		add_child(ring)
+	ring.position = token.position
+	ring.open(id, stack.faces, cell * float(token.get_meta("cells", 1.0)))
 
 
 func _token_sprite(info: Dictionary, texture: Texture2D) -> Sprite2D:
@@ -740,7 +775,13 @@ func _input(event: InputEvent) -> void:
 	if k.ctrl_pressed or k.alt_pressed or _typing():
 		return
 	var code := k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode
-	if _dragging != null and code == KEY_SPACE:  # TASK-114: measure the drag from now on
+	if code == KEY_G and not k.echo and not locked and _dragging == null and selection().size() >= 2:  # TASK-115
+		group_requested.emit(selection())
+		get_viewport().set_input_as_handled()
+	elif code == KEY_ESCAPE and ring != null and ring.is_open():
+		ring.close()
+		get_viewport().set_input_as_handled()
+	elif _dragging != null and code == KEY_SPACE:  # TASK-114: measure the drag from now on
 		if not k.echo and _drag_started:
 			plans.start_measure()
 		get_viewport().set_input_as_handled()
@@ -799,8 +840,13 @@ func _unhandled_input(event: InputEvent) -> void:
 						token_menu.emit(str(t.get_meta("entity")))
 		elif event.button_index == MOUSE_BUTTON_LEFT and is_past():
 			_past_press(event as InputEventMouseButton)
+		elif event.button_index == MOUSE_BUTTON_LEFT and not locked and ring != null and ring.is_open() and (ring.dragged != "" or (event.pressed
+				and ring.member_at(get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position) != "")):
+			_ring_press(event as InputEventMouseButton)  # TASK-115: a member is taken out of the group
 		elif event.button_index == MOUSE_BUTTON_LEFT and not locked:
 			var at := get_canvas_transform().affine_inverse() * (event as InputEventMouseButton).position
+			if event.pressed and ring != null and ring.is_open():
+				ring.close()  # a click beside the ring closes it
 			if event.pressed:
 				get_viewport().gui_release_focus()  # the map has the keys now
 				var ghost := plans.ghost_at(at)  # a planned move's ghost is picked up again
@@ -809,6 +855,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_press_at = event.position
 				if _pressed != null and (event as InputEventMouseButton).double_click:
 					token_double_clicked.emit(str(_pressed.get_meta("entity")))
+					if _pressed.has_node("Stack"):  # TASK-115: a group opens its ring
+						open_ring(str(_pressed.get_meta("entity")))
+						_pressed = null
+						return
 				if _pressed == null:
 					_boxing = true
 					_box_from = at
@@ -863,7 +913,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion:
 		if _panning:
 			_camera.position -= event.relative / _camera.zoom
-		if _past_drag != null:
+		if ring != null and ring.dragged != "":
+			ring.drag_at = get_global_mouse_position()
+			ring.queue_redraw()
+		elif _past_drag != null:
 			_past_drag.position += event.relative / _camera.zoom
 		elif _dragging:
 			var lead := str(_dragging.get_meta("entity"))
@@ -880,8 +933,34 @@ func _unhandled_input(event: InputEvent) -> void:
 			_hover(get_global_mouse_position())
 
 
+## A press or release on the open ring: the member under the mouse follows it and leaves the
+## group where it is let go (on the ring itself: nothing happens).
+func _ring_press(event: InputEventMouseButton) -> void:
+	var at := get_canvas_transform().affine_inverse() * event.position
+	if event.pressed:
+		ring.dragged = ring.member_at(at)
+		ring.drag_at = at
+	else:
+		var member := ring.dragged
+		ring.dragged = ""
+		if ring.member_at(at) == member and at.distance_to(ring.position) < cell * 2.0:
+			ring.queue_redraw()
+			return
+		var gid := ring.group
+		ring.close()
+		member_out_requested.emit(gid, member, cell_at(at))
+	get_viewport().set_input_as_handled()
+
+
 func _hover(at: Vector2) -> void:
 	var token := _token_under(at)
+	var fan := token if token != null and token.has_node("Stack") else null
+	if fan != _fanned:
+		if _fanned != null and is_instance_valid(_fanned):
+			(_fanned.get_node("Stack") as GroupStack).fanned = false
+		_fanned = fan
+		if fan != null:
+			(fan.get_node("Stack") as GroupStack).fanned = true
 	if token:
 		var info: Dictionary = token.get_meta("info", {})
 		var parts := PackedStringArray([str(info.get("name", "?"))])

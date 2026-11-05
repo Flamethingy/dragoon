@@ -835,6 +835,10 @@ static func _lists(s: Dictionary, key: String, name: String) -> bool:
 ## no size of its own, so the frame stays the piece's size; content that needs more room is
 ## scaled down to fit (never up).
 class FitBox extends Container:
+	const MAX_SORTS := 4  ## re-fits per frame at most (see below)
+	var _sort_frame := -1
+	var _sorts := 0
+
 	func _init() -> void:
 		clip_contents = true
 		mouse_filter = Control.MOUSE_FILTER_PASS
@@ -843,6 +847,21 @@ class FitBox extends Container:
 
 	func _notification(what: int) -> void:
 		if what != NOTIFICATION_SORT_CHILDREN:
+			return
+		# 2026-11-05: wrapping text's minimum size depends on its width, so fitting it changed
+		# its minimum, which asked for another fit ... without end in one frame (millions of
+		# deferred sorts: a freeze, then a crash when the message queue ran full). No room: no
+		# fit; and a few re-fits a frame at most, the rest waits for the next one.
+		if size.x < 1.0 or size.y < 1.0:
+			return
+		var frame := Engine.get_process_frames()
+		if frame != _sort_frame:
+			_sort_frame = frame
+			_sorts = 0
+		_sorts += 1
+		if _sorts > MAX_SORTS:
+			if _sorts == MAX_SORTS + 1:
+				queue_sort.call_deferred()  # settle next frame (once)
 			return
 		for c in get_children():
 			if c is Control and (c as Control).visible:

@@ -56,7 +56,7 @@ func _ready() -> void:
 	table.sheet_received.connect(func(ref: String) -> void:
 		if ref == active:
 			_fill())
-	resized.connect(_fill)
+	resized.connect(_on_resized)
 	EntryDrag.accept_on(self, table, func() -> String: return active)  # TASK-94: drop items etc. on the HUD
 	_check_active()
 
@@ -225,7 +225,21 @@ func _typing() -> bool:
 
 ## What the HUD shows now: the active one's sheet (or its token until the sheet comes), laid
 ## out as its layout says.
+var _filled_size := Vector2(-1, -1)  ## the size the pieces were last built for
+var _resize_frame := -1  ## the frame a resize last rebuilt them
+
+## Resized: the pieces are built anew, but only for a real change and once a frame. A piece
+## that changes the HUD's size (a long wrapping name) made resize -> rebuild -> resize loop
+## within one frame and froze the game (2026-11-05, a group token's long name).
+func _on_resized() -> void:
+	if size.is_equal_approx(_filled_size) or Engine.get_process_frames() == _resize_frame:
+		return
+	_resize_frame = Engine.get_process_frames()
+	_fill()
+
+
 func _fill() -> void:
+	_filled_size = size
 	visible = active != "" and table != null and table.is_online() and editor == null
 	if pages != null:
 		pages.refresh()

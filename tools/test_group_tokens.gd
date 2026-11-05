@@ -61,10 +61,16 @@ func _init() -> void:
 	await _until(func() -> bool: return ann.grid.tokens.has(ref))
 	_check(ann.grid.tokens.has(ref) and not ann.grid.tokens.has(aria), "Ann sees the group token too")
 	_check(ann._may_drag(ref), "and may move it (Aria is in it)")
-	var hud := dm._ui.hud
+	var hud := CharacterHud.new()  # the tables here run without UI: a HUD of its own
+	hud.table = dm
+	root.add_child(hud)
+	await process_frame
 	_check(not ref in hud.controlled(), "the character HUD doesn't take a group token (it froze the game)")
 	hud.set_active(ref)
 	_check(hud.active != ref, "and won't show it")
+	hud.queue_free()  # it would steer the tokens of the rest of the test
+	grid.set_active("")
+	await process_frame
 	_check(str(info.get("name", "")) == "%s +2" % dm.timeline.name_of(aria), "a short name, the leader +N (%s)" % info.get("name"))
 
 	# --- Hover fans out, the menu --------------------------------------------------------------

@@ -22,6 +22,7 @@ signal table_changed  ## the map or tokens were (re)built
 signal pcs_changed  ## lobby: the PC list or my PC changed
 signal entry_received(ref: String)  ## player: an entry I asked for arrived or changed
 signal quick_index_received(list: Array)  ## player: the world's names I may find (TASK-104)
+signal calendar_received(view: Dictionary)  ## player: today and the calendar entries I may see (TASK-112)
 signal accounts_changed  ## names or colors of the accounts changed
 signal sheet_received(ref: String)  ## a sheet I opened arrived or changed (TASK-10)
 signal rolls_changed  ## the roll log got a roll (TASK-12)
@@ -3059,6 +3060,33 @@ func quick_index_for(player: String) -> Array:
 			if name != "":
 				out.append({"name": name, "kind": kind, "ref": ref})
 	return out
+
+
+## The calendar as `player` sees it (TASK-112): {day, time, entries} (CalendarView.entries_of;
+## a player gets no hidden / DM-only entries).
+func calendar_for(player: String) -> Dictionary:
+	if event_log == null:
+		return {}
+	return {"day": event_log.day, "time": event_log.time, "entries": CalendarView.entries_of(_effective(), player == Reveal.DM)}
+
+
+## Player: asks the host for today and the calendar.
+func request_calendar() -> void:
+	if is_online() and not is_dm():
+		_send_calendar.rpc_id(1)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _send_calendar() -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if not is_dm() or not peers.has(sender):
+		return
+	_receive_calendar.rpc_id(sender, calendar_for(str(peers[sender])))
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_calendar(view: Dictionary) -> void:
+	calendar_received.emit(view)
 
 
 ## Player: asks the host for the names to find.

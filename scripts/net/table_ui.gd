@@ -47,7 +47,12 @@ var bunny: TableBunny  ## the Table Bunny walking along the bottom (TASK-98)
 var bunny_desk: BunnyDesk  ## its see-through window on the desktop, if it walks there (TASK-102)
 var bunny_chat: BunnyChat  ## my own chat with the bunny, Tamago's chat window (TASK-103)
 var bunny_button: BunnyButton  ## its icon in the lower left corner: out / away (TASK-102)
-var timeline_bar: TimelineBar  ## the moments of the timeline, at the top (TASK-82)
+var timeline_bar: TimelineBar  ## the moments of the timeline, at the top (TASK-82); off for now (TASK-112)
+## Nico 2026-11-05: the timeline bar is off the main screen for now (he comes back to it); the
+## date at the top opens the calendar instead.
+const SHOW_TIMELINE_BAR := false
+var date_button: Button  ## today's date at the top: opens the calendar (TASK-112)
+var calendar_view: CalendarView
 ## DM: show these events of a moment in the Timeline list (the app opens it).
 var timeline_list_opener := Callable()
 var minimal := false  ## the app's calm table: no bar at the top (App.minimal)
@@ -119,6 +124,26 @@ func _ready() -> void:
 	root.add_child(bunny_button)
 	bunny.place_changed.connect(home_bunny)
 	home_bunny.call_deferred()
+	date_button = Button.new()  # TASK-112: today, a click opens the calendar
+	date_button.name = "DateButton"
+	date_button.tooltip_text = "The calendar"
+	date_button.visible = false
+	date_button.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	date_button.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	date_button.offset_top = 8
+	date_button.pressed.connect(open_calendar)
+	root.add_child(date_button)
+	calendar_view = CalendarView.new()
+	calendar_view.table = table
+	add_child(calendar_view)
+	table.calendar_received.connect(func(v: Dictionary) -> void:
+		_player_today = v
+		_update_date()
+		if calendar_view.visible:
+			calendar_view.set_view(v))
+	table.timeline_sync.changed.connect(func() -> void:  # something happened: a player asks for today again
+		if not table.is_dm():
+			table.request_calendar())
 	timeline_bar = TimelineBar.new()
 	timeline_bar.visible = false
 	root.add_child(timeline_bar)
@@ -198,6 +223,26 @@ func home_bunny() -> void:
 			bunny_desk = null
 
 
+var _player_today := {}  ## a player: today from the host (calendar_received)
+
+## The date at the top: today on the table's calendar.
+func _update_date() -> void:
+	if date_button == null or table.notes == null or table.notes.calendar == null:
+		return
+	var c := table.notes.calendar
+	if table.is_dm() and table.event_log != null:
+		date_button.text = "📅 " + c.format_moment(table.event_log.day, table.event_log.time)
+	elif not _player_today.is_empty():
+		date_button.text = "📅 " + c.format_moment(int(_player_today.day), int(_player_today.time))
+	else:
+		date_button.text = "📅 Calendar"
+
+
+## Opens the calendar window (everyone: only the entries they may see).
+func open_calendar() -> void:
+	calendar_view.open()
+
+
 ## The table's calendar was replaced (hosting a world, the DM's edit): the timeline bar
 ## shows its dates (Nico 2026-11-02).
 func apply_calendar() -> void:
@@ -213,7 +258,9 @@ func _refresh() -> void:
 	chat.visible = online and minimal  # the app's calm table; otherwise the session panel has the rolls
 	bunny.visible = online and bunny.is_on()
 	bunny_button.visible = online
-	timeline_bar.visible = online
+	timeline_bar.visible = online and SHOW_TIMELINE_BAR
+	date_button.visible = online
+	_update_date()
 	timeline_bar.dm = dm
 	timeline_bar.line.can_extend = dm  # the DM drags into the future to pass time
 	if not online:

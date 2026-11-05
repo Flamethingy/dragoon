@@ -76,8 +76,8 @@ func controlled() -> PackedStringArray:
 			rest.append(ref)
 	if table.grid != null:
 		for ref: String in table.grid.tokens:
-			if ref == NetTable.PARTY:
-				continue
+			if ref == NetTable.PARTY or ref.begins_with(NetTable.GROUP_PREFIX):
+				continue  # a group token isn't a character (its members are; selecting it froze the HUD)
 			var info: Dictionary = table.grid.tokens[ref].get_meta("info", {})
 			if dm or table.my_player in (info.get("owners", []) as Array):
 				rest.append(ref)
@@ -130,6 +130,8 @@ func dismiss() -> void:
 
 
 func set_active(ref: String, direction := 0) -> void:
+	if ref.begins_with(NetTable.GROUP_PREFIX):
+		return  # a group token: its members are the characters
 	if ref != "":
 		_dismissed = false
 	if ref == active:

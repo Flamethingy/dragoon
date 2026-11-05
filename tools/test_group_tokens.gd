@@ -61,6 +61,11 @@ func _init() -> void:
 	await _until(func() -> bool: return ann.grid.tokens.has(ref))
 	_check(ann.grid.tokens.has(ref) and not ann.grid.tokens.has(aria), "Ann sees the group token too")
 	_check(ann._may_drag(ref), "and may move it (Aria is in it)")
+	var hud := dm._ui.hud
+	_check(not ref in hud.controlled(), "the character HUD doesn't take a group token (it froze the game)")
+	hud.set_active(ref)
+	_check(hud.active != ref, "and won't show it")
+	_check(str(info.get("name", "")) == "%s +2" % dm.timeline.name_of(aria), "a short name, the leader +N (%s)" % info.get("name"))
 
 	# --- Hover fans out, the menu --------------------------------------------------------------
 	grid._hover(grid.tokens[ref].position)

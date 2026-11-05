@@ -2295,7 +2295,7 @@ func _group_tokens(tokens: Array) -> Array:
 					players.append(p)
 			gone[str(m)] = true
 		out.append({"id": GROUP_PREFIX + gid, "kind": "group", "group": gid, "image": lead.get("image", ""), "token_style": lead.get("token_style"),
-			"name": "%s ×%d: %s" % [names[0], members.size(), ", ".join(names)], "size": lead.get("size", "medium"), "members": members,
+			"name": "%s +%d" % [names[0], members.size() - 1], "member_names": names, "size": lead.get("size", "medium"), "members": members,
 			"faces": faces, "cells": cells, "players": players, "cell": lead.cell})
 	for t: Dictionary in tokens:
 		if not gone.has(str(t.id)):

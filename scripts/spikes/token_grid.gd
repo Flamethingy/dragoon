@@ -1043,6 +1043,8 @@ func _hover(at: Vector2) -> void:
 	if token:
 		var info: Dictionary = token.get_meta("info", {})
 		var parts := PackedStringArray([str(info.get("name", "?"))])
+		if info.has("member_names"):  # a group: who is in it
+			parts.append("(%s)" % ", ".join(PackedStringArray(info.member_names)))
 		for key: String in ["hp", "ac"]:
 			if info.has(key):
 				parts.append("%s %s" % [key.to_upper(), info[key]])

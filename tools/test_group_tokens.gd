@@ -45,6 +45,7 @@ func _init() -> void:
 	g.keycode = KEY_G
 	g.physical_keycode = KEY_G
 	grid._input(g)
+	await process_frame
 	var groups := dm.groups_on(dm.map_id)
 	_check(groups.size() == 1, "G groups the selected tokens (%s)" % [groups])
 	var gid: String = groups.keys()[0] if not groups.is_empty() else ""
@@ -102,15 +103,15 @@ func _init() -> void:
 	for i in 30:
 		await process_frame
 	_check(float(stack.grow.get(c, 1.0)) > 1.1, "it grows (%s)" % stack.grow.get(c, 1.0))
-	_mouse(grid, c_at, true)
+	await _mouse(grid, c_at, true)
 	_check(grid.member_drag != null and grid.member_drag.visible and grid.member_drag.member == c, "pressing it takes it out of the fan")
-	_mouse(grid, tok.position, false)  # let go on its group: nothing happens
+	await _mouse(grid, tok.position, false)  # let go on its group: nothing happens
 	_check(dm.groups_on(dm.map_id).get(gid, {}).get("members") == [aria, b, c], "let go on its group: it stays in")
 	grid._hover(tok.position)
-	_mouse(grid, c_at, true)
+	await _mouse(grid, c_at, true)
 	_motion(grid, grid.cell_center(out_cell, 1.0))
 	_check(grid.member_drag.position.distance_to(grid.cell_center(out_cell, 1.0)) < 1.0, "it follows the mouse")
-	_mouse(grid, grid.cell_center(out_cell, 1.0), false)
+	await _mouse(grid, grid.cell_center(out_cell, 1.0), false)
 	_check(not grid.member_drag.visible, "let go")
 	_check(grid.tokens.has(c) and grid.token_cell(c) == out_cell, "the member stands where it was dropped (%s)" % [grid.token_cell(c) if grid.tokens.has(c) else "gone"])
 	_check(dm.groups_on(dm.map_id).get(gid, {}).get("members") == [aria, b] and grid.tokens.has(ref), "the others stay grouped")
@@ -127,16 +128,16 @@ func _init() -> void:
 
 	# --- G toggles: a group alone ungroups, a group plus singles takes them in -------------------
 	grid.select([ref, c])
-	_key_g(grid)
+	await _key_g(grid)
 	var both := dm.groups_on(dm.map_id)
 	_check(both.size() == 1 and (both.values()[0].members as Array).size() == 3 and both.values()[0].leader == aria and c in both.values()[0].members,
 		"G on a group plus a single: it joins, the leader stays (%s)" % [both])
 	var ref3: String = NetTable.GROUP_PREFIX + str(both.keys()[0]) if both.size() == 1 else ""
 	grid.select([ref3])
-	_key_g(grid)
+	await _key_g(grid)
 	_check(dm.groups_on(dm.map_id).is_empty() and grid.tokens.has(aria) and grid.tokens.has(b) and grid.tokens.has(c), "G on a group alone ungroups it")
 	grid.select([aria, b])
-	_key_g(grid)
+	await _key_g(grid)
 	_check(dm.groups_on(dm.map_id).size() == 1, "G on two singles groups them")
 
 	# --- A combat splits groups ------------------------------------------------------------------
@@ -150,31 +151,31 @@ func _init() -> void:
 	# --- Drop a token exactly onto another one: they group (no Alt, TASK-116) -------------------
 	grid.select([])
 	await process_frame
-	_mouse(grid, grid.tokens[b].position, true)
+	await _mouse(grid, grid.tokens[b].position, true)
 	_motion(grid, grid.tokens[aria].position, grid.tokens[aria].position - grid.tokens[b].position)
 	_check(grid.join_hint != null and grid.join_hint.visible and grid.join_hint.position == grid.tokens[aria].position, "over a token: the + hint on it")
-	_mouse(grid, grid.tokens[aria].position, false)
+	await _mouse(grid, grid.tokens[aria].position, false)
 	var alt_groups := dm.groups_on(dm.map_id)
 	_check(alt_groups.size() == 1 and alt_groups.values()[0].members == [aria, b] and alt_groups.values()[0].leader == aria,
 		"dropped onto Aria they group, Aria leads (%s)" % [alt_groups])
 	_check(grid.plans.plans.is_empty() and not grid.join_hint.visible, "no ghost or hint left behind")
 	var gref0: String = NetTable.GROUP_PREFIX + str(alt_groups.keys()[0]) if alt_groups.size() == 1 else ""
 	# a single onto a group token joins it
-	_mouse(grid, grid.tokens[c].position, true)
+	await _mouse(grid, grid.tokens[c].position, true)
 	_motion(grid, grid.tokens[gref0].position, grid.tokens[gref0].position - grid.tokens[c].position)
-	_mouse(grid, grid.tokens[gref0].position, false)
+	await _mouse(grid, grid.tokens[gref0].position, false)
 	var joined := dm.groups_on(dm.map_id)
 	_check(joined.size() == 1 and joined.values()[0].members == [aria, b, c], "dropped onto a group it joins (%s)" % [joined])
 	# beside a token: a normal move
 	var gref1: String = NetTable.GROUP_PREFIX + str(joined.keys()[0]) if joined.size() == 1 else ""
 	grid.select([gref1])
-	_key_g(grid)
+	await _key_g(grid)
 	var free_to := _free_cell(grid, grid.token_cell(c) + Vector2i(0, 3), c)
-	_mouse(grid, grid.tokens[c].position, true)
+	await _mouse(grid, grid.tokens[c].position, true)
 	var c_size: float = grid.tokens[c].get_meta("cells", 1.0)
 	_motion(grid, grid.cell_center(free_to, c_size), grid.cell_center(free_to, c_size) - grid.tokens[c].position)
 	_check(not grid.join_hint.visible, "no hint over an empty square")
-	_mouse(grid, grid.cell_center(free_to, c_size), false)
+	await _mouse(grid, grid.cell_center(free_to, c_size), false)
 	await _until(func() -> bool: return grid.token_cell(c) == free_to)
 	_check(grid.token_cell(c) == free_to and dm.groups_on(dm.map_id).is_empty(), "beside a token it's a normal move")
 	grid.select([])
@@ -194,7 +195,7 @@ func _init() -> void:
 		_check(st.fanned, "the way up to the faces keeps them open")
 		grid._hover(gtok.position + (spot.at as Vector2))
 		_check(st.fanned, "over a face too")
-		_mouse(grid, gtok.position + (spot.at as Vector2), true)
+		await _mouse(grid, gtok.position + (spot.at as Vector2), true)
 		_check(grid.member_drag != null and grid.member_drag.member == b, "pressing a fanned face takes that member")
 		var to := _free_cell(grid, grid.token_cell(gref) + Vector2i(0, 4))
 		var mv := InputEventMouseMotion.new()
@@ -205,6 +206,7 @@ func _init() -> void:
 		let_go.pressed = false
 		let_go.position = mv.position
 		grid._unhandled_input(let_go)
+		await process_frame
 		_check(grid.tokens.has(b) and grid.token_cell(b) == to and dm.groups_on(dm.map_id).is_empty(), "dropped it stands there, the group is gone")
 	else:
 		_check(false, "no group to fan out")
@@ -226,6 +228,7 @@ func _mouse(grid: TokenGrid, at: Vector2, down: bool) -> void:
 	e.pressed = down
 	e.position = grid.get_canvas_transform() * at
 	grid._unhandled_input(e)
+	await process_frame  # the requests go out after the input
 
 
 func _motion(grid: TokenGrid, at: Vector2, by := Vector2.ZERO) -> void:
@@ -241,6 +244,7 @@ func _key_g(grid: TokenGrid) -> void:
 	g.keycode = KEY_G
 	g.physical_keycode = KEY_G
 	grid._input(g)
+	await process_frame
 
 
 ## A shift that puts all three on free squares.

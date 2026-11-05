@@ -901,7 +901,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					if onto != "":  # TASK-116: let go exactly on a token: they group (it leads / its group takes them)
 						for g: String in [id] + group:
 							plans.cancel(g)
-						group_requested.emit([onto, id] + group)
+						group_requested.emit.call_deferred([onto, id] + group)  # after the input: the tokens are replaced
 					elif plans.is_measuring(id):
 						plans.end_drag(id, ends.get(id, target), ends)
 					else:
@@ -957,10 +957,10 @@ func _g_key() -> bool:
 	var sel := selection()
 	var groups := sel.filter(func(id: String) -> bool: return tokens[id].has_node("Stack"))
 	if sel.size() == 1 and groups.size() == 1:
-		ungroup_requested.emit(str(sel[0]))
+		ungroup_requested.emit.call_deferred(str(sel[0]))
 		return true
 	if sel.size() >= 2:
-		group_requested.emit(groups + sel.filter(func(id: String) -> bool: return not id in groups))
+		group_requested.emit.call_deferred(groups + sel.filter(func(id: String) -> bool: return not id in groups))
 		return true
 	return false
 
@@ -1007,7 +1007,7 @@ func _member_release(at: Vector2) -> void:
 		return
 	if _fanned != null and is_instance_valid(_fanned) and _fanned.has_node("Stack") and (_fanned.get_node("Stack") as GroupStack).in_fan(at - _fanned.position):
 		return
-	member_out_requested.emit(member_drag.group, member_drag.member, cell_at(at))
+	member_out_requested.emit.call_deferred(member_drag.group, member_drag.member, cell_at(at))
 
 
 ## The member under `at` among the faces of the group token fanned out now ("" = none).

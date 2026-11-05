@@ -49,9 +49,12 @@ func close_soon() -> void:
 	if not is_inside_tree():
 		fanned = false
 		return
-	get_tree().create_timer(GRACE).timeout.connect(func() -> void:
-		if t == _ticket:
-			fanned = false)
+	get_tree().create_timer(GRACE).timeout.connect(_close_if.bind(t))  # a method, not a lambda: dropped if freed
+
+
+func _close_if(ticket: int) -> void:
+	if ticket == _ticket:
+		fanned = false
 
 
 func _process(delta: float) -> void:

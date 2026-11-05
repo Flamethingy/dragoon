@@ -1,5 +1,6 @@
 extends SceneTree
-## Screenshots of a group token (TASK-115): the stack, fanned out on hover, its ring.
+## Screenshots of a group token (TASK-115/116): the stack, fanned out on hover with the face
+## under the mouse grown, a member dragged out of the fan, the + hint of a drop onto a token.
 ## godot --path . --resolution 1600x950 -s tools/screenshot_groups.gd -- out_folder
 
 const DIR := "user://screenshot_groups"
@@ -32,11 +33,18 @@ func _init() -> void:
 	cam.position = g.tokens[ref].position
 	cam.zoom = Vector2.ONE * 1.8
 	await _shot("group_stack.png")
-	(g.tokens[ref].get_node("Stack") as GroupStack).fanned = true
+	var st := g.tokens[ref].get_node("Stack") as GroupStack
+	g._hover(g.tokens[ref].position)
+	g._hover(g.tokens[ref].position + st.spots()[0].at)
 	await _shot("group_fanned.png")
-	(g.tokens[ref].get_node("Stack") as GroupStack).fanned = false
-	g.open_ring(ref)
-	await _shot("group_ring.png")
+	g._member_grab(g.tokens[ref].position + st.spots()[0].at)
+	g.member_drag.position = g.tokens[ref].position + Vector2(g.cell * 1.6, g.cell * 1.4)
+	await _shot("group_member_drag.png")
+	g.member_drag.visible = false
+	var single: Array = g.tokens.keys().filter(func(id: String) -> bool: return not id.begins_with(NetTable.GROUP_PREFIX) and "/" in id)
+	if not single.is_empty():
+		g._show_join_hint(ref)
+		await _shot("group_join_hint.png")
 	quit()
 
 

@@ -614,7 +614,6 @@ func cancel_attack() -> void:
 const _EXHAUSTION_UP := 1000
 const _EXHAUSTION_DOWN := 1001
 const _GROUP_SELECTED := 1002  ## TASK-115
-const _GROUP_OPEN := 1003
 const _UNGROUP := 1004
 
 ## The conditions of `ref` to tick and untick (the DM, or the player whose sheet it is), at
@@ -671,9 +670,7 @@ func _open_group_menu(ref: String, at: Vector2) -> PopupMenu:
 		group_menu.name = "GroupMenu"
 		group_menu.id_pressed.connect(func(id: int) -> void:
 			var g := str(group_menu.get_meta("ref", ""))
-			if id == _GROUP_OPEN:
-				table.grid.open_ring(g)
-			elif id == _UNGROUP:
+			if id == _UNGROUP:
 				table.split_group(g))
 		_root.add_child(group_menu)
 	group_menu.set_meta("ref", ref)
@@ -683,8 +680,7 @@ func _open_group_menu(ref: String, at: Vector2) -> PopupMenu:
 		group_menu.add_item(str(f.name))
 		group_menu.set_item_disabled(group_menu.item_count - 1, true)
 	group_menu.add_separator()
-	group_menu.add_item("Open: drag members out  (double-click)", _GROUP_OPEN)
-	group_menu.add_item("Ungroup all", _UNGROUP)
+	group_menu.add_item("Ungroup all  (G)", _UNGROUP)  # TASK-116: members are dragged straight out of the fan
 	var pos := at if at.x >= 0 else _root.get_viewport().get_mouse_position()
 	group_menu.popup(Rect2i(Vector2i(pos), Vector2i.ZERO))
 	return group_menu

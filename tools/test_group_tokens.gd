@@ -3,6 +3,7 @@ extends SceneTree
 ## stack token (the leader's picture, the members at its edge), it moves as one at the slowest
 ## speed keeping the formation, a member is dragged out of its ring, Ungroup splits all, the
 ## events (undo), a player's rights, the sync to a player and the split when a combat starts.
+## TASK-116: G toggles, a token dropped onto a token groups, members come straight out of the fan.
 ## godot --headless --path . -s tools/test_group_tokens.gd
 
 const PORT := 47823
@@ -64,7 +65,9 @@ func _init() -> void:
 	grid._hover(grid.tokens[ref].position)
 	_check(stack != null and stack.fanned, "hovering fans the members out")
 	grid._hover(Vector2(-9999, -9999))
-	_check(stack != null and not stack.fanned, "and back")
+	_check(stack != null and stack.fanned, "a short grace time after leaving it")
+	await create_timer(GroupStack.GRACE + 0.15).timeout
+	_check(stack != null and not stack.fanned, "then it closes")
 
 	# --- Moves as one: the slowest speed, the formation kept ------------------------------------
 	var slowest := INF
@@ -86,23 +89,29 @@ func _init() -> void:
 	await _until(func() -> bool: return ann.grid.token_cell(ref) == target)
 	_check(ann.grid.token_cell(ref) == target, "Ann sees it there")
 
-	# --- A member dragged out of the ring --------------------------------------------------------
-	grid.open_ring(ref)
-	_check(grid.ring != null and grid.ring.is_open() and grid.ring.members.size() == 3, "a double-click opens the ring")
+	# --- A member dragged straight out of the fan (TASK-116: no ring) -----------------------------
+	_check(not "open_ring" in grid and grid.find_child("GroupRing", true, false) == null, "the ring is gone")
 	var out_cell := _free_cell(grid, target + Vector2i(0, 4))
-	var press := InputEventMouseButton.new()
-	press.button_index = MOUSE_BUTTON_LEFT
-	press.pressed = true
-	var c_at: Vector2 = grid.ring.position + (grid.ring.members[2].at as Vector2)
-	press.position = grid.get_canvas_transform() * c_at
-	grid._unhandled_input(press)
-	_check(grid.ring.dragged == c, "pressing a member in the ring takes it (%s)" % grid.ring.dragged)
-	var release := InputEventMouseButton.new()
-	release.button_index = MOUSE_BUTTON_LEFT
-	release.pressed = false
-	release.position = grid.get_canvas_transform() * grid.cell_center(out_cell, 1.0)
-	grid._unhandled_input(release)
-	_check(not grid.ring.is_open(), "the ring closes")
+	var tok: Sprite2D = grid.tokens[ref]
+	for i in 90:  # the group's glide ends
+		await process_frame
+	grid._hover(tok.position)
+	var c_at := tok.position + _spot_of(stack, c)
+	grid._hover(c_at)
+	_check(stack.hot == c, "hovering a face in the fan makes it the hot one")
+	for i in 30:
+		await process_frame
+	_check(float(stack.grow.get(c, 1.0)) > 1.1, "it grows (%s)" % stack.grow.get(c, 1.0))
+	_mouse(grid, c_at, true)
+	_check(grid.member_drag != null and grid.member_drag.visible and grid.member_drag.member == c, "pressing it takes it out of the fan")
+	_mouse(grid, tok.position, false)  # let go on its group: nothing happens
+	_check(dm.groups_on(dm.map_id).get(gid, {}).get("members") == [aria, b, c], "let go on its group: it stays in")
+	grid._hover(tok.position)
+	_mouse(grid, c_at, true)
+	_motion(grid, grid.cell_center(out_cell, 1.0))
+	_check(grid.member_drag.position.distance_to(grid.cell_center(out_cell, 1.0)) < 1.0, "it follows the mouse")
+	_mouse(grid, grid.cell_center(out_cell, 1.0), false)
+	_check(not grid.member_drag.visible, "let go")
 	_check(grid.tokens.has(c) and grid.token_cell(c) == out_cell, "the member stands where it was dropped (%s)" % [grid.token_cell(c) if grid.tokens.has(c) else "gone"])
 	_check(dm.groups_on(dm.map_id).get(gid, {}).get("members") == [aria, b] and grid.tokens.has(ref), "the others stay grouped")
 
@@ -116,55 +125,77 @@ func _init() -> void:
 	dm._groups_changed()
 	_check(grid.tokens.has(ref), "and the table shows it")
 
+	# --- G toggles: a group alone ungroups, a group plus singles takes them in -------------------
+	grid.select([ref, c])
+	_key_g(grid)
+	var both := dm.groups_on(dm.map_id)
+	_check(both.size() == 1 and (both.values()[0].members as Array).size() == 3 and both.values()[0].leader == aria and c in both.values()[0].members,
+		"G on a group plus a single: it joins, the leader stays (%s)" % [both])
+	var ref3: String = NetTable.GROUP_PREFIX + str(both.keys()[0]) if both.size() == 1 else ""
+	grid.select([ref3])
+	_key_g(grid)
+	_check(dm.groups_on(dm.map_id).is_empty() and grid.tokens.has(aria) and grid.tokens.has(b) and grid.tokens.has(c), "G on a group alone ungroups it")
+	grid.select([aria, b])
+	_key_g(grid)
+	_check(dm.groups_on(dm.map_id).size() == 1, "G on two singles groups them")
+
 	# --- A combat splits groups ------------------------------------------------------------------
 	dm.start_combat()
 	_check(dm.groups_on(dm.map_id).is_empty() and grid.tokens.has(aria) and grid.tokens.has(b), "a combat splits the groups")
 	dm.group_tokens([aria, b])
 	_check(dm.groups_on(dm.map_id).is_empty(), "no groups during a combat")
+	_check(grid.join_target(grid.tokens[aria].position, b, []) == "", "no dropping onto a token to group during a combat")
 	dm.end_combat()
 
-	# --- Alt + drop onto a token groups them ------------------------------------------------------
+	# --- Drop a token exactly onto another one: they group (no Alt, TASK-116) -------------------
 	grid.select([])
 	await process_frame
-	var down := InputEventMouseButton.new()
-	down.button_index = MOUSE_BUTTON_LEFT
-	down.pressed = true
-	down.position = grid.get_canvas_transform() * grid.tokens[b].position
-	grid._unhandled_input(down)
-	var move := InputEventMouseMotion.new()
-	move.relative = (grid.tokens[aria].position - grid.tokens[b].position) * grid._camera.zoom
-	move.position = grid.get_canvas_transform() * grid.tokens[aria].position
-	grid._unhandled_input(move)
-	var up := InputEventMouseButton.new()
-	up.button_index = MOUSE_BUTTON_LEFT
-	up.pressed = false
-	up.alt_pressed = true
-	up.position = grid.get_canvas_transform() * grid.tokens[aria].position
-	grid._unhandled_input(up)
+	_mouse(grid, grid.tokens[b].position, true)
+	_motion(grid, grid.tokens[aria].position, grid.tokens[aria].position - grid.tokens[b].position)
+	_check(grid.join_hint != null and grid.join_hint.visible and grid.join_hint.position == grid.tokens[aria].position, "over a token: the + hint on it")
+	_mouse(grid, grid.tokens[aria].position, false)
 	var alt_groups := dm.groups_on(dm.map_id)
 	_check(alt_groups.size() == 1 and alt_groups.values()[0].members == [aria, b] and alt_groups.values()[0].leader == aria,
-		"Alt + drop onto Aria groups them, Aria leads (%s)" % [alt_groups])
-	_check(grid.plans.plans.is_empty(), "no ghost left behind")
+		"dropped onto Aria they group, Aria leads (%s)" % [alt_groups])
+	_check(grid.plans.plans.is_empty() and not grid.join_hint.visible, "no ghost or hint left behind")
+	var gref0: String = NetTable.GROUP_PREFIX + str(alt_groups.keys()[0]) if alt_groups.size() == 1 else ""
+	# a single onto a group token joins it
+	_mouse(grid, grid.tokens[c].position, true)
+	_motion(grid, grid.tokens[gref0].position, grid.tokens[gref0].position - grid.tokens[c].position)
+	_mouse(grid, grid.tokens[gref0].position, false)
+	var joined := dm.groups_on(dm.map_id)
+	_check(joined.size() == 1 and joined.values()[0].members == [aria, b, c], "dropped onto a group it joins (%s)" % [joined])
+	# beside a token: a normal move
+	var gref1: String = NetTable.GROUP_PREFIX + str(joined.keys()[0]) if joined.size() == 1 else ""
+	grid.select([gref1])
+	_key_g(grid)
+	var free_to := _free_cell(grid, grid.token_cell(c) + Vector2i(0, 3), c)
+	_mouse(grid, grid.tokens[c].position, true)
+	var c_size: float = grid.tokens[c].get_meta("cells", 1.0)
+	_motion(grid, grid.cell_center(free_to, c_size), grid.cell_center(free_to, c_size) - grid.tokens[c].position)
+	_check(not grid.join_hint.visible, "no hint over an empty square")
+	_mouse(grid, grid.cell_center(free_to, c_size), false)
+	await _until(func() -> bool: return grid.token_cell(c) == free_to)
+	_check(grid.token_cell(c) == free_to and dm.groups_on(dm.map_id).is_empty(), "beside a token it's a normal move")
+	grid.select([])
+	dm.group_tokens([aria, b])
+	alt_groups = dm.groups_on(dm.map_id)
 
 	# --- Hovering up to the fanned faces keeps them open; a face is grabbed and dragged out --------
 	var gref: String = NetTable.GROUP_PREFIX + str(alt_groups.keys()[0]) if alt_groups.size() == 1 else ""
 	if grid.tokens.has(gref):
-		var tok: Sprite2D = grid.tokens[gref]
-		var st := tok.get_node("Stack") as GroupStack
-		grid._hover(tok.position)
+		var gtok: Sprite2D = grid.tokens[gref]
+		var st := gtok.get_node("Stack") as GroupStack
+		grid._hover(gtok.position)
 		_check(st.fanned, "hover fans out")
 		var spot: Dictionary = st.spots()[0]
-		var gap := tok.position + Vector2(0, -st.radius - 2.0)  # between the token and the faces
+		var gap := gtok.position + Vector2(0, -st.radius - 2.0)  # between the token and the faces
 		grid._hover(gap)
 		_check(st.fanned, "the way up to the faces keeps them open")
-		grid._hover(tok.position + (spot.at as Vector2))
+		grid._hover(gtok.position + (spot.at as Vector2))
 		_check(st.fanned, "over a face too")
-		var grab := InputEventMouseButton.new()
-		grab.button_index = MOUSE_BUTTON_LEFT
-		grab.pressed = true
-		grab.position = grid.get_canvas_transform() * (tok.position + (spot.at as Vector2))
-		grid._unhandled_input(grab)
-		_check(grid.ring != null and grid.ring.dragged == b, "pressing a fanned face takes that member (%s)" % (grid.ring.dragged if grid.ring else "no ring"))
+		_mouse(grid, gtok.position + (spot.at as Vector2), true)
+		_check(grid.member_drag != null and grid.member_drag.member == b, "pressing a fanned face takes that member")
 		var to := _free_cell(grid, grid.token_cell(gref) + Vector2i(0, 4))
 		var mv := InputEventMouseMotion.new()
 		mv.position = grid.get_canvas_transform() * grid.cell_center(to, 1.0)
@@ -182,6 +213,36 @@ func _init() -> void:
 	quit(1 if _failed > 0 else 0)
 
 
+func _spot_of(stack: GroupStack, member: String) -> Vector2:
+	for sp: Dictionary in stack.spots():
+		if str(sp.face.id) == member:
+			return sp.at
+	return Vector2.ZERO
+
+
+func _mouse(grid: TokenGrid, at: Vector2, down: bool) -> void:
+	var e := InputEventMouseButton.new()
+	e.button_index = MOUSE_BUTTON_LEFT
+	e.pressed = down
+	e.position = grid.get_canvas_transform() * at
+	grid._unhandled_input(e)
+
+
+func _motion(grid: TokenGrid, at: Vector2, by := Vector2.ZERO) -> void:
+	var e := InputEventMouseMotion.new()
+	e.position = grid.get_canvas_transform() * at
+	e.relative = by * grid._camera.zoom
+	grid._unhandled_input(e)
+
+
+func _key_g(grid: TokenGrid) -> void:
+	var g := InputEventKey.new()
+	g.pressed = true
+	g.keycode = KEY_G
+	g.physical_keycode = KEY_G
+	grid._input(g)
+
+
 ## A shift that puts all three on free squares.
 func _free_delta(grid: TokenGrid, ref: String, start: Dictionary) -> Vector2i:
 	for d: Vector2i in [Vector2i(2, 0), Vector2i(0, 2), Vector2i(-2, 0), Vector2i(0, -2), Vector2i(3, 1), Vector2i(1, 3)]:
@@ -194,12 +255,12 @@ func _free(grid: TokenGrid, at: Vector2i, except: String) -> bool:
 	return at.x >= 0 and at.y >= 0 and at.x < grid.grid_size.x and at.y < grid.grid_size.y and not grid.occupied(except).has(at)
 
 
-func _free_cell(grid: TokenGrid, near: Vector2i) -> Vector2i:
+func _free_cell(grid: TokenGrid, near: Vector2i, who := "x") -> Vector2i:
 	for r in 6:
 		for dx in range(-r, r + 1):
 			for dy in range(-r, r + 1):
 				var at := near + Vector2i(dx, dy)
-				if _free(grid, at, "") and grid.can_place("x", at):
+				if _free(grid, at, "") and grid.can_place(who, at):
 					return at
 	return near
 

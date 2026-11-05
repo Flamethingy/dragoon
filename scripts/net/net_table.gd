@@ -160,6 +160,8 @@ func _ready() -> void:
 	grid.token_clicked.connect(_on_token_clicked)
 	grid.token_menu.connect(func(entity: String) -> void: condition_menu_requested.emit(entity))
 	grid.group_requested.connect(group_tokens)  # TASK-115
+	grid.ungroup_requested.connect(func(g: String) -> void: split_group(g))  # TASK-116: G on a group
+	grid.may_group = may_group
 	grid.member_out_requested.connect(func(g: String, member: String, at: Vector2i) -> void: split_group(g, member, at))
 	grid.map_layer.edited.connect(func(changes: Dictionary) -> void: edit_map(changes))  # TASK-73
 	grid.map_layer.door_clicked.connect(func(i: int) -> void: toggle_door(i))
@@ -2301,6 +2303,21 @@ func _group_tokens(tokens: Array) -> Array:
 	return out
 
 
+## May I group these tokens now (TASK-116: a drop onto a token groups only then)? No combat; a
+## player only her own tokens (a group token: all its members).
+func may_group(ids: Array) -> bool:
+	if in_combat() or not is_online():
+		return false
+	if is_dm():
+		return true
+	for v: Variant in ids:
+		var id := str(v)
+		var members: Array = (grid.tokens[id].get_meta("info", {}) as Dictionary).get("members", [id]) if grid.tokens.has(id) else [id]
+		if not members.all(func(m: Variant) -> bool: return owns(my_player, str(m))):
+			return false
+	return true
+
+
 ## Groups these tokens (the first leads; a group token among them brings its members).
 func group_tokens(ids: Array) -> void:
 	if not is_online():
@@ -2323,7 +2340,8 @@ func _handle_group(sender: int, ids: Array) -> void:
 	for v: Variant in ids:
 		var id := str(v)
 		if id.begins_with(GROUP_PREFIX) and groups.has(id.trim_prefix(GROUP_PREFIX)):
-			for m: Variant in groups[id.trim_prefix(GROUP_PREFIX)].members:
+			var g: Dictionary = groups[id.trim_prefix(GROUP_PREFIX)]
+			for m: Variant in [g.leader] + (g.members as Array):  # its leader first (it leads on)
 				if not m in members:
 					members.append(str(m))
 		elif grid.tokens.has(id) and "/" in id and id != PARTY and not id in members:

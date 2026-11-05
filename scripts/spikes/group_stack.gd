@@ -6,6 +6,8 @@ extends Node2D
 ## unscaled like its Marks.
 
 const SHOWN := 3  ## faces at the edge at most (the badge tells the rest)
+const GROW := 1.15  ## a fanned face under the mouse grows to this (TASK-116)
+const GRACE := 0.3  ## seconds the fan stays open after the mouse left it
 
 var radius := 35.0  ## the token's radius in pixels
 var faces: Array = []  ## [{id, name, texture}], the leader first
@@ -13,7 +15,60 @@ var fanned := false:
 	set(v):
 		if fanned != v:
 			fanned = v
+			if not v:
+				hot = ""
 			queue_redraw()
+## The fanned face under the mouse ("" = none): it grows a little, eased (TASK-116).
+var hot := "":
+	set(v):
+		if hot != v:
+			hot = v
+			set_process(true)
+var grow := {}  ## member -> its scale now (1.0 .. GROW)
+var lifted := "":  ## the member being dragged out (not drawn in the fan meanwhile)
+	set(v):
+		lifted = v
+		queue_redraw()
+var _ticket := 0  ## the pending close_soon (a newer open / close cancels it)
+
+
+func _ready() -> void:
+	set_process(false)
+
+
+## Fans the members out (and keeps them out: a pending close is dropped).
+func open() -> void:
+	_ticket += 1
+	fanned = true
+
+
+## Closes the fan after GRACE seconds, unless the mouse comes back first.
+func close_soon() -> void:
+	_ticket += 1
+	var t := _ticket
+	if not is_inside_tree():
+		fanned = false
+		return
+	get_tree().create_timer(GRACE).timeout.connect(func() -> void:
+		if t == _ticket:
+			fanned = false)
+
+
+func _process(delta: float) -> void:
+	var busy := false
+	for f: Dictionary in faces:
+		var id := str(f.get("id", ""))
+		var target := GROW if id == hot and fanned else 1.0
+		var now: float = grow.get(id, 1.0)
+		now = lerpf(now, target, 1.0 - exp(-delta * 16.0))  # eased towards the target
+		if absf(now - target) < 0.002:
+			now = target
+		else:
+			busy = true
+		grow[id] = now
+	queue_redraw()
+	if not busy:
+		set_process(false)
 
 
 func set_faces(list: Array, r: float) -> void:
@@ -62,7 +117,13 @@ func _draw() -> void:
 	if faces.size() < 2:
 		return
 	for s: Dictionary in spots():
-		_face(s.at, s.r, s.face)
+		if str(s.face.get("id", "")) == lifted:
+			continue
+		if str(s.face.get("id", "")) != hot or not fanned:
+			_face(s.at, s.r, s.face)
+	for s: Dictionary in spots():  # the hot one on top
+		if str(s.face.get("id", "")) == hot and fanned and hot != lifted:
+			_face(s.at, float(s.r) * float(grow.get(hot, 1.0)), s.face)
 	var badge := Vector2(radius * 0.78, -radius * 0.72)
 	var font := ThemeDB.fallback_font
 	var text := "×%d" % faces.size()
@@ -94,60 +155,37 @@ static func _pill() -> StyleBoxFlat:
 	return _pill_box
 
 
-## The ring a double-click on a group token opens (TASK-115): every member around the token;
-## one dragged out of it leaves the group at the square it is dropped on.
-class Ring:
+## A member dragged out of the fan (TASK-116): its face follows the mouse until let go.
+class MemberDrag:
 	extends Node2D
 
 	var group := ""
-	var members: Array = []  ## [{id, name, texture, at (local position)}]
-	var dragged := ""
-	var drag_at := Vector2.ZERO
-	var size := 50.0
-
-	func open(gid: String, faces: Array, token_size: float) -> void:
-		group = gid
-		size = token_size * 0.8
-		members = []
-		var r := token_size * 0.55 + size * 0.6
-		for i in faces.size():
-			var f: Dictionary = (faces[i] as Dictionary).duplicate()
-			var angle := -PI * 0.5 + TAU * i / faces.size()
-			f["at"] = Vector2(cos(angle), sin(angle)) * r
-			members.append(f)
-		visible = true
-		queue_redraw()
-
-	func close() -> void:
-		group = ""
-		members = []
-		dragged = ""
-		visible = false
-		queue_redraw()
-
-	func is_open() -> bool:
-		return group != ""
-
-	## The member under a map position ("" = none).
-	func member_at(map_pos: Vector2) -> String:
-		var local := map_pos - position
-		for f: Dictionary in members:
-			if (f.at as Vector2).distance_to(local) <= size * 0.5:
-				return str(f.id)
-		return ""
+	var member := ""
+	var face := {}
+	var r := 25.0
 
 	func _draw() -> void:
-		if members.is_empty():
-			return
-		var r := (members[0].at as Vector2).length()
-		draw_arc(Vector2.ZERO, r, 0, TAU, 48, Color(1, 0.96, 0.86, 0.5), 2.0)
+		draw_circle(Vector2.ZERO, r + 3.0, Color("#3b2a1a"))
+		var tex: Texture2D = face.get("texture")
+		if tex != null:
+			draw_texture_rect(tex, Rect2(-Vector2.ONE * r, Vector2.ONE * r * 2.0), false)
 		var font := ThemeDB.fallback_font
-		for f: Dictionary in members:
-			var at: Vector2 = drag_at - position if str(f.id) == dragged else f.at
-			draw_circle(at, size * 0.5 + 3.0, Color("#3b2a1a"))
-			var tex: Texture2D = f.get("texture")
-			if tex != null:
-				draw_texture_rect(tex, Rect2(at - Vector2.ONE * size * 0.5, Vector2.ONE * size), false)
-			var name := str(f.get("name", ""))
-			var w := font.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-			draw_string(font, at + Vector2(-w * 0.5, size * 0.5 + 15), name, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#fff4dc"))
+		var text := str(face.get("name", ""))
+		var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		draw_string(font, Vector2(-w * 0.5, r + 16), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#fff4dc"))
+
+
+## Letting go here groups (TASK-116): a gold ring and a "+" on the token under a dragged one.
+class JoinHint:
+	extends Node2D
+
+	var r := 35.0
+
+	func _draw() -> void:
+		draw_arc(Vector2.ZERO, r + 4.0, 0, TAU, 48, Color("#f0c24b"), 4.0)
+		var at := Vector2(r * 0.72, -r * 0.72)
+		draw_circle(at, r * 0.32, Color("#f0c24b"))
+		draw_circle(at, r * 0.32, Color("#3b2a1a"), false, 2.0)
+		var w := r * 0.18
+		draw_line(at - Vector2(w, 0), at + Vector2(w, 0), Color("#3b2a1a"), 3.0)
+		draw_line(at - Vector2(0, w), at + Vector2(0, w), Color("#3b2a1a"), 3.0)
